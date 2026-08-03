@@ -11,6 +11,7 @@ import androidx.test.espresso.action.ViewActions.scrollTo
 import androidx.test.espresso.matcher.ViewMatchers.withTagValue
 import androidx.test.ext.junit.rules.ActivityScenarioRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import android.view.ViewGroup
 import org.hamcrest.Matchers.equalTo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -84,6 +85,21 @@ class TestHostActivityTest {
     private fun <T : View> Activity.field(tag: String): T {
         val content = checkNotNull(findViewById<View>(android.R.id.content)) { "content view missing" }
         return checkNotNull(content.findViewByTag<T>(tag)) { "view with tag '$tag' missing" }
+    }
+
+    /** Depth-first search for a view with the given tag within [root]. */
+    private fun <T : View> View.findViewByTag(tag: String): T? {
+        if (tag == this.tag) {
+            @Suppress("UNCHECKED_CAST")
+            return this as T
+        }
+        if (this is ViewGroup) {
+            for (i in 0 until childCount) {
+                val found = getChildAt(i).findViewByTag<T>(tag)
+                if (found != null) return found
+            }
+        }
+        return null
     }
 
     companion object {

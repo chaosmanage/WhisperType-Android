@@ -16,7 +16,7 @@ captures/
 seed.txt
 key.txt
 diag-*/
-diagnostics/
+/diagnostics/
 dist/
 *.sha256
 .env
