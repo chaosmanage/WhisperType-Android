@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WhisperType</string>
+    <string name="accessibility_service_label">WhisperType</string>
+    <string name="accessibility_service_description">WhisperType detects when a text field is focused and the keyboard is visible so it can place a small microphone control at the keyboard boundary. It inserts the dictated text at the cursor when you tap Stop. It does not read or store unrelated screen content.</string>
+    <string name="mic_notification_channel">Dictation recording</string>
+    <string name="mic_notification_title">WhisperType is listening</string>
+    <string name="mic_notification_text">Tap Stop when you finish speaking</string>
+    <string name="notification_action_stop">Stop</string>
+    <string name="notification_action_cancel">Cancel</string>
+</resources>

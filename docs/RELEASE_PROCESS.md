@@ -1,0 +1,124 @@
+# WhisperType Android — Release Process
+
+This document covers versioning, signing, APK generation, checksum generation, installation, upgrade testing, rollback/uninstall, and release notes for WhisperType Android. The command-driven workflows reference the deployment scripts defined in Implementation Plan section 22.14; manual command equivalents are given so the process is reproducible without them.
+
+## Versioning
+
+- The project follows semantic versioning: `MAJOR.MINOR.PATCH`.
+- Roadmap (Implementation Plan section 21): `0.1.0` first private prototype, `0.2.0` verified docked overlay and Gemini dictation, `0.3.0` compatibility and fallback hardening, `1.0.0` stable private release after Pixel/Samsung acceptance.
+- The version lives in `app/build.gradle.kts`:
+
+```kotlin
+defaultConfig {
+    applicationId = "com.whispertype.android"
+    minSdk = 34
+    targetSdk = 36
+    versionCode = 1
+    versionName = "0.1.0"
+}
+```
+
+- `versionName` is user-facing; `versionCode` is a strict integer that must increase monotonically, including for downgrade-prevention. Bump both for every release and add a `CHANGELOG.md` entry.
+
+## Signing
+
+The release keystore is the single artifact that must never enter the repository.
+
+1. Create the keystore once, outside the repo, and back it up securely:
+
+```powershell
+keytool -genkeypair -v -keystore C:\secure\whispertype-release.keystore `
+  -alias whispertype -keyalg RSA -keysize 2048 -validity 10000
+```
+
+2. Create `signing.properties` at the repository root (never commit it; add it to `.gitignore`):
+
+```text
+storeFile=C:/secure/whispertype-release.keystore
+storePassword=<store password>
+keyAlias=whispertype
+keyPassword=<key password>
+```
+
+`app/build.gradle.kts` reads exactly these four properties (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`) and creates the `release` signing config only when the file is present. Without it the release APK is unsigned and fails signature verification, so the release workflow fails clearly with a missing-file error before building.
+
+## APK generation
+
+Debug (unsigned, installable with ADB):
+
+```powershell
+.\gradlew.bat :app:assembleDebug
+```
+
+Release (signed when `signing.properties` exists):
+
+```powershell
+.\gradlew.bat :app:assembleRelease
+```
+
+Full pre-release verification (unit tests, lint with warnings-as-errors, assemble release):
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleRelease
+```
+
+Outputs:
+
+- `app/build/outputs/apk/debug/app-debug.apk`
+- `app/build/outputs/apk/release/app-release.apk`
+
+The automated `SourcePrivacyAuditTest` is part of `:app:testDebugUnitTest` and scans the source tree for API key literals, authenticated URL literals, sensitive log lines, and committed keystore/secret files.
+
+## Checksum generation
+
+Record the SHA-256 of every distributed APK. On Windows:
+
+```powershell
+Get-FileHash -Algorithm SHA256 -Path "app\build\outputs\apk\release\app-release.apk"
+```
+
+Store the checksum next to the APK in the versioned distribution directory and this is verified before installation by `install-release.ps1`.
+
+## Installation
+
+Preflight and install via the documented scripts:
+
+- `scripts/adb-preflight.ps1` — locate ADB, list devices, require an explicit serial when multiple targets exist, print non-sensitive device/build info.
+- `scripts/install-debug.ps1` — build/install the debug APK and optionally launch it.
+- `scripts/install-release.ps1` — verify the APK and its checksum, select exactly one authorized device, install with `adb install -r`, and launch.
+
+Manual equivalents:
+
+```powershell
+adb -s <serial> install -r app\build\outputs\apk\release\app-release.apk
+adb -s <serial> shell am start -n com.whispertype.android/.MainActivity
+```
+
+The scripts must stop on errors, quote Windows paths safely, never default to every connected device, never print secrets, and never uninstall or clear data without an explicit switch plus confirmation.
+
+## Upgrade testing
+
+Before shipping a new version:
+
+1. Install the previous version and complete onboarding.
+2. Install the new version with `adb install -r` (upgrade path, no data wipe).
+3. Verify: app opens, onboarding state is preserved, Accessibility Service stays enabled, API key still present and usable, dock appears over a supported keyboard, one dictation inserts correctly, and history (if enabled) is retained.
+4. Also verify a clean install on a fresh device: onboarding completes, permissions request in order, and the first dictation works.
+
+## Rollback / uninstall
+
+- Rollback: uninstall the newer version, then install the older APK (`adb uninstall com.whispertype.android`, then `adb install` of the older artifact). Local-only user data (API key, settings, optional history) is lost on uninstall by design — the app is excluded from backups.
+- Scripts never uninstall or clear data without an explicit switch and confirmation.
+
+## Release notes
+
+Each release entry in `CHANGELOG.md` must record:
+
+- Version, date (or `Unreleased`), and a short summary.
+- New features and fixed issues grouped by area (`accessibility`, `overlay`, `dictation`, `gemini`, `validation`, `security`, `settings`, `history`, `onboarding`, `diagnostics`).
+- Any behavior changes and known limitations for that release.
+- Do not include secrets, transcripts, audio, unique device identifiers, or sensitive diagnostic artifacts.
+
+## Release gate (from Implementation Plan section 22.15)
+
+A deployment is complete only when: preflight works in all device states; a signed non-debug APK exists with the expected application id/version; `apksigner` verification succeeds against the recorded certificate; clean-install and upgrade tests pass; the versioned `dist` directory contains the APK, SHA-256 checksum, install guide, and release notes; at least one additional personal device install is tested or explicitly marked pending; and the release keystore plus credentials remain outside the repository.
