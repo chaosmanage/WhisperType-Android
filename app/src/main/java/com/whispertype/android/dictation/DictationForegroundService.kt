@@ -75,6 +75,12 @@ class DictationForegroundService : Service() {
             Intent(this, DictationForegroundService::class.java).setAction(ACTION_CANCEL),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val openIntent = PendingIntent.getService(
+            this,
+            3,
+            Intent(this, DictationForegroundService::class.java).setAction(ACTION_OPEN),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle(getString(R.string.mic_notification_title))
@@ -82,6 +88,7 @@ class DictationForegroundService : Service() {
             .setContentIntent(contentIntent)
             .addAction(0, getString(R.string.notification_action_stop), stopIntent)
             .addAction(0, getString(R.string.notification_action_cancel), cancelIntent)
+            .addAction(0, getString(R.string.notification_action_open), openIntent)
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)

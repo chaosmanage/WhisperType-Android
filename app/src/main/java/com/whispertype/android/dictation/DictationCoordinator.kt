@@ -300,8 +300,12 @@ class DictationCoordinator(
         capture.stop()
         s.diagnostics.markDrainStart()
         s.timing = s.timing.copy(drainStartedAtMillis = clock())
-        val remaining = queue.drain()
-        remaining.forEach { conn.sendAudio(it) }
+        // The bounded queue is a backpressure/overflow meter only. Every chunk
+        // is already sent once by the capture callback (runSession); draining
+        // now only clears the buffer and records its final metrics. Re-sending
+        // the drained chunks here would duplicate the tail audio to Gemini,
+        // violating "never resend" (§13/§12: single flush, exactly-once send).
+        queue.drain()
         s.diagnostics.markDrainFinish()
         s.timing = s.timing.copy(drainFinishedAtMillis = clock())
         conn.sendActivityEnd()

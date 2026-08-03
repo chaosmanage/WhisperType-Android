@@ -71,7 +71,7 @@ class CoordinatorFlowTest {
         val h = buildHarness()
         h.coordinator.begin(token())
         runCurrent()
-        h.capture.pushChunk()
+        repeat(3) { h.capture.pushChunk() }
         flush()
 
         h.coordinator.stop()
@@ -85,6 +85,9 @@ class CoordinatorFlowTest {
         assertTrue(h.connection.sent.subList(0, endIndex).all { it == "audio" })
         assertTrue(h.connection.sent.subList(endIndex + 1, h.connection.sent.size).none { it == "audio" })
         assertEquals(endIndex, h.connection.sent.lastIndex)
+        // The bounded queue is only a backpressure meter; draining at finalize must
+        // not re-send buffered chunks, so each chunk reaches Gemini exactly once.
+        assertEquals(3, h.connection.sent.count { it == "audio" })
     }
 
     @Test

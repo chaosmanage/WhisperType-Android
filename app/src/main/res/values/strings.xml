@@ -8,4 +8,5 @@
     <string name="mic_notification_text">Tap Stop when you finish speaking</string>
     <string name="notification_action_stop">Stop</string>
     <string name="notification_action_cancel">Cancel</string>
+    <string name="notification_action_open">Open WhisperType</string>
 </resources>

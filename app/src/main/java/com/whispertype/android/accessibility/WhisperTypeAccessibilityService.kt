@@ -148,6 +148,12 @@ open class WhisperTypeAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         runCatching { unregisterReceiver(screenOffReceiver) }
+        // The service is disconnecting; cancel any in-flight dictation so no
+        // partial result can be inserted after the service dies (§17).
+        if (stillActive()) {
+            Log.i(TAG, "cancel: SERVICE_DISCONNECTED")
+            cancelActiveSession()
+        }
         overlay?.removeAll()
         overlay = null
         shared = null
@@ -183,10 +189,11 @@ open class WhisperTypeAccessibilityService : AccessibilityService() {
         val tracker = inputTracker ?: return
         val bridge = currentBridge() ?: return
         val ime = imeTracker?.currentImeBounds() ?: return
+        val active = tracker.current() ?: return
+        // Defense in depth: never start the mic on a secure field (§9.3).
+        if (active.isSecure) return
+        if (lastDockSettings.disabledApps.contains(active.packageName)) return
         val token = tracker.currentToken(UUID.randomUUID().toString(), ime) ?: return
-        if (tracker.current()?.let { lastDockSettings.disabledApps.contains(it.packageName) } == true) {
-            return
-        }
         bridge.begin(token)
     }
 
@@ -217,7 +224,12 @@ open class WhisperTypeAccessibilityService : AccessibilityService() {
                 val presentation = OverlayStateRenderer.render(state)
                 val targetBlocked = activeInput != null &&
                     dockSettings.disabledApps.contains(activeInput.packageName)
-                val showDock = presentation.showDock && activeInput != null && imeBounds != null && !targetBlocked
+                // Never show the dock over a secure field (§9.3): the dock must not
+                // appear (and therefore must not offer to start the mic) for
+                // password/PIN/payment/authentication inputs.
+                val secureTarget = activeInput?.isSecure == true
+                val showDock = presentation.showDock && activeInput != null && imeBounds != null &&
+                    !targetBlocked && !secureTarget
                 val showPanel = presentation.showPanel && imeBounds != null
                 val resolved = presentation.copy(showDock = showDock, showPanel = showPanel)
                 val layout = OverlayLayout(
