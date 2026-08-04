@@ -91,9 +91,12 @@ class PersistentOverlayHost(
         // A detach() queued before this ran may already have cancelled the pending attach.
         if (machine.status != OverlayHostStatus.AttachPending) return
         try {
-            val overlayContext = createWindowContext()
-            val wm = overlayContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            val composeView = ComposeView(overlayContext).apply {
+            // The accessibility service context supplies the window token for
+            // TYPE_ACCESSIBILITY_OVERLAY windows; adding via its WindowManager is
+            // the established pattern (a fabricated createWindowContext() yields a
+            // null/display-less token and addView() throws BadTokenException).
+            val wm = baseContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            val composeView = ComposeView(baseContext).apply {
                 setContent {
                     val current by uiState.collectAsState()
                     WhisperTypeOverlayContent(
@@ -103,7 +106,7 @@ class PersistentOverlayHost(
                 }
             }
             // addView() success is recorded only after it returns without throwing.
-            wm.addView(composeView, buildLayoutParams(overlayContext, placement))
+            wm.addView(composeView, buildLayoutParams(baseContext, placement))
             view = composeView
             windowManager = wm
             machine.attachSucceeded()
@@ -132,12 +135,6 @@ class PersistentOverlayHost(
         _status.value = machine.status
     }
 
-    /** Binds to the accessibility-overlay window type on a display context. */
-    private fun createWindowContext(): Context = baseContext.createWindowContext(
-        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-        null,
-    )
-
     /**
      * Maps the pure [OverlayPlacement] into pixel LayoutParams using the
      * display-context density. Gravity anchors the bubble to a screen edge with
@@ -149,19 +146,25 @@ class PersistentOverlayHost(
     ): WindowManager.LayoutParams {
         val density = context.resources.displayMetrics.density
         val marginPx = (placement.marginDp * density).toInt()
+        val sizePx = (placement.surfaceSizeDp * density).toInt()
         val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        // Explicit, density-derived pixel surface size (PRD §16.5: verify bounded
+        // WRAP_CONTENT or use explicit dimensions) — matches the reference
+        // overlay parameter set that creates TYPE_ACCESSIBILITY_OVERLAY windows
+        // reliably on Samsung (no FLAG_LAYOUT_NO_LIMITS, gravity TOP|START).
         return WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            sizePx,
+            sizePx,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             flags,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            when (placement.edge) {
-                OverlayEdge.TopEnd -> gravity = Gravity.TOP or Gravity.END
+            gravity = if (placement.edge == OverlayEdge.TopEnd) {
+                Gravity.TOP or Gravity.END
+            } else {
+                Gravity.TOP or Gravity.START
             }
             x = marginPx
             y = marginPx

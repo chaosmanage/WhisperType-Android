@@ -49,7 +49,7 @@ fun visibilityOf(ui: OverlayUiState): OverlayVisibility = when (ui.state) {
 }
 
 /** Edge of the display the overlay window anchors to. Kept framework-free. */
-enum class OverlayEdge { TopEnd }
+enum class OverlayEdge { TopStart, TopEnd }
 
 /**
  * Pure, host-testable overlay geometry expressed in dp. The WindowManager
@@ -59,10 +59,11 @@ enum class OverlayEdge { TopEnd }
  * [minTouchDp] guarantees the bubble meets the §17.3 >= 48dp touch target.
  */
 data class OverlayPlacement(
-    val edge: OverlayEdge = OverlayEdge.TopEnd,
+    val edge: OverlayEdge = OverlayEdge.TopStart,
     val marginDp: Float = 16f,
     val minTouchDp: Float = 48f,
+    val surfaceSizeDp: Float = 72f,
 ) {
     val isValid: Boolean
-        get() = marginDp >= 0f && minTouchDp >= 48f
+        get() = marginDp >= 0f && minTouchDp >= 48f && surfaceSizeDp > 0f
 }
