@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">WhisperType</string>
 
     <string name="accessibility_service_label">WhisperType</string>
     <string name="accessibility_service_description">WhisperType uses Accessibility to detect when a normal text field is focused and the keyboard is visible, so it can show a small microphone bubble. When you tap Stop, it inserts the dictated text into the focused field. It never reads unrelated screen content and never works in password or secure fields.</string>
 
-    <string name="mic_notification_channel">Dictation recording</string>
-    <string name="mic_notification_title">WhisperType is listening</string>
-    <string name="mic_notification_text">Tap Stop when you finish speaking</string>
-    <string name="notification_action_stop">Stop</string>
-    <string name="notification_action_cancel">Cancel</string>
-    <string name="notification_action_open">Open WhisperType</string>
+    <string name="mic_notification_channel" tools:ignore="UnusedResources">Dictation recording</string>
+    <string name="mic_notification_title" tools:ignore="UnusedResources">WhisperType is listening</string>
+    <string name="mic_notification_text" tools:ignore="UnusedResources">Tap Stop when you finish speaking</string>
+    <string name="notification_action_stop" tools:ignore="UnusedResources">Stop</string>
+    <string name="notification_action_cancel" tools:ignore="UnusedResources">Cancel</string>
+    <string name="notification_action_open" tools:ignore="UnusedResources">Open WhisperType</string>
 
     <string name="dictation_start">Start dictation</string>
     <string name="dictation_starting">Starting</string>
@@ -20,10 +20,10 @@
     <string name="dictation_stop">Stop</string>
     <string name="dictation_cancel">Cancel</string>
     <string name="dictation_copy">Copy text</string>
-    <string name="dictation_copied">Copied</string>
+    <string name="dictation_copied" tools:ignore="UnusedResources">Copied</string>
     <string name="dictation_could_not_insert">Could not insert text</string>
-    <string name="dictation_reconnect_mic">Reconnect microphone permission</string>
-    <string name="dictation_reconnect_accessibility">Reconnect Accessibility</string>
+    <string name="dictation_reconnect_mic" tools:ignore="UnusedResources">Reconnect microphone permission</string>
+    <string name="dictation_reconnect_accessibility" tools:ignore="UnusedResources">Reconnect Accessibility</string>
     <string name="dictation_dismiss">Dismiss</string>
 
     <string name="test_tag_bubble">wt_bubble</string>
