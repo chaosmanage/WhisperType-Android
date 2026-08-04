@@ -7,9 +7,14 @@ import android.os.Looper
 import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
+import androidx.savedstate.compose.LocalSavedStateRegistryOwner
 import com.whispertype.android.core.contracts.OverlayController
 import com.whispertype.android.core.model.DictationState
 import com.whispertype.android.core.model.OverlayIntent
@@ -30,19 +35,34 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
- * One persistent overlay host per accessibility-service lifetime (PRD §16.5).
+ * The one persistent production overlay, rebuilt to the Wispr Flow parity model
+ * (§4.2 / §4.3 / Phase 2):
  *
- * The host renders [uiState] and emits [OverlayIntent]s; it is strictly
- * presentational and never orchestrates dictation. All WindowManager
- * operations run on the main thread via [Handler]. A pure
- * [OverlayHostStateMachine] drives attach/detach lifecycle, and
+ *  - window type [WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY] gated by
+ *    `SYSTEM_ALERT_WINDOW` (matching Wispr's FlowService), **not**
+ *    `TYPE_ACCESSIBILITY_OVERLAY`;
+ *  - `WRAP_CONTENT` dimensions with a right-edge, vertically-centered bubble;
+ *  - translucent, non-focusable, touchable window;
+ *  - one single persistent attachment; content is revealed / hidden purely via
+ *    [OverlayUiState] (never add/remove the window per accessibility event);
+ *  - a lifecycle-backed [ComposeView] with stable
+ *    [androidx.lifecycle.LifecycleOwner], [androidx.savedstate.SavedStateRegistryOwner]
+ *    and [androidx.lifecycle.ViewModelStoreOwner] installed via the view tree
+ *    (no bare ComposeView — §2.2 / forbidden-shortcuts);
+ *  - stable attach/remove diagnostics plus a bounded, schedule-based retry after
+ *    a recoverable attach failure (§2.7 / Phase 2).
+ *
+ * All WindowManager operations run on the main thread via [Handler]. A pure
+ * [OverlayHostStateMachine] drives attach/detach lifecycle and
  * [OverlayHostStatus] plus [lastFailure] expose a typed, non-sensitive diagnostic.
  */
 class PersistentOverlayHost(
-    private val baseContext: Context,
+    private val serviceContext: Context,
+    private val owners: OverlayOwners,
     sessionState: Flow<DictationState>,
     eligibility: Flow<TargetEligibility>,
     private val placement: OverlayPlacement = OverlayPlacement(),
+    private val maxRetries: Int = MAX_ATTACH_RETRIES,
 ) : OverlayController {
 
     private val _uiState = MutableStateFlow(OverlayUiState.Hidden)
@@ -55,8 +75,6 @@ class PersistentOverlayHost(
     val status: StateFlow<OverlayHostStatus> = _status
 
     private val _lastFailure = MutableStateFlow<String?>(null)
-
-    /** Non-sensitive typed diagnostic for the most recent attach failure. */
     val lastFailure: StateFlow<String?> = _lastFailure
 
     private val machine = OverlayHostStateMachine()
@@ -67,6 +85,8 @@ class PersistentOverlayHost(
 
     @Volatile
     private var windowManager: WindowManager? = null
+
+    private var retryCount = 0
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -80,42 +100,69 @@ class PersistentOverlayHost(
         }
     }
 
-    /** Adds the persistent overlay window; idempotent, main-thread only. */
+    /** Adds the single persistent overlay window; idempotent, main-thread only. */
     override fun attach() {
         handler.post { performAttach() }
     }
 
     private fun performAttach() {
-        // Idempotent: no-op when already attached/attaching/recovering.
-        if (!machine.attachRequested()) return
-        // A detach() queued before this ran may already have cancelled the pending attach.
-        if (machine.status != OverlayHostStatus.AttachPending) return
+        if (!machine.attachRequested()) {
+            _status.value = machine.status
+            return
+        }
         try {
-            // The accessibility service context supplies the window token for
-            // TYPE_ACCESSIBILITY_OVERLAY windows; adding via its WindowManager is
-            // the established pattern (a fabricated createWindowContext() yields a
-            // null/display-less token and addView() throws BadTokenException).
-            val wm = baseContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            val composeView = ComposeView(baseContext).apply {
+            // A normal application-overlay window is added through the WindowManager
+            // obtained from the owning service context (same-process context that
+            // runs FlowRuntimeService), never service.baseContext.
+            val wm = serviceContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            val composeView = ComposeView(serviceContext).apply {
+                setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+                // Stable owners are provided to the composition, mirroring Wispr's
+                // FlowService (LifecycleOwner + SavedStateRegistryOwner +
+                // ViewModelStoreOwner) and avoiding a bare ComposeView (§2.2).
                 setContent {
-                    val current by uiState.collectAsState()
-                    WhisperTypeOverlayContent(
-                        uiState = current,
-                        onIntent = { _intents.tryEmit(it) },
-                    )
+                    CompositionLocalProvider(
+                        LocalLifecycleOwner provides owners,
+                        LocalSavedStateRegistryOwner provides owners,
+                        LocalViewModelStoreOwner provides owners,
+                    ) {
+                        val current by uiState.collectAsState()
+                        WhisperTypeOverlayContent(
+                            uiState = current,
+                            onIntent = { _intents.tryEmit(it) },
+                        )
+                    }
                 }
             }
+            owners.startOwners()
+
             // addView() success is recorded only after it returns without throwing.
-            wm.addView(composeView, buildLayoutParams(baseContext, placement))
+            wm.addView(composeView, buildLayoutParams(serviceContext, placement))
             view = composeView
             windowManager = wm
+            retryCount = 0
             machine.attachSucceeded()
         } catch (t: Throwable) {
             machine.attachFailed()
             _lastFailure.value = t::class.simpleName ?: "AttachFailure"
             Log.w(TAG, "Overlay attach failed", t)
+            view = null
+            windowManager = null
+            scheduleRetry()
         }
         _status.value = machine.status
+    }
+
+    /**
+     * Bounded retry after a recoverable (transient) attach failure (§2.7). The
+     * retry count is capped so a permanent failure does not spin forever; the
+     * runtime service recreates a per-display host when a display appears later.
+     */
+    private fun scheduleRetry() {
+        if (retryCount >= maxRetries) return
+        retryCount += 1
+        Log.i(TAG, "Scheduling bounded overlay attach retry $retryCount/$maxRetries")
+        handler.postDelayed({ performAttach() }, ATTACH_RETRY_DELAY_MS)
     }
 
     private fun performDetach() {
@@ -132,51 +179,50 @@ class PersistentOverlayHost(
             view = null
             windowManager = null
         }
+        owners.stopOwners()
         _status.value = machine.status
     }
 
     /**
-     * Maps the pure [OverlayPlacement] into pixel LayoutParams using the
-     * display-context density. Gravity anchors the bubble to a screen edge with
-     * an explicit density-derived margin; no guessed display/IME metrics.
+     * Maps the pure Wispr [OverlayPlacement] into pixel LayoutParams using the
+     * display-context density. The overlay is a persistent `WRAP_CONTENT`
+     * application-overlay window anchored to the right edge near vertical center,
+     * with its horizontal inset derived from the edge margin.
      */
     private fun buildLayoutParams(
         context: Context,
         placement: OverlayPlacement,
     ): WindowManager.LayoutParams {
         val density = context.resources.displayMetrics.density
-        val marginPx = (placement.marginDp * density).toInt()
-        val sizePx = (placement.surfaceSizeDp * density).toInt()
+        val marginPx = (placement.edgeMarginDp * density).toInt()
         val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-        // Explicit, density-derived pixel surface size (PRD §16.5: verify bounded
-        // WRAP_CONTENT or use explicit dimensions) — matches the reference
-        // overlay parameter set that creates TYPE_ACCESSIBILITY_OVERLAY windows
-        // reliably on Samsung (no FLAG_LAYOUT_NO_LIMITS, gravity TOP|START).
         return WindowManager.LayoutParams(
-            sizePx,
-            sizePx,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             flags,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            gravity = if (placement.edge == OverlayEdge.TopEnd) {
-                Gravity.TOP or Gravity.END
-            } else {
-                Gravity.TOP or Gravity.START
-            }
-            x = marginPx
-            y = marginPx
+            // Right edge, around vertical center (Wispr §4.2). Gravity.END keeps the
+            // bubble at the locale-correct right edge; for Gravity.END the x offset is
+            // measured from that edge and a negative inset moves the window inward by
+            // the edge margin.
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            x = -marginPx
+            y = 0
         }
-    }
-
-    private companion object {
-        const val TAG = "PersistentOverlayHost"
     }
 
     /** Removes the persistent overlay window; idempotent, main-thread only. */
     override fun detach() {
         handler.post { performDetach() }
+    }
+
+    private companion object {
+        const val TAG = "PersistentOverlayHost"
+        const val MAX_ATTACH_RETRIES = 3
+        const val ATTACH_RETRY_DELAY_MS = 2000L
     }
 }

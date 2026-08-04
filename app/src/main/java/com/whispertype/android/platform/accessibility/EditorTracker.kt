@@ -200,7 +200,10 @@ class EditorTracker {
             editorIdentity = node.viewIdResourceName,
             inputType = inputType,
             isPassword = password,
-            contentInvalid = inputType == 0,
+            // inputType == 0 is a normal custom/web-editor signal, not a corrupt
+            // capture; SecurityClassifier now treats it as ordinary text (§2.3). This
+            // flag is reserved for genuinely unreadable editors.
+            contentInvalid = false,
             selectionStart = if (selStart < 0) null else selStart,
             selectionEnd = if (selEnd < 0) null else selEnd,
             generation = 0L,

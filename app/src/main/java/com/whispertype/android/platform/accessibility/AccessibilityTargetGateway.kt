@@ -1,7 +1,9 @@
 package com.whispertype.android.platform.accessibility
 
+import android.accessibilityservice.InputMethod
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.inputmethod.SurroundingText
 import com.whispertype.android.core.contracts.TargetGateway
 import com.whispertype.android.core.model.InsertionResult
 import com.whispertype.android.core.model.SessionId
@@ -22,19 +24,27 @@ data class LiveTarget(
 )
 
 /**
- * [TargetGateway] implementation over [EditorTracker]. Target capture is
- * explicit and immutable; insertion reacquires the live node, validates the
- * target is still current, then commits exactly once — never a retry of an
- * ambiguous commit and never synthetic keystrokes or clipboard paste.
+ * Cursor-aware [TargetGateway] implementation over [EditorTracker] and the
+ * accessibility IME surface (Phase 4, §4.5 / §2.5).
  *
- * Note: the public Android SDK does not expose an `InputConnection` from an
- * accessibility node, so the accessibility-native `ACTION_SET_TEXT` (which
- * replaces the editor's content, like `InputConnection.commitText`) is used as
- * the single-shot commit. The typed, exactly-once result contract is preserved.
+ * Insertion no longer uses `ACTION_SET_TEXT` (which replaces the whole editor).
+ * Instead it commits exactly once at the current cursor / selection through the
+ * [InputMethod.AccessibilityInputConnection] exposed by
+ * [android.accessibilityservice.InputMethod.getCurrentInputConnection], which
+ * is the same `commitText()` semantics as a real IME, preserving surrounding
+ * text and replacing only the selected range:
+ *
+ *  1. reacquire the live node and validate the captured target is still current,
+ *  2. read surrounding text before committing,
+ *  3. call `commitText(text, newCursorPosition)` once at the current selection,
+ *  4. verify the surrounding-text change / selection advance,
+ *  5. never blindly retry — an unverifiable result is [InsertionResult.Ambiguous]
+ *     and routes to the Copy fallback.
  */
 class AccessibilityTargetGateway(
     private val tracker: EditorTracker,
     private val liveTargetProvider: () -> LiveTarget?,
+    private val inputConnectionProvider: () -> InputMethod.AccessibilityInputConnection?,
 ) : TargetGateway {
 
     override fun currentEligibility(): Flow<TargetEligibility> = tracker.eligibility
@@ -60,39 +70,61 @@ class AccessibilityTargetGateway(
     }
 
     override suspend fun insert(target: TargetSnapshot, text: String): InsertionResult {
+        val ic = inputConnectionProvider()
         val live = liveTargetProvider()
 
-        val connectionPresent = live != null
+        val connectionPresent = ic != null
         val targetCurrent = live != null &&
             live.packageName == target.packageName &&
             live.windowId == target.windowId &&
             live.generation == target.generation
         val targetSecureOrUncertain = target.isSecure || target.isUncertain
 
-        var commitAccepted: Boolean? = null
-        if (live != null && targetCurrent && !targetSecureOrUncertain) {
-            // Exactly-once commit via ACTION_SET_TEXT; never retried, even if it
-            // returns ambiguous/false.
-            commitAccepted = try {
-                live.node.performAction(
-                    AccessibilityNodeInfo.ACTION_SET_TEXT,
-                    Bundle().apply {
-                        putCharSequence(
-                            AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                            text,
-                        )
-                    },
-                )
-            } catch (_: Throwable) {
-                false
-            }
+        var commitVerified: Boolean? = null
+        if (ic != null && live != null && targetCurrent && !targetSecureOrUncertain) {
+            // Single-shot, cursor-aware commit; never retried, even if ambiguous.
+            commitVerified = commitAndVerify(ic, text)
         }
 
         return InsertionDecision.evaluate(
             connectionPresent = connectionPresent,
             targetCurrent = targetCurrent,
             targetSecureOrUncertain = targetSecureOrUncertain,
-            commitAccepted = commitAccepted,
+            commitAccepted = commitVerified,
         )
+    }
+
+    /**
+     * Commits [text] at the current selection once and verifies the editor
+     * reflected it. Returns `true` only on a confirmed change; `false` / `null`
+     * on an unverifiable result (the caller maps that to Ambiguous, never a
+     * retry). A `null` surrounding-text read is treated as ambiguous so a
+     * closed / unstarted session is surfaced rather than mis-attributed.
+     */
+    private fun commitAndVerify(
+        ic: InputMethod.AccessibilityInputConnection,
+        text: String,
+    ): Boolean? = try {
+        val before = readSurrounding(ic) ?: return null
+        ic.commitText(text, NEW_CURSOR_POSITION, null)
+        val after = readSurrounding(ic) ?: return null
+        // Confirmed if the surrounding text changed and now contains the commit.
+        val beforeText = before.getText().toString()
+        val afterText = after.getText().toString()
+        afterText.contains(text) && afterText != beforeText
+    } catch (_: Throwable) {
+        null
+    }
+
+    private fun readSurrounding(ic: InputMethod.AccessibilityInputConnection): SurroundingText? = try {
+        ic.getSurroundingText(SURROUNDING_BEFORE, SURROUNDING_AFTER, 0)
+    } catch (_: Throwable) {
+        null
+    }
+
+    private companion object {
+        const val NEW_CURSOR_POSITION = 1
+        const val SURROUNDING_BEFORE = 200
+        const val SURROUNDING_AFTER = 400
     }
 }

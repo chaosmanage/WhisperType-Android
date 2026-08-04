@@ -48,22 +48,32 @@ fun visibilityOf(ui: OverlayUiState): OverlayVisibility = when (ui.state) {
     is DictationState.Error -> OverlayVisibility.Error
 }
 
-/** Edge of the display the overlay window anchors to. Kept framework-free. */
-enum class OverlayEdge { TopStart, TopEnd }
+/**
+ * Edge of the display the overlay window anchors to. Wispr Flow anchors the
+ * production bubble to the RIGHT edge near vertical center; the rebuild mirrors
+ * that interaction and geometry model (§4.2 / §4.3). Kept framework-free.
+ */
+enum class OverlayEdge { Right }
 
 /**
- * Pure, host-testable overlay geometry expressed in dp. The WindowManager
- * adapter converts these into pixel LayoutParams (gravity + margins) using the
- * display-context density; it does not mix in IME/display guessed metrics.
+ * Pure, host-testable overlay geometry expressed in dp (Wispr Flow parity,
+ * §4.2). The WindowManager adapter converts these into pixel LayoutParams
+ * (gravity + margin) using the display-context density; it does not mix in
+ * IME/display guessed metrics.
+ *
+ * Reference-derived starting measurements (not a substitute for same-device
+ * visual comparison): 56dp bubble, 20dp edge margin, right edge around vertical
+ * center ([verticallyCentered] = true).
  *
  * [minTouchDp] guarantees the bubble meets the §17.3 >= 48dp touch target.
  */
 data class OverlayPlacement(
-    val edge: OverlayEdge = OverlayEdge.TopStart,
-    val marginDp: Float = 16f,
-    val minTouchDp: Float = 48f,
-    val surfaceSizeDp: Float = 72f,
+    val edge: OverlayEdge = OverlayEdge.Right,
+    val edgeMarginDp: Float = 20f,
+    val bubbleDp: Float = 56f,
+    val minTouchDp: Float = 56f,
+    val verticallyCentered: Boolean = true,
 ) {
     val isValid: Boolean
-        get() = marginDp >= 0f && minTouchDp >= 48f && surfaceSizeDp > 0f
+        get() = edgeMarginDp >= 0f && bubbleDp > 0f && minTouchDp >= 48f
 }

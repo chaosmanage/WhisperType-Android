@@ -7,16 +7,18 @@ import com.whispertype.android.core.model.TargetEligibility
 import kotlinx.coroutines.flow.Flow
 
 /**
- * Default [OverlayHostFactory]; public so the accessibility service can
- * construct a [PersistentOverlayHost] on its display-specific context.
+ * Default [OverlayHostFactory]; public so the runtime service can construct a
+ * [PersistentOverlayHost] on its own service context and stable owners.
  */
 class DefaultOverlayHostFactory : OverlayHostFactory {
     override fun create(
-        baseContext: Context,
+        serviceContext: Context,
+        owners: OverlayOwners,
         sessionState: Flow<DictationState>,
         eligibility: Flow<TargetEligibility>,
     ): OverlayController = PersistentOverlayHost(
-        baseContext = baseContext,
+        serviceContext = serviceContext,
+        owners = owners,
         sessionState = sessionState,
         eligibility = eligibility,
     )

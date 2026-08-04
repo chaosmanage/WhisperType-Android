@@ -14,13 +14,14 @@ class OverlayPlacementTest {
     }
 
     @Test
-    fun `default margin is non-negative`() {
-        assertTrue(OverlayPlacement().marginDp >= 0f)
+    fun `default edge margin is non-negative`() {
+        assertTrue(OverlayPlacement().edgeMarginDp >= 0f)
     }
 
     @Test
-    fun `default anchors to top end edge`() {
-        assertTrue(OverlayPlacement().edge == OverlayEdge.TopEnd)
+    fun `default anchors to the right edge and vertical center`() {
+        assertTrue(OverlayPlacement().edge == OverlayEdge.Right)
+        assertTrue(OverlayPlacement().verticallyCentered)
     }
 
     @Test
@@ -34,17 +35,17 @@ class OverlayPlacementTest {
     }
 
     @Test
-    fun `negative margin is invalid`() {
-        assertFalse(OverlayPlacement(marginDp = -1f).isValid)
+    fun `negative edge margin is invalid`() {
+        assertFalse(OverlayPlacement(edgeMarginDp = -1f).isValid)
     }
 
     @Test
-    fun `zero margin is valid`() {
-        assertTrue(OverlayPlacement(marginDp = 0f).isValid)
+    fun `zero edge margin is valid`() {
+        assertTrue(OverlayPlacement(edgeMarginDp = 0f).isValid)
     }
 
     @Test
-    fun `zero min touch is invalid`() {
-        assertFalse(OverlayPlacement(minTouchDp = 0f).isValid)
+    fun `zero bubble size is invalid`() {
+        assertFalse(OverlayPlacement(bubbleDp = 0f).isValid)
     }
 }

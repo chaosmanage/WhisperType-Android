@@ -2,6 +2,8 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">WhisperType</string>
 
+    <string name="flow_runtime_label" tools:ignore="UnusedResources">WhisperType runtime</string>
+
     <string name="accessibility_service_label">WhisperType</string>
     <string name="accessibility_service_description">WhisperType uses Accessibility to detect when a normal text field is focused and the keyboard is visible, so it can show a small microphone bubble. When you tap Stop, it inserts the dictated text into the focused field. It never reads unrelated screen content and never works in password or secure fields.</string>
 
@@ -32,4 +34,11 @@
     <string name="test_tag_copy">wt_copy</string>
     <string name="test_tag_dismiss">wt_dismiss</string>
     <string name="test_tag_panel">wt_panel</string>
+
+    <!-- Overlay-permission onboarding (Phase 1 gate) -->
+    <string name="overlay_permission_title" tools:ignore="UnusedResources">Allow microphone overlay</string>
+    <string name="overlay_permission_description" tools:ignore="UnusedResources">WhisperType shows a small microphone bubble over other apps so you can dictate into any text field. Grant overlay permission to continue.</string>
+    <string name="overlay_permission_button" tools:ignore="UnusedResources">Grant overlay permission</string>
+    <string name="overlay_permission_granted" tools:ignore="UnusedResources">Overlay permission granted. Runtime starting…</string>
+    <string name="runtime_started_toast" tools:ignore="UnusedResources">WhisperType runtime started</string>
 </resources>

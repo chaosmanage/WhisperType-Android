@@ -6,6 +6,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Wispr-parity production overlay gate (Phase 1, §4.1): the application
+         overlay window is TYPE_APPLICATION_OVERLAY, which requires this. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <queries>
         <intent>
@@ -35,9 +38,20 @@
         </activity>
 
         <service
+            android:name=".platform.runtime.FlowRuntimeService"
+            android:exported="false"
+            android:foregroundServiceType="microphone"
+            android:label="@string/flow_runtime_label" />
+
+        <!-- Runs in a dedicated :accessibility process per the locked rebuild
+             decision (§3): the actor that sees the screen (focus / target /
+             insertion) is isolated from the main process which owns the overlay,
+             microphone session, and Gemini connection. Typed IPC links the two. -->
+        <service
             android:name=".platform.accessibility.WhisperTypeAccessibilityService"
             android:exported="true"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:process=":accessibility"
             android:label="@string/accessibility_service_label">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />

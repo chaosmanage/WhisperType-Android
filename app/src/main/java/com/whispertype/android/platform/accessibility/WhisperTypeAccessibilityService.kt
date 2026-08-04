@@ -1,79 +1,111 @@
 package com.whispertype.android.platform.accessibility
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.InputMethod
+import android.content.ComponentName
 import android.content.Intent
+import android.content.ServiceConnection
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import android.os.Message
+import android.os.Messenger
+import android.os.RemoteException
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
-import com.whispertype.android.core.contracts.OverlayController
-import com.whispertype.android.core.model.DictationFailure
-import com.whispertype.android.core.model.DictationState
 import com.whispertype.android.core.model.InsertionResult
-import com.whispertype.android.core.model.OverlayIntent
 import com.whispertype.android.core.model.SessionId
-import com.whispertype.android.platform.overlay.DefaultOverlayHostFactory
+import com.whispertype.android.core.model.TargetSnapshot
+import com.whispertype.android.platform.ipc.RuntimeIpc
+import com.whispertype.android.platform.runtime.FlowRuntimeService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Phase 2 static-insertion spike (PRD FR-2 Eligibility, FR-8 Insertion,
- * §16.4). On connect it builds the classifier, the editor tracker and the
- * target gateway, then attaches the overlay host via [DefaultOverlayHostFactory]
- * and collects its intents. Tapping the bubble captures a
- * fresh target and commits [STATIC_TEST_TEXT] exactly once into the focused
- * field — keyboard stays, no Gemini / audio / dictation service.
- *
- * No API key, transcript or editor content is ever logged; [TAG] is stable and
- * non-sensitive.
+ * The dedicated `:accessibility`-process service (locked decision §3). It sees
+ * the screen only and owns focus / target / insertion — never the overlay, the
+ * microphone, or Gemini. Focus and keyboard state are pushed to the main-process
+ * [FlowRuntimeService] over typed IPC; the runtime responds with insert requests.
+ * No editor content is ever transported over IPC.
  */
 class WhisperTypeAccessibilityService : AccessibilityService() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private val tracker = EditorTracker()
-    private val gateway = AccessibilityTargetGateway(tracker) { resolveLiveTarget() }
 
-    private val sessionState = MutableStateFlow<DictationState>(DictationState.Idle)
+    private val inputMethod = WhisperTypeInputMethod(this)
 
-    private var overlay: OverlayController? = null
-    private var overlayJob: Job? = null
+    private val gateway = AccessibilityTargetGateway(
+        tracker = tracker,
+        liveTargetProvider = { resolveLiveTarget() },
+        inputConnectionProvider = { inputMethod.getCurrentInputConnection() },
+    )
 
     @Volatile
-    private var sessionInFlight = false
+    private var runtimeMessenger: Messenger? = null
 
-    companion object {
-        private const val TAG = "WhisperTypeAccessibility"
+    private var insertionJob: Job? = null
 
-        /** Spike fixture: static test text inserted on bubble tap (Phase 2 only). */
-        private const val STATIC_TEST_TEXT = "WhisperType static insertion test"
-
-        private const val RETURN_TO_IDLE_DELAY_MS = 1200L
+    private val replyHandler = object : Handler(Looper.getMainLooper()) {
+        override fun handleMessage(msg: Message) {
+            when (msg.what) {
+                RuntimeIpc.MSG_INSERT -> onInsertRequest(msg)
+                else -> Log.w(TAG, "Unhandled runtime message ${msg.what}")
+            }
+        }
     }
+
+    private val replyMessenger = Messenger(replyHandler)
+
+    private val runtimeConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            val remote = binder?.let { Messenger(it) }
+            runtimeMessenger = remote
+            if (remote == null) {
+                Log.w(TAG, "Runtime service bound with null messenger")
+                return
+            }
+            val reg = Message.obtain(null, RuntimeIpc.MSG_REGISTER_REPLY).apply {
+                replyTo = replyMessenger
+            }
+            try {
+                remote.send(reg)
+            } catch (_: RemoteException) {
+                runtimeMessenger = null
+            }
+            pushEligibility()
+            Log.i(TAG, "Runtime service connected over IPC")
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            runtimeMessenger = null
+            Log.w(TAG, "Runtime service disconnected")
+        }
+    }
+
+    /** Wispr-parity: return our own IME surface so cursor-aware commitText works. */
+    override fun onCreateInputMethod(): InputMethod = inputMethod
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         tracker.serviceConnected()
-        refreshKeyboardVisible()
+        // Focus + keyboard are (re)initialized on connect and on every window
+        // change (§2.3), so a bubble decision is never made from a stale editor.
+        refreshFocusedEditorAndKeyboard()
+        bindToRuntime()
 
-        val controller = DefaultOverlayHostFactory().create(
-            baseContext,
-            sessionState,
-            gateway.currentEligibility(),
-        )
-        overlay = controller
-        controller.attach()
-        overlayJob = scope.launch {
-            controller.intents.collect { intent -> handleIntent(intent) }
+        // Push eligibility to the runtime on every change so the bubble tracks focus.
+        scope.launch {
+            tracker.eligibility.collect { pushEligibility() }
         }
-
-        Log.i(TAG, "Accessibility service connected (static-insertion spike)")
+        Log.i(TAG, "Accessibility service connected (:accessibility process)")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -81,7 +113,9 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_VIEW_FOCUSED -> tracker.onViewFocused(event)
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> tracker.refreshFromRoot(rootInActiveWindow)
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> tracker.refreshFromRoot(rootInActiveWindow)
-            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> refreshKeyboardVisible()
+            // TYPE_WINDOWS_CHANGED refreshes BOTH keyboard visibility and the
+            // focused-editor state, matching Wispr's observed event pipeline (§4.4).
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> refreshFocusedEditorAndKeyboard()
             else -> Unit
         }
     }
@@ -91,78 +125,102 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
-        teardownOverlay()
+        runtimeMessenger = null
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
-        teardownOverlay()
+        insertionJob?.cancel()
+        try {
+            unbindService(runtimeConnection)
+        } catch (_: Throwable) {
+            // never bound
+        }
         scope.cancel()
         super.onDestroy()
     }
 
     // ------------------------------------------------------------------
-    // Overlay / intents
+    // Runtime binding / eligibility push
     // ------------------------------------------------------------------
 
-    private fun teardownOverlay() {
-        overlayJob?.cancel()
-        overlayJob = null
-        overlay?.detach()
-        overlay = null
-    }
-
-    private fun handleIntent(intent: OverlayIntent) {
-        when (intent) {
-            OverlayIntent.START_DICTATION -> startStaticInsertion()
-            // No listener/orchestration for the remaining intents in this spike.
-            OverlayIntent.STOP,
-            OverlayIntent.CANCEL,
-            OverlayIntent.COPY,
-            OverlayIntent.DISMISS,
-            -> Unit
+    private fun bindToRuntime() {
+        val intent = Intent(this, FlowRuntimeService::class.java)
+        try {
+            bindService(intent, runtimeConnection, BIND_AUTO_CREATE)
+        } catch (t: Throwable) {
+            Log.w(TAG, "Could not bind runtime service", t)
         }
     }
 
-    private fun startStaticInsertion() {
-        if (sessionInFlight) return
-        sessionInFlight = true
+    private fun pushEligibility() {
+        val remote = runtimeMessenger ?: return
+        val m = Message.obtain(null, RuntimeIpc.MSG_ELIGIBILITY).apply {
+            data = RuntimeIpc.packEligibility(tracker.eligibility.value)
+        }
+        try {
+            remote.send(m)
+        } catch (_: RemoteException) {
+            runtimeMessenger = null
+        }
+    }
 
-        val sessionId = SessionId.new()
-        val target = gateway.captureTarget(sessionId)
-        if (target == null) {
-            sessionState.value = DictationState.Error(
-                sessionId,
-                DictationFailure(
+    // ------------------------------------------------------------------
+    // Insertion (Phase 4 cursor-aware, over IPC)
+    // ------------------------------------------------------------------
+
+    private fun onInsertRequest(msg: Message) {
+        val text = msg.data?.getString(RuntimeIpc.KEY_INSERT_TEXT) ?: return
+        val sessionId = SessionId(msg.data?.getString(RuntimeIpc.KEY_SESSION_ID) ?: SessionId.new().value)
+        val replyTo = msg.replyTo ?: run {
+            Log.w(TAG, "Insert request carried no reply messenger")
+            return
+        }
+        insertionJob?.cancel()
+        insertionJob = scope.launch {
+            val target = gateway.captureTarget(sessionId)
+            val localizedTarget = target ?: TargetSnapshot(
+                sessionId = sessionId,
+                packageName = "",
+                displayId = 0,
+                windowId = -1,
+                editorIdentity = "",
+                generation = 0L,
+                inputTypeMask = 0,
+                isSecure = true,
+                isUncertain = false,
+                selectionStart = null,
+                selectionEnd = null,
+                capturedAtMillis = System.currentTimeMillis(),
+            )
+            val result = if (target == null) {
+                InsertionResult.Failed(com.whispertype.android.core.model.DictationFailure(
                     code = "insert_target_ineligible",
                     message = "No safe text field is focused. Not a password or secure field.",
                     recoverable = true,
-                ),
-            )
-            scope.launch { resetToIdle() }
-        } else {
-            sessionState.value = DictationState.Starting(sessionId, target)
-            scope.launch {
-                val result = gateway.insert(target, STATIC_TEST_TEXT)
-                sessionState.value = when (result) {
-                    InsertionResult.Inserted -> DictationState.Success(sessionId)
-                    is InsertionResult.Failed -> DictationState.Error(sessionId, result.failure)
-                    InsertionResult.Ambiguous -> DictationState.Error(sessionId, InsertionDecision.ambiguous())
-                }
-                delay(RETURN_TO_IDLE_DELAY_MS)
-                resetToIdle()
+                ))
+            } else {
+                gateway.insert(localizedTarget, text)
+            }
+            val reply = Message.obtain(null, RuntimeIpc.MSG_INSERT_RESULT).apply {
+                data = RuntimeIpc.packInsertionResult(result)
+            }
+            try {
+                replyTo.send(reply)
+            } catch (_: RemoteException) {
+                Log.w(TAG, "Could not deliver insertion result")
             }
         }
     }
 
-    private suspend fun resetToIdle() {
-        sessionState.value = DictationState.Idle
-        sessionInFlight = false
-    }
+    // ------------------------------------------------------------------
+    // Live focus / keyboard
+    // ------------------------------------------------------------------
 
-    // ------------------------------------------------------------------
-    // Live connection / keyboard
-    // ------------------------------------------------------------------
+    private fun refreshFocusedEditorAndKeyboard() {
+        tracker.refreshFromRoot(rootInActiveWindow)
+        refreshKeyboardVisible()
+    }
 
     @Suppress("DEPRECATION")
     private fun refreshKeyboardVisible() {
@@ -190,5 +248,15 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
             node = focus,
         )
     }
+
+    private companion object {
+        const val TAG = "WhisperTypeAccessibility"
+    }
 }
 
+/**
+ * The accessibility IME surface returned by [onCreateInputMethod] (Phase 3,
+ * §2.6). It exposes the current [InputMethod.AccessibilityInputConnection] used
+ * by the gateway for cursor-aware `commitText()` insertion.
+ */
+class WhisperTypeInputMethod(service: AccessibilityService) : InputMethod(service)

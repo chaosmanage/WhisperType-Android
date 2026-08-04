@@ -81,20 +81,28 @@ class SecurityClassifierTest {
     }
 
     @Test
-    fun `zero input type with no other signal is uncertain`() {
-        assertEquals(Classification.UNCERTAIN, SecurityClassifier.classify(0, password = false, contentInvalid = false))
+    fun `zero input type with no other signal is safe for custom editors`() {
+        // §2.3: many custom / web editors report inputType == 0; that alone must
+        // not fail closed.
+        assertEquals(Classification.SAFE, SecurityClassifier.classify(0, password = false, contentInvalid = false))
     }
 
     @Test
-    fun `phone class is uncertain`() {
+    fun `phone class is safe ordinary text`() {
         val type = 0x0000_0003 // TYPE_CLASS_PHONE
-        assertEquals(Classification.UNCERTAIN, SecurityClassifier.classify(type, password = false, contentInvalid = false))
+        assertEquals(Classification.SAFE, SecurityClassifier.classify(type, password = false, contentInvalid = false))
     }
 
     @Test
-    fun `text with email variation is uncertain`() {
-        val type = SecurityClassifier.TYPE_CLASS_TEXT or 0x0000_0020 // TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-        assertEquals(Classification.UNCERTAIN, SecurityClassifier.classify(type, password = false, contentInvalid = false))
+    fun `text with email variation is safe`() {
+        val type = SecurityClassifier.TYPE_CLASS_TEXT or SecurityClassifier.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+        assertEquals(Classification.SAFE, SecurityClassifier.classify(type, password = false, contentInvalid = false))
+    }
+
+    @Test
+    fun `text with uri variation is safe`() {
+        val type = SecurityClassifier.TYPE_CLASS_TEXT or SecurityClassifier.TYPE_TEXT_VARIATION_URI
+        assertEquals(Classification.SAFE, SecurityClassifier.classify(type, password = false, contentInvalid = false))
     }
 
     @Test
