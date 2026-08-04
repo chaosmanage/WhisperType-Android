@@ -87,7 +87,7 @@ All state writes happen on the session coroutine (the injected scope, `Dispatche
 
 1. `begin(target)` -> `Starting` -> start `DictationForegroundService` -> `runSession` on the coordinator scope.
 2. Read API key from `SecretStore`; missing key aborts with `API_KEY_MISSING`.
-3. `DefaultGeminiLiveClient.connect(sessionId, key, config)` builds `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=<encoded>&model=<modelId>` and opens the WebSocket (`modelId` lives only in `GeminiSessionConfig.DEFAULT_MODEL_ID = gemini-2.0-flash-live-001`).
+3. `DefaultGeminiLiveClient.connect(sessionId, key, config)` builds `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=<encoded>&model=<modelId>` and opens the WebSocket (`modelId` lives only in `GeminiSessionConfig.DEFAULT_MODEL_ID = gemini-3.1-flash-live-preview`).
 4. Setup + realtime-input config are the first two messages; any server content before `setupComplete` is a `PROTOCOL_ERROR`.
 5. `AudioCapture` streams 20 ms PCM16 mono chunks (16 kHz, 640 bytes) on a daemon thread; each chunk is both pushed to the bounded `AudioQueue` (capacity 100, drops oldest) and sent to Gemini. The ticker updates `Listening` state with elapsed time and amplitude every 50 ms.
 6. `stop()` or the 5-minute cap or a 3-second mic stall triggers `doFinalize`: stop capture, drain the queue and send remaining chunks, send exactly one activity-end boundary, wait up to `activityEndTimeoutMillis` (15 s) for `SessionEnd`.

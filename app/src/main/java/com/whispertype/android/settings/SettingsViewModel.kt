@@ -5,6 +5,7 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.Application
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.view.accessibility.AccessibilityManager
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -68,11 +69,22 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val historyRetentionDays: StateFlow<Int> =
         repo.historyRetentionDays.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 30)
 
+    /** Opt-in app-package metadata in history; off by default (plan §16). */
+    val historyIncludeMetadata: StateFlow<Boolean> =
+        repo.historyIncludeMetadata.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     val onboardingCompleted: StateFlow<Boolean> =
         repo.onboardingCompleted.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     val geminiKeyConfigured: StateFlow<Boolean> =
         repo.geminiKeyConfigured.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val geminiModelId: StateFlow<String> =
+        repo.geminiModelId.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            com.whispertype.android.gemini.GeminiSessionConfig.DEFAULT_MODEL_ID,
+        )
 
     private val _accessibilityEnabled = MutableStateFlow(false)
     val accessibilityEnabled: StateFlow<Boolean> = _accessibilityEnabled
@@ -110,6 +122,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { repo.setHistoryRetentionDays(days) }
     }
 
+    fun setHistoryIncludeMetadata(enabled: Boolean) {
+        viewModelScope.launch { repo.setHistoryIncludeMetadata(enabled) }
+    }
+
     fun completeOnboarding() {
         viewModelScope.launch { repo.setOnboardingCompleted(true) }
     }
@@ -131,6 +147,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             secretStore.deleteApiKey()
             repo.refreshKeyConfigured()
         }
+    }
+
+    fun setGeminiModelId(modelId: String) {
+        viewModelScope.launch { repo.setGeminiModelId(modelId) }
     }
 
     fun testApiKey(key: String) {
@@ -163,6 +183,22 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun exportDiagnostics(): String = DiagnosticsExporter.export(getApplication<Application>())
+
+    /** Writes the diagnostics report to the given content Uri (e.g. from a document picker). */
+    fun exportDiagnosticsTo(uri: Uri) {
+        val content = DiagnosticsExporter.export(getApplication<Application>())
+        viewModelScope.launch {
+            runCatching {
+                val resolver = getApplication<Application>().contentResolver
+                val output = resolver.openOutputStream(uri) ?: return@launch
+                try {
+                    output.write(content.toByteArray(Charsets.UTF_8))
+                } finally {
+                    output.close()
+                }
+            }
+        }
+    }
 
     fun launchableApps(): List<AppEntry> {
         val packageManager = getApplication<Application>().packageManager

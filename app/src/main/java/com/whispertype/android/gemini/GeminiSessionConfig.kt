@@ -14,7 +14,7 @@ data class GeminiSessionConfig(
     val connectionTimeoutMillis: Long = 15_000L,
 ) {
     companion object {
-        const val DEFAULT_MODEL_ID: String = "gemini-2.0-flash-live-001"
+        const val DEFAULT_MODEL_ID: String = "gemini-3.1-flash-live-preview"
     }
 }
 

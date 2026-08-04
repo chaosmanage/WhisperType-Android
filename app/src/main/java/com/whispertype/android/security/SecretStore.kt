@@ -25,8 +25,8 @@ class SecretStore(context: Context) {
     suspend fun saveApiKey(key: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val normalized = key.trim()
-            if (!normalized.startsWith(KEY_PREFIX)) {
-                return@withContext Result.failure(Exception("Invalid API key format"))
+            if (normalized.isEmpty()) {
+                return@withContext Result.failure(Exception("API key is empty"))
             }
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, keyStoreManager.getOrCreateKey(KEY_ALIAS))
@@ -76,7 +76,6 @@ class SecretStore(context: Context) {
         const val SECRET_FILE_RELATIVE_PATH: String = "secrets/api_key.bin"
         const val TRANSFORMATION: String = "AES/GCM/NoPadding"
         const val GCM_TAG_LENGTH_BITS: Int = 128
-        const val KEY_PREFIX: String = "AIza"
     }
 }
 

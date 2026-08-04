@@ -39,7 +39,9 @@ private val DOCK_CANCEL_SIDE: Preferences.Key<String> = stringPreferencesKey("do
 private val DOCK_DISABLED_APPS: Preferences.Key<Set<String>> = stringSetPreferencesKey("dock_disabled_apps")
 private val HISTORY_ENABLED: Preferences.Key<Boolean> = booleanPreferencesKey("history_enabled")
 private val HISTORY_RETENTION_DAYS: Preferences.Key<Int> = intPreferencesKey("history_retention_days")
+private val HISTORY_INCLUDE_METADATA: Preferences.Key<Boolean> = booleanPreferencesKey("history_include_metadata")
 private val ONBOARDING_COMPLETED: Preferences.Key<Boolean> = booleanPreferencesKey("onboarding_completed")
+private val GEMINI_MODEL_ID: Preferences.Key<String> = stringPreferencesKey("gemini_model_id")
 
 private fun String.toSpeechMode(): LanguageMode =
     LanguageMode.entries.firstOrNull { it.name == this } ?: LanguageMode.ENGLISH
@@ -136,11 +138,28 @@ class SettingsRepositoryImpl(
         edit { this[HISTORY_RETENTION_DAYS] = days }
     }
 
+    override val historyIncludeMetadata: Flow<Boolean> =
+        context.settingsDataStore.data.map { preferences -> preferences[HISTORY_INCLUDE_METADATA] ?: false }
+
+    override suspend fun setHistoryIncludeMetadata(enabled: Boolean) {
+        edit { this[HISTORY_INCLUDE_METADATA] = enabled }
+    }
+
     override val onboardingCompleted: Flow<Boolean> =
         context.settingsDataStore.data.map { preferences -> preferences[ONBOARDING_COMPLETED] ?: false }
 
     override suspend fun setOnboardingCompleted(completed: Boolean) {
         edit { this[ONBOARDING_COMPLETED] = completed }
+    }
+
+    override val geminiModelId: Flow<String> =
+        context.settingsDataStore.data.map { preferences ->
+            preferences[GEMINI_MODEL_ID]?.takeIf { it.isNotBlank() }
+                ?: com.whispertype.android.gemini.GeminiSessionConfig.DEFAULT_MODEL_ID
+        }
+
+    override suspend fun setGeminiModelId(modelId: String) {
+        edit { this[GEMINI_MODEL_ID] = modelId.trim() }
     }
 
     override suspend fun refreshKeyConfigured() {

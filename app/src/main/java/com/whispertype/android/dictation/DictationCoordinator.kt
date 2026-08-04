@@ -48,8 +48,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 class DictationCoordinator(
     private val context: Context,
     private val apiKeyProvider: suspend () -> String? = { SecretStore(context).getApiKey().getOrNull() },
-    private val inserter: (TargetToken, String) -> InsertionOutcome? = { token, text ->
-        WhisperTypeAccessibilityService.shared?.insertText(token, text)
+    private val inserter: suspend (TargetToken, String) -> InsertionOutcome? = { token, text ->
+        insertWithRetry(token, text)
     },
     private val copier: (String) -> Boolean = { WhisperTypeAccessibilityService.shared?.copyFallback(it) == true },
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
@@ -66,6 +66,10 @@ class DictationCoordinator(
     private val modeProvider: suspend () -> LanguageMode = {
         runCatching { WhisperTypeApplication.instance.settingsRepository.speechMode.first() }
             .getOrNull() ?: LanguageMode.ENGLISH
+    },
+    private val modelIdProvider: suspend () -> String = {
+        runCatching { WhisperTypeApplication.instance.settingsRepository.geminiModelId.first() }
+            .getOrNull() ?: GeminiSessionConfig.DEFAULT_MODEL_ID
     },
     private val idleStateProvider: () -> DictationState = {
         if (WhisperTypeAccessibilityService.shared?.isUsable() == true) {
@@ -179,7 +183,7 @@ class DictationCoordinator(
     }
 
     /** Re-evaluates the idle state after accessibility readiness changes. */
-    fun refreshReadiness() {
+    override fun refreshReadiness() {
         if (session == null &&
             mutableState.value !is DictationState.Starting &&
             mutableState.value !is DictationState.Listening &&
@@ -198,7 +202,10 @@ class DictationCoordinator(
             abortWith(s, DictationFailure("API_KEY_MISSING", "Add your Gemini API key in Settings", true))
             return
         }
-        val cfg = s.config.copy(languageMode = modeProvider())
+        val cfg = s.config.copy(
+            languageMode = modeProvider(),
+            modelId = modelIdProvider(),
+        )
         s.config = cfg
         val conn = try {
             clientFactory(s.sessionId, apiKey, cfg)
@@ -374,4 +381,26 @@ class DictationCoordinator(
         currentCapture = null
         DictationForegroundService.instance?.stopSelf()
     }
+}
+
+private const val INSERT_MAX_ATTEMPTS = 3
+private const val INSERT_RETRY_BASE_DELAY_MILLIS = 75L
+
+/**
+ * Default inserter: retries recoverable failures before falling back to the copy
+ * path, mirroring Wispr's retry-before-fallback insertion mindset.
+ */
+private suspend fun insertWithRetry(target: TargetToken, text: String): InsertionOutcome {
+    var lastFailure: InsertionOutcome = InsertionOutcome.Failure("NO_ATTEMPT", recoverable = true)
+    for (attempt in 1..INSERT_MAX_ATTEMPTS) {
+        val outcome = WhisperTypeAccessibilityService.shared?.insertText(target, text)
+            ?: return InsertionOutcome.Failure("SERVICE_UNAVAILABLE", recoverable = false)
+        if (outcome is InsertionOutcome.Success) return outcome
+        lastFailure = outcome
+        val failure = outcome as InsertionOutcome.Failure
+        if (attempt < INSERT_MAX_ATTEMPTS && failure.recoverable) {
+            delay(INSERT_RETRY_BASE_DELAY_MILLIS * attempt)
+        }
+    }
+    return lastFailure
 }

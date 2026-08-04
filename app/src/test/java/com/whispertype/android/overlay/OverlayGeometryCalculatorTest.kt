@@ -97,6 +97,44 @@ class OverlayGeometryCalculatorTest {
     }
 
     @Test
+    fun fallbackDockIsVerticallyCenteredAndWithinDisplay() {
+        val size = sizePx(DockSize.STANDARD)
+        for (position in DockPosition.entries) {
+            val dock = OverlayGeometryCalculator.dockRectFallback(
+                display, DockSettings(position = position), density,
+            )
+            assertEquals(display.top + (display.height - size) / 2, dock.top)
+            assertTrue(dock.left >= display.left)
+            assertTrue(dock.right <= display.right)
+        }
+        val centered = OverlayGeometryCalculator.dockRectFallback(
+            display, DockSettings(position = DockPosition.CENTER), density,
+        )
+        assertEquals(display.centerX, centered.centerX)
+    }
+
+    @Test
+    fun fallbackDockRespectsLeftAndRightPositions() {
+        val dock = OverlayGeometryCalculator.dockRectFallback(
+            display, DockSettings(position = DockPosition.RIGHT), density,
+        )
+        assertEquals(display.right - margin, dock.right)
+        val leftDock = OverlayGeometryCalculator.dockRectFallback(
+            display, DockSettings(position = DockPosition.LEFT), density,
+        )
+        assertEquals(display.left + margin, leftDock.left)
+    }
+
+    @Test
+    fun fallbackPanelCoversBottomFortyFivePercent() {
+        val panel = OverlayGeometryCalculator.voicePanelRectFallback(display)
+        assertEquals(display.left, panel.left)
+        assertEquals(display.right, panel.right)
+        assertEquals(display.bottom, panel.bottom)
+        assertEquals(display.height * 45 / 100, panel.top - display.top)
+    }
+
+    @Test
     fun dockIsAlwaysFullyWithinDisplayBounds() {
         for (position in DockPosition.entries) {
             for (size in DockSize.entries) {

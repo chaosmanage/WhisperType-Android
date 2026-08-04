@@ -9,8 +9,14 @@ Gemini Live dictation session. It is the companion to Implementation Plan §12�
   `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=<apiKey>&model=<modelId>`
 - The API key is URL-encoded and passed as the `key` query parameter. It is never logged.
 - The model identifier lives **only** in `GeminiSessionConfig.DEFAULT_MODEL_ID`
-  (`gemini-2.0-flash-live-001`). Changing it must be a one-line change accompanied by a
+  (`gemini-3.1-flash-live-preview`). Changing it must be a one-line change accompanied by a
   contract-test update (`GeminiLiveClientContractTest` pins the model in the request).
+  The default can be overridden per-user in Settings ("Gemini model" field in the
+  Privacy screen), stored in DataStore and applied by `DictationCoordinator.modelIdProvider`.
+- The `model` query parameter and the `setup.model` body value must use the `models/`
+  prefix (e.g. `models/gemini-3.1-flash-live-preview`); a bare model id is rejected by
+  the server. The protocol prepends `models/` automatically, so the configured value
+  is just the short id.`
 
 ## 2. Session lifecycle
 
@@ -23,7 +29,7 @@ connect() ──► handshake ──► send setup ──► send realtimeInput.
    ```json
    {
      "setup": {
-       "model": "models/gemini-2.0-flash-live-001",
+       "model": "models/gemini-3.1-flash-live-preview",
        "generationConfig": { "responseModalities": ["AUDIO"] },
        "systemInstruction": { "parts": [{ "text": "<dictation instruction>" }] }
      }

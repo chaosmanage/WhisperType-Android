@@ -22,4 +22,7 @@ interface DictationBridge {
     fun copyResult()
 
     fun dismissCopy()
+
+    /** Re-evaluates the idle state (DockedReady vs Unavailable) after a readiness change. */
+    fun refreshReadiness()
 }

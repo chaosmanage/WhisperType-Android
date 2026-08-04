@@ -103,7 +103,8 @@ open class WhisperTypeAccessibilityService : AccessibilityService() {
             onCopy = { currentBridge()?.copyResult() },
             onDismiss = { currentBridge()?.dismissCopy() },
         )
-        collectFlows()
+collectFlows()
+        currentBridge()?.refreshReadiness()
         ContextCompat.registerReceiver(
             this,
             screenOffReceiver,
@@ -116,10 +117,14 @@ open class WhisperTypeAccessibilityService : AccessibilityService() {
         val evt = event ?: return
         val focusEvent = evt.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
             evt.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED
+        val windowsChanged = evt.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
         val trackedBefore = inputTracker?.current()
         val imeBefore = imeTracker?.currentImeBounds()
         router?.onAccessibilityEvent(evt, getWindows = { getWindows() }, root = { rootInActiveWindow })
         imeBoundsFlow.value = imeTracker?.currentImeBounds()?.toIntRectPx()
+        if (focusEvent || windowsChanged || (imeBefore == null && imeTracker?.currentImeBounds() != null)) {
+            currentBridge()?.refreshReadiness()
+        }
         if (!stillActive()) return
 
         if (focusEvent) {
@@ -166,8 +171,7 @@ open class WhisperTypeAccessibilityService : AccessibilityService() {
         shared == this &&
             lastKnownGeminiConfigured &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
-            PackageManager.PERMISSION_GRANTED &&
-            imeTracker?.currentImeBounds() != null
+            PackageManager.PERMISSION_GRANTED
     }.getOrDefault(false)
 
     fun currentInputGeneration(): Long? = inputTracker?.current()?.inputGeneration
@@ -188,12 +192,11 @@ open class WhisperTypeAccessibilityService : AccessibilityService() {
     private fun onDockTap() {
         val tracker = inputTracker ?: return
         val bridge = currentBridge() ?: return
-        val ime = imeTracker?.currentImeBounds() ?: return
         val active = tracker.current() ?: return
         // Defense in depth: never start the mic on a secure field (§9.3).
         if (active.isSecure) return
         if (lastDockSettings.disabledApps.contains(active.packageName)) return
-        val token = tracker.currentToken(UUID.randomUUID().toString(), ime) ?: return
+        val token = tracker.currentToken(UUID.randomUUID().toString(), imeTracker?.currentImeBounds()) ?: return
         bridge.begin(token)
     }
 
@@ -207,7 +210,8 @@ open class WhisperTypeAccessibilityService : AccessibilityService() {
             bridge.state.collect { lastBridgeState = it }
         }
         scope?.launch {
-            settings.geminiKeyConfigured.collect { lastKnownGeminiConfigured = it }
+            settings.geminiKeyConfigured.collect { lastKnownGeminiConfigured = it
+                bridge.refreshReadiness() }
         }
 
         val overlayController = overlay ?: return
@@ -228,18 +232,31 @@ open class WhisperTypeAccessibilityService : AccessibilityService() {
                 // appear (and therefore must not offer to start the mic) for
                 // password/PIN/payment/authentication inputs.
                 val secureTarget = activeInput?.isSecure == true
-                val showDock = presentation.showDock && activeInput != null && imeBounds != null &&
+                // The dock must not require a validated IME window: on some IMEs
+                // the keyboard never surfaces as a TYPE_INPUT_METHOD window, so the
+                // bubble would never appear. Fall back to a Wispr-style right-edge
+                // position and snap to the keyboard edge once bounds arrive.
+                val showDock = presentation.showDock && activeInput != null &&
                     !targetBlocked && !secureTarget
-                val showPanel = presentation.showPanel && imeBounds != null
+                val showPanel = presentation.showPanel
                 val resolved = presentation.copy(showDock = showDock, showPanel = showPanel)
+                val display = displayBounds()
                 val layout = OverlayLayout(
                     dock = if (showDock) {
-                        OverlayGeometryCalculator.dockRect(imeBounds, displayBounds(), dockSettings, density)
+                        if (imeBounds != null) {
+                            OverlayGeometryCalculator.dockRect(imeBounds, display, dockSettings, density)
+                        } else {
+                            OverlayGeometryCalculator.dockRectFallback(display, dockSettings, density)
+                        }
                     } else {
                         null
                     },
                     panel = if (showPanel) {
-                        OverlayGeometryCalculator.voicePanelRect(imeBounds)
+                        if (imeBounds != null) {
+                            OverlayGeometryCalculator.voicePanelRect(imeBounds)
+                        } else {
+                            OverlayGeometryCalculator.voicePanelRectFallback(display)
+                        }
                     } else {
                         null
                     },

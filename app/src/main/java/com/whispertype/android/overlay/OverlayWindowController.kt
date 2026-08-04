@@ -8,7 +8,6 @@ import android.view.WindowManager
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.platform.ComposeView
 import com.whispertype.android.settings.DockSettings
 import com.whispertype.android.settings.ThemeMode
 import com.whispertype.android.ui.theme.WhisperTypeTheme
@@ -28,8 +27,8 @@ class OverlayWindowController(
     private val windowManager =
         context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
-    private val dockView = ComposeView(context)
-    private val panelView = ComposeView(context)
+    private val dockView = LifecycleOverlayView(context)
+    private val panelView = LifecycleOverlayView(context)
     private val dockSettings = mutableStateOf(DockSettings())
     private val panelUi = mutableStateOf(PanelUiState())
 
@@ -55,10 +54,12 @@ class OverlayWindowController(
         applyPanel(if (presentation.showPanel || presentation.showCopyUi || presentation.showError) layout.panel else null)
     }
 
-    /** Removes both overlay windows. */
+    /** Removes both overlay windows and destroys their lifecycle owners. */
     fun removeAll() {
         removeDock()
         removePanel()
+        dockView.destroy()
+        panelView.destroy()
     }
 
     private fun applyDock(rect: IntRectPx?) = when {
@@ -187,3 +188,4 @@ class OverlayWindowController(
         const val TAG = "WhisperTypeOverlay"
     }
 }
+

@@ -2,12 +2,15 @@ package com.whispertype.android.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -49,16 +52,20 @@ fun PrivacySettingsScreen(
     val keyConfigured by viewModel.geminiKeyConfigured.collectAsStateWithLifecycle()
     val historyEnabled by viewModel.historyEnabled.collectAsStateWithLifecycle()
     val retentionDays by viewModel.historyRetentionDays.collectAsStateWithLifecycle()
+    val includeMetadata by viewModel.historyIncludeMetadata.collectAsStateWithLifecycle()
     val saveState = viewModel.saveResult.collectAsStateWithLifecycle().value
     val testState = viewModel.testResult.collectAsStateWithLifecycle().value
+    val geminiModelId by viewModel.geminiModelId.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
     var key by remember { mutableStateOf("") }
     var visible by remember { mutableStateOf(false) }
+    var modelText by remember(geminiModelId) { mutableStateOf(geminiModelId) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .safeDrawingPadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 16.dp),
     ) {
@@ -123,6 +130,30 @@ fun PrivacySettingsScreen(
         }
         Spacer(modifier = Modifier.height(24.dp))
 
+        Text("Gemini model", style = MaterialTheme.typography.titleMedium)
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            "Leave as-is unless you know a different live model works with your key.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        OutlinedTextField(
+            value = modelText,
+            onValueChange = { modelText = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Model id") },
+            singleLine = true,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Button(
+            onClick = { viewModel.setGeminiModelId(modelText) },
+            enabled = modelText.isNotBlank(),
+        ) {
+            Text("Save model")
+        }
+        Spacer(modifier = Modifier.height(24.dp))
+
         Text("Local history", style = MaterialTheme.typography.titleMedium)
         Spacer(modifier = Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -147,6 +178,16 @@ fun PrivacySettingsScreen(
                     )
                 }
             }
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Record originating app", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                Switch(checked = includeMetadata, onCheckedChange = viewModel::setHistoryIncludeMetadata)
+            }
+            Text(
+                "Off by default. When enabled, stores the app package alongside each entry.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Spacer(modifier = Modifier.height(12.dp))
             TextButton(
                 onClick = { scope.launch { viewModel.clearAllHistory() } },

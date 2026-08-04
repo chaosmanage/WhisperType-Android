@@ -58,6 +58,35 @@ object OverlayGeometryCalculator {
     /** The voice panel covers the keyboard bounds exactly. */
     fun voicePanelRect(imeBounds: IntRectPx): IntRectPx = imeBounds
 
+    /**
+     * Dock placement used when no IME window has been detected yet. Mirrors Wispr's
+     * persistent-bubble stance: the dock stays visible and tappable so dictation is
+     * always available once a field is focused, then snaps to the keyboard edge as
+     * soon as IME bounds are known. Vertically centered on the display.
+     */
+    fun dockRectFallback(
+        displayBounds: IntRectPx,
+        settings: DockSettings,
+        density: Float,
+    ): IntRectPx {
+        val size = sizePx(settings.size, density)
+        val margin = (Constants.SAFE_EDGE_MARGIN_DP * density).toInt()
+        val maxLeft = (displayBounds.right - size).coerceAtLeast(displayBounds.left)
+        val left = when (settings.position) {
+            DockPosition.LEFT -> (displayBounds.left + margin).coerceIn(displayBounds.left, maxLeft)
+            DockPosition.CENTER -> (displayBounds.centerX - size / 2).coerceIn(displayBounds.left, maxLeft)
+            DockPosition.RIGHT -> (displayBounds.right - margin - size).coerceIn(displayBounds.left, maxLeft)
+        }
+        val top = ((displayBounds.top + displayBounds.bottom - size) / 2).coerceAtLeast(displayBounds.top)
+        return IntRectPx(left, top, left + size, top + size)
+    }
+
+    /** Panel placement used when the keyboard window is unknown: bottom ~45% of the display. */
+    fun voicePanelRectFallback(displayBounds: IntRectPx): IntRectPx {
+        val top = displayBounds.top + (displayBounds.height * FALLBACK_PANEL_FRACTION).toInt()
+        return IntRectPx(displayBounds.left, top, displayBounds.right, displayBounds.bottom)
+    }
+
     /** Pixel rectangles for the dock and voice panel windows. */
     data class OverlayLayout(
         val dock: IntRectPx?,
@@ -78,4 +107,6 @@ object OverlayGeometryCalculator {
         const val DOCK_VERTICAL_GAP_DP = 4
         const val HALF_OVER_FRACTION = 0.5f
     }
+
+    private const val FALLBACK_PANEL_FRACTION = 0.45f
 }

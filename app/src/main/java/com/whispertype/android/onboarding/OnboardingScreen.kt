@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -94,6 +97,7 @@ fun OnboardingScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .safeDrawingPadding()
                 .verticalScroll(rememberScrollState()),
         ) {
             when (step) {
@@ -281,9 +285,10 @@ private fun LanguageStep(viewModel: OnboardingViewModel) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LanguageModeSelector(mode: LanguageMode, onSelect: (LanguageMode) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         LanguageMode.entries.forEach { entry ->
             FilterChip(
                 selected = entry == mode,
@@ -294,6 +299,7 @@ private fun LanguageModeSelector(mode: LanguageMode, onSelect: (LanguageMode) ->
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DockPreviewStep(viewModel: OnboardingViewModel) {
     val settings by viewModel.dockSettings.collectAsStateWithLifecycle()
@@ -304,7 +310,7 @@ private fun DockPreviewStep(viewModel: OnboardingViewModel) {
         DockPreview(settings = settings)
         Spacer(modifier = Modifier.height(16.dp))
         Text("Position", style = MaterialTheme.typography.labelLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             DockPosition.entries.forEach { position ->
                 FilterChip(
                     selected = settings.position == position,
@@ -315,7 +321,7 @@ private fun DockPreviewStep(viewModel: OnboardingViewModel) {
         }
         Spacer(modifier = Modifier.height(12.dp))
         Text("Size", style = MaterialTheme.typography.labelLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             DockSize.entries.forEach { size ->
                 FilterChip(
                     selected = settings.size == size,

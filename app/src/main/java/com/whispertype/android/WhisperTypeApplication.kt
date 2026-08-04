@@ -42,6 +42,9 @@ class WhisperTypeApplication : Application() {
     @Volatile
     private var historyRetentionCache = 30
 
+    @Volatile
+    private var historyIncludeMetadataCache = false
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -52,12 +55,13 @@ class WhisperTypeApplication : Application() {
             this,
             enabledProvider = { historyEnabledCache },
             retentionProvider = { historyRetentionCache },
-            includeMetadataProvider = { true },
+            includeMetadataProvider = { historyIncludeMetadataCache },
         )
         dictationBridge = DictationCoordinator(this)
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         scope.launch { settingsRepository.historyEnabled.collect { historyEnabledCache = it } }
         scope.launch { settingsRepository.historyRetentionDays.collect { historyRetentionCache = it } }
+        scope.launch { settingsRepository.historyIncludeMetadata.collect { historyIncludeMetadataCache = it } }
     }
 
     companion object {

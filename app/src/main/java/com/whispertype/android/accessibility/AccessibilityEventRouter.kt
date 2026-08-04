@@ -64,7 +64,10 @@ class AccessibilityEventRouter(
 
     private fun isFocusEvent(event: AccessibilityEvent): Boolean =
         event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED ||
-            event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+            event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+            // Windows-changed fires whenever an IME shows/hides; refresh the IME
+            // bounds there too, matching Wispr's windows-changed-driven discovery.
+            event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
 
     private fun safeSource(event: AccessibilityEvent): AccessibilityNodeInfo? =
         try {

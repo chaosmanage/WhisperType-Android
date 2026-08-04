@@ -56,6 +56,12 @@ The foundation build of WhisperType Android. Requires Android 14+ (minSdk 34) an
 - Step-by-step onboarding: intro, microphone, notifications, accessibility, API key, language, dock preview, demo.
 - Compatibility test screen against a sample text field.
 
+### Privacy fix (plan §16)
+
+- History now stores the originating app package only when the user explicitly opts in via a new "Record originating app" toggle in `Privacy` settings, off by default. The application-scoped `HistoryRepository` is wired to this opt-in instead of hardcoding metadata inclusion.
+- Added `scripts/verify-secrets.ps1` for the plan-required secrets audit (exits non-zero on real Gemini keys or forbidden signing/manifest files).
+- Hardened `.gitignore` with emulator snapshot, transcript-fixture, and general Gemini-key patterns.
+
 ### Diagnostics
 
 - `DiagnosticsExporter` in-memory 256-event ring buffer of typed codes and timing; export is privacy-safe.
