@@ -113,12 +113,12 @@ class PersistentOverlayHost(
             // runs FlowRuntimeService), never service.baseContext.
             val wm = serviceContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
             // The ComposeView is wrapped in an OverlayComposeContainer which
-            // implements LifecycleOwner + SavedStateRegistryOwner + ViewModelStoreOwner.
-            // Compose's WindowRecomposer traverses the view tree upward from the
-            // ComposeView to find the owners, so wrapping them here makes the
-            // owners discoverable BEFORE the composition starts — fixing the
-            // "ViewTreeLifecycleOwner not found" crash (§2.2) without depending on
-            // the ViewTree*Owner.set() API.
+            // installs LifecycleOwner + SavedStateRegistryOwner + ViewModelStoreOwner
+            // on itself via the setViewTree*Owner() APIs. Compose's WindowRecomposer
+            // finds the owners by the tag-based findViewTree*Owner() lookup traversing
+            // the view tree upward from the ComposeView, so the tags must be set
+            // BEFORE the window is added — fixing the "ViewTreeLifecycleOwner not
+            // found" crash (§2.2).
             val container = OverlayComposeContainer(serviceContext, owners)
             val composeView = ComposeView(serviceContext).apply {
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)

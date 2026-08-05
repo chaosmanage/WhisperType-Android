@@ -113,4 +113,43 @@ directly) and re-run the gate.
 
 Builder protocol: **stopped**. Do not add Gemini/audio (Phase 6) until this passes.
 
+## Stage 1c — ViewTree owner installation fix (Phase 2 blocker) — DONE (code)
+
+**Physical gate status: NOT RUN** (§8 — no device connected).
+
+Build id: `assembleDebug` on `rebuild/clean-runtime` after `ea61f60` (working tree).
+
+### Root cause (corrected diagnosis)
+
+The `ViewTree*Owner` APIs were **not** missing from the compile classpath (the Stage 1b
+"dependency/visibility" conclusion was wrong). Inspection of the actual
+`debugCompileClasspath` and Kotlin compile-classpath jars (lifecycle `2.10.0`, savedstate
+`1.4.0`) shows all three classes and `set()` methods present. The real cause of
+`import androidx.lifecycle.ViewTreeLifecycleOwner` → `Unresolved reference` is a **Kotlin
+API rename**: the helpers are compiled as `View` **extension functions**
+(`View.setViewTreeLifecycleOwner(LifecycleOwner?)`, `setViewTreeViewModelStoreOwner(...)`,
+`setViewTreeSavedStateRegistryOwner(...)`); the `ViewTreeLifecycleOwner`-style names are
+`@file:JvmName` file-facade artifacts, not Kotlin declarations, so class-style imports
+cannot resolve. Decoded from the compile-classpath metadata: `fun setViewTreeLifecycleOwner`
+/ `fun findViewTreeLifecycleOwner`.
+
+### Changed files
+
+- `platform/overlay/OverlayComposeContainer.kt` — `init` calls
+  `setViewTreeLifecycleOwner(owners)` / `setViewTreeSavedStateRegistryOwner(owners)` /
+  `setViewTreeViewModelStoreOwner(owners)` (tags set before `addView`, before composition);
+  `@SuppressLint("ViewConstructor")`.
+- `platform/overlay/PersistentOverlayHost.kt` — corrected comment to the real mechanism.
+
+### Tests run (host, not physical)
+
+- `./gradlew :app:assembleDebug` — PASS
+- `./gradlew :app:testDebugUnitTest` — PASS (0 failures)
+- `./gradlew :app:lintDebug` — PASS
+
+### Next gate
+
+Re-run the Phase 2 Samsung gate (composition must start without the
+`ViewTreeLifecycleOwner` crash), then visibility/show-hide, rotation, insertion.
+
 
