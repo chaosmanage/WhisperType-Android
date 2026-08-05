@@ -106,6 +106,7 @@ class FlowRuntimeService : Service(), OverlayOwners {
     private var liveCapture: AudioCapture? = null
     private var liveAudioJob: Job? = null
     private var liveSessionJob: Job? = null
+    private var amplitudeJob: Job? = null
     private val liveCandidates = mutableListOf<ResultCandidate>()
 
     /** Peak input amplitude (0..1) of the current capture, for mic diagnostics. */
@@ -115,6 +116,10 @@ class FlowRuntimeService : Service(), OverlayOwners {
     /** Number of 20 ms audio chunks accepted by the session this turn. */
     @Volatile
     private var chunksSent = 0L
+
+    /** Peak RMS of the actual PCM bytes handed to the session this turn (0..32768). */
+    @Volatile
+    private var peakChunkRms = 0.0
 
     /**
      * Pending delayed selection after TurnComplete. inputTranscription is a
@@ -154,7 +159,11 @@ class FlowRuntimeService : Service(), OverlayOwners {
         super.onCreate()
         isRunning = true
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
+        // Start as a special-use FGS (no runtime permission required) so the
+        // overlay service can run before RECORD_AUDIO is granted. The service
+        // is promoted to the microphone type only during dictation, once the
+        // permission is confirmed (see runLiveSession).
+        startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         startOverlay()
         Log.i(TAG, "FlowRuntimeService started (main process)")
     }
@@ -219,9 +228,11 @@ class FlowRuntimeService : Service(), OverlayOwners {
      */
     private fun startLiveDictation() {
         val sessionId = SessionId.new()
+        Log.i(TAG, "STAGE: dictation requested session=$sessionId")
         liveCandidates.clear()
         peakAmplitude = 0f
         chunksSent = 0L
+        peakChunkRms = 0.0
         pendingSelection?.cancel()
         pendingSelection = null
         _sessionState.value = DictationState.Starting(sessionId, EMPTY_TARGET(sessionId))
@@ -244,7 +255,14 @@ class FlowRuntimeService : Service(), OverlayOwners {
                 ?: GeminiSessionFactory.DEFAULT_MODEL
             val session = GeminiSessionFactory.create(
                 apiKey = key,
-                config = GeminiSessionConfig(model = model, language = language),
+                config = GeminiSessionConfig(
+                    model = model,
+                    language = language,
+                    // No systemInstruction: a systemInstruction suppresses the
+                    // server's outputTranscription delivery (verified 2026-08-05 on
+                    // the live endpoint). outputAudioTranscription transcribes the
+                    // model's spoken reply, which is the dictation echo source.
+                ),
             )
             liveSession = session
             runLiveSession(sessionId, session)
@@ -271,13 +289,6 @@ class FlowRuntimeService : Service(), OverlayOwners {
             }
             if (_sessionState.value !is DictationState.Starting) return
 
-            // Phase 6: promote to microphone foreground mode before AudioRecord.
-            startForeground(
-                NOTIFICATION_ID,
-                buildNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
-            )
-
             if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
                 != android.content.pm.PackageManager.PERMISSION_GRANTED
             ) {
@@ -291,6 +302,22 @@ class FlowRuntimeService : Service(), OverlayOwners {
                 )
                 return
             }
+
+            // Phase 6: promote to microphone foreground mode before AudioRecord,
+            // only now that RECORD_AUDIO is confirmed granted. specialUse stays in
+            // the type set so the overlay service keeps running after dictation.
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+            )
+
+            // Prime the model as a dictation echo via a client text turn (kept
+            // inside the open turn, before any audio). A systemInstruction would
+            // suppress outputTranscription; this client turn does not, so the
+            // model's spoken echo is transcribed and becomes the dictation.
+            session.sendTextTurn(DICTATION_PRIME_TEXT)
+            Log.i(TAG, "STAGE: dictation prime sent")
 
             val cap = AudioCapture()
             capture = cap
@@ -306,10 +333,31 @@ class FlowRuntimeService : Service(), OverlayOwners {
             _sessionState.value = DictationState.Listening(sessionId)
             audioJob = scope.launch {
                 for (chunk in cap.chunks) {
-                    if (session.sendAudio(chunk) is SendResult.Accepted) chunksSent++
+                    if (session.sendAudio(chunk) is SendResult.Accepted) {
+                        chunksSent++
+                        val rms = pcm16Rms(chunk.pcm16Bytes)
+                        if (rms > peakChunkRms) peakChunkRms = rms
+                        if (chunksSent == 1L) {
+                            Log.i(TAG, "STAGE: first audio chunk sent (mic producing data)")
+                        } else if (chunksSent % 50 == 0L) {
+                            Log.i(TAG, "audio progress: chunksSent=$chunksSent peakChunkRms=$peakChunkRms peakAmp=$peakAmplitude")
+                        }
+                    }
                 }
             }
             liveAudioJob = audioJob
+            // Mic-level diagnostic + live waveform: AudioCapture exposes its own
+            // amplitude flow; drive peakAmplitude and the overlay amplitude from
+            // it (GeminiEvent.Amplitude is not emitted by the session).
+            amplitudeJob = scope.launch {
+                cap.amplitude.collect { level ->
+                    if (level > peakAmplitude) peakAmplitude = level
+                    val cur = _sessionState.value
+                    if (cur is DictationState.Listening && cur.sessionId == sessionId) {
+                        _sessionState.value = cur.copy(amplitude = level)
+                    }
+                }
+            }
 
             session.events().collect { event -> onLiveEvent(sessionId, event) }
         } catch (e: CancellationException) {
@@ -325,6 +373,7 @@ class FlowRuntimeService : Service(), OverlayOwners {
             )
         } finally {
             audioJob?.cancel()
+            amplitudeJob?.cancel()
             capture?.stop()
             liveAudioJob = null
             liveCapture = null
@@ -435,7 +484,7 @@ class FlowRuntimeService : Service(), OverlayOwners {
         val capture = liveCapture
         val session = liveSession
         val audioJob = liveAudioJob
-        Log.i(TAG, "stopDictation: peakAmp=$peakAmplitude candidates=${liveCandidates.size} chunksSent=$chunksSent")
+        Log.i(TAG, "stopDictation: peakAmp=$peakAmplitude candidates=${liveCandidates.size} chunksSent=$chunksSent peakChunkRms=$peakChunkRms")
         scope.launch {
             capture?.forceRemainingChunk()
             capture?.stop()
@@ -517,6 +566,7 @@ class FlowRuntimeService : Service(), OverlayOwners {
     )
 
     private fun onInsertionResult(result: InsertionResult) {
+        Log.i(TAG, "STAGE: insertion result=$result")
         val current = _sessionState.value
         val sessionId = when (current) {
             is DictationState.Starting -> current.sessionId
@@ -589,6 +639,19 @@ class FlowRuntimeService : Service(), OverlayOwners {
             .build()
     }
 
+    /** RMS of signed little-endian PCM16 bytes, in [0, 32768]. Aggregate only; never logs audio. */
+    private fun pcm16Rms(bytes: ByteArray): Double {
+        if (bytes.size < 2) return 0.0
+        var sum = 0.0
+        var i = 0
+        while (i + 1 < bytes.size) {
+            val sample = (bytes[i].toInt() and 0xFF) or (bytes[i + 1].toInt() shl 8)
+            sum += sample.toDouble() * sample
+            i += 2
+        }
+        return Math.sqrt(sum / (i / 2))
+    }
+
     companion object {
         const val TAG = "FlowRuntimeService"
         const val NOTIFICATION_ID = 1001
@@ -597,6 +660,15 @@ class FlowRuntimeService : Service(), OverlayOwners {
         const val RETURN_TO_IDLE_MS = 1200L
         const val TRAILING_TRANSCRIPT_GRACE_MS = 2000L
         const val FINALIZE_TIMEOUT_MS = 8000L
+
+        /** Client text turn (not a systemInstruction) priming the Live model to
+         *  speak the user's dictation verbatim; its outputTranscription becomes
+         *  the transcript. */
+        const val DICTATION_PRIME_TEXT =
+            "You are a verbatim dictation echo. When the user speaks, speak back " +
+                "ONLY their exact words, word for word, in the same language. Do not " +
+                "greet, do not comment, do not ask questions, do not paraphrase, and " +
+                "do not acknowledge this instruction."
 
         /** Process-local service-liveness flag for the app UI (set in onCreate/onDestroy). */
         @Volatile

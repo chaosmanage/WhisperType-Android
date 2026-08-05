@@ -58,6 +58,13 @@ object GeminiLiveWire {
             if (config.inputAudioTranscription) {
                 put("inputAudioTranscription", buildJsonObject {})
             }
+            // Echo fallback: outputAudioTranscription transcribes the model's own
+            // audio reply. When the model is instructed to repeat the user's words
+            // verbatim, outputTranscription.text is the dictation text — used as a
+            // fallback because the server does not always deliver inputTranscription.
+            if (config.outputAudioTranscription) {
+                put("outputAudioTranscription", buildJsonObject {})
+            }
             config.systemInstruction?.let { instruction ->
                 put(
                     "systemInstruction",
@@ -96,6 +103,34 @@ object GeminiLiveWire {
     fun buildTurnComplete(): String =
         buildJsonObject {
             put("clientContent", buildJsonObject { put("turnComplete", true) })
+        }.toString()
+
+    /** One client text turn appended to the open turn (no turnComplete). Used to
+     *  prime the model's behavior without a systemInstruction, which the server
+     *  currently suppresses transcription for. */
+    fun buildTextTurn(text: String): String =
+        buildJsonObject {
+            put(
+                "clientContent",
+                buildJsonObject {
+                    put(
+                        "turns",
+                        kotlinx.serialization.json.buildJsonArray {
+                            add(
+                                buildJsonObject {
+                                    put("role", "user")
+                                    put(
+                                        "parts",
+                                        kotlinx.serialization.json.buildJsonArray {
+                                            add(buildJsonObject { put("text", text) })
+                                        },
+                                    )
+                                },
+                            )
+                        },
+                    )
+                },
+            )
         }.toString()
 
     // ------------------------------------------------------------------
@@ -150,11 +185,18 @@ object GeminiLiveWire {
             ?.get("text")
             ?.jsonPrimitive
             ?.contentOrNull
+        val outputTranscription = content
+            ?.get("outputTranscription")
+            ?.jsonObject
+            ?.get("text")
+            ?.jsonPrimitive
+            ?.contentOrNull
         val turnComplete = content?.get("turnComplete")?.jsonPrimitive?.booleanOrNull ?: false
         val interrupted = content?.get("interrupted")?.jsonPrimitive?.booleanOrNull ?: false
         return ServerMessage.ServerContent(
             textParts = textParts,
             inputTranscription = inputTranscription,
+            outputTranscription = outputTranscription,
             turnComplete = turnComplete,
             interrupted = interrupted,
         )
@@ -186,12 +228,14 @@ object GeminiLiveWire {
         /**
          * A `serverContent` frame. [textParts] are model text parts (empty for
          * a pure input-transcription echo), [inputTranscription] is the
-         * recognized user speech for that frame, and the flags describe the
-         * turn lifecycle.
+         * recognized user speech for that frame, [outputTranscription] is the
+         * model's own audio reply transcribed (the echo fallback), and the
+         * flags describe the turn lifecycle.
          */
         data class ServerContent(
             val textParts: List<String>,
             val inputTranscription: String?,
+            val outputTranscription: String?,
             val turnComplete: Boolean,
             val interrupted: Boolean,
         ) : ServerMessage

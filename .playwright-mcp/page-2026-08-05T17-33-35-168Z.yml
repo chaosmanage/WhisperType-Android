@@ -1,0 +1,611 @@
+- generic [active] [ref=e1]:
+  - link "Skip to main content" [ref=e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - generic [ref=e3]:
+    - banner:
+      - generic:
+        - generic [ref=e6]:
+          - text: menu
+          - generic [ref=e7]:
+            - link [ref=e8] [cursor=pointer]:
+              - /url: /
+              - img "Gemini API" [ref=e10]
+            - generic:
+              - list:
+                - listitem
+          - generic [ref=e15]:
+            - combobox "Search" [ref=e16]
+            - generic [ref=e21]: /
+          - generic [ref=e22]:
+            - button "Appearance:" [ref=e23] [cursor=pointer]: light_mode
+            - text: light_mode dark_mode brightness_medium
+          - generic "Select your language preference." [ref=e24]:
+            - button "Language" [ref=e25] [cursor=pointer]
+          - link "Get API key" [ref=e27] [cursor=pointer]:
+            - /url: https://aistudio.google.com/apikey
+          - link "Cookbook" [ref=e28] [cursor=pointer]:
+            - /url: https://github.com/google-gemini/cookbook
+          - link "Community" [ref=e29] [cursor=pointer]:
+            - /url: https://discuss.ai.google.dev/c/gemini-api/
+        - navigation "Lower tabs" [ref=e35]:
+          - link "Docs, selected" [ref=e37] [cursor=pointer]:
+            - /url: https://ai.google.dev/gemini-api/docs
+            - text: Docs
+          - link "API reference" [ref=e39] [cursor=pointer]:
+            - /url: https://ai.google.dev/api
+          - text: arrow_drop_down
+    - generic [ref=e41]:
+      - text: filter_list close
+      - navigation "Side menu" [ref=e42]:
+        - text: arrow_back
+        - list [ref=e45]:
+          - listitem [ref=e46]:
+            - generic [ref=e47]: Get started
+          - listitem [ref=e49]:
+            - link "Overview" [ref=e50] [cursor=pointer]:
+              - /url: /gemini-api/docs
+          - listitem [ref=e52]:
+            - link "Get Started" [ref=e53] [cursor=pointer]:
+              - /url: /gemini-api/docs/get-started
+          - listitem [ref=e55]:
+            - link "API keys" [ref=e56] [cursor=pointer]:
+              - /url: /gemini-api/docs/api-key
+          - listitem [ref=e58]:
+            - link "Pricing" [ref=e59] [cursor=pointer]:
+              - /url: /gemini-api/docs/pricing
+          - listitem [ref=e61]:
+            - link "Coding agent setup" [ref=e62] [cursor=pointer]:
+              - /url: /gemini-api/docs/coding-agents
+          - listitem [ref=e64]:
+            - generic [ref=e65]: Models
+          - listitem [ref=e67]:
+            - link "All models" [ref=e68] [cursor=pointer]:
+              - /url: /gemini-api/docs/models
+          - listitem [ref=e70]:
+            - link "Latest Gemini models" [ref=e71] [cursor=pointer]:
+              - /url: /gemini-api/docs/latest-model
+          - listitem [ref=e73]:
+            - link "Nano Banana" [ref=e74] [cursor=pointer]:
+              - /url: /gemini-api/docs/image-generation
+          - listitem [ref=e76]:
+            - link "Veo" [ref=e77] [cursor=pointer]:
+              - /url: /gemini-api/docs/veo
+          - listitem [ref=e79]:
+            - link "Gemini Omni Flash" [ref=e80] [cursor=pointer]:
+              - /url: /gemini-api/docs/omni
+          - listitem [ref=e82]:
+            - link "Lyria 3" [ref=e83] [cursor=pointer]:
+              - /url: /gemini-api/docs/music-generation
+          - listitem [ref=e85]:
+            - link [ref=e86] [cursor=pointer]:
+              - /url: /gemini-api/docs/realtime-music-generation
+          - listitem [ref=e88]:
+            - link "Imagen" [ref=e89] [cursor=pointer]:
+              - /url: /gemini-api/docs/imagen
+          - listitem [ref=e91]:
+            - link "Text-to-speech" [ref=e92] [cursor=pointer]:
+              - /url: /gemini-api/docs/speech-generation
+          - listitem [ref=e94]:
+            - link "Live" [ref=e95] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api
+          - listitem [ref=e97]:
+            - link "Live Translate" [ref=e98] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api/live-translate
+          - listitem [ref=e100]:
+            - link "Embeddings" [ref=e101] [cursor=pointer]:
+              - /url: /gemini-api/docs/embeddings
+          - listitem [ref=e103]:
+            - generic [ref=e104]:
+              - text: arrow_drop_down
+              - button "Robotics " [ref=e105] [cursor=pointer]:
+                - generic [ref=e106]: Robotics
+                - text: 
+          - listitem [ref=e107]:
+            - generic [ref=e108]: Core capabilities
+          - listitem [ref=e110]:
+            - link "Text" [ref=e111] [cursor=pointer]:
+              - /url: /gemini-api/docs/text-generation
+          - listitem [ref=e113]:
+            - generic [ref=e114]:
+              - text: arrow_drop_down
+              - button "Image " [ref=e115] [cursor=pointer]:
+                - generic [ref=e116]: Image
+                - text: 
+          - listitem [ref=e117]:
+            - generic [ref=e118]:
+              - text: arrow_drop_down
+              - button "Video " [ref=e119] [cursor=pointer]:
+                - generic [ref=e120]: Video
+                - text: 
+          - listitem [ref=e121]:
+            - link "Documents" [ref=e122] [cursor=pointer]:
+              - /url: /gemini-api/docs/document-processing
+          - listitem [ref=e124]:
+            - generic [ref=e125]:
+              - text: arrow_drop_down
+              - button "Speech and audio " [ref=e126] [cursor=pointer]:
+                - generic [ref=e127]: Speech and audio
+                - text: 
+          - listitem [ref=e128]:
+            - generic [ref=e129]:
+              - text: arrow_drop_down
+              - button "Thinking " [ref=e130] [cursor=pointer]:
+                - generic [ref=e131]: Thinking
+                - text: 
+          - listitem [ref=e132]:
+            - link "Structured outputs" [ref=e133] [cursor=pointer]:
+              - /url: /gemini-api/docs/structured-output
+          - listitem [ref=e135]:
+            - link "Function calling" [ref=e136] [cursor=pointer]:
+              - /url: /gemini-api/docs/function-calling
+          - listitem [ref=e138]:
+            - link "Long context" [ref=e139] [cursor=pointer]:
+              - /url: /gemini-api/docs/long-context
+          - listitem [ref=e141]:
+            - generic [ref=e142]: Agents
+          - listitem [ref=e144]:
+            - link "Overview" [ref=e145] [cursor=pointer]:
+              - /url: /gemini-api/docs/agents
+          - listitem [ref=e147]:
+            - link "Quickstart" [ref=e148] [cursor=pointer]:
+              - /url: /gemini-api/docs/managed-agents-quickstart
+          - listitem [ref=e150]:
+            - link "Antigravity Agent" [ref=e151] [cursor=pointer]:
+              - /url: /gemini-api/docs/antigravity-agent
+          - listitem [ref=e154]:
+            - link "Building managed agents" [ref=e155] [cursor=pointer]:
+              - /url: /gemini-api/docs/custom-agents
+          - listitem [ref=e157]:
+            - link "Environments" [ref=e158] [cursor=pointer]:
+              - /url: /gemini-api/docs/agent-environment
+          - listitem [ref=e160]:
+            - link "Hooks" [ref=e161] [cursor=pointer]:
+              - /url: /gemini-api/docs/agent-hooks
+          - listitem [ref=e163]:
+            - link "Deep Research Agent" [ref=e164] [cursor=pointer]:
+              - /url: /gemini-api/docs/deep-research
+          - listitem [ref=e167]:
+            - generic [ref=e168]: Tools
+          - listitem [ref=e170]:
+            - link "Overview" [ref=e171] [cursor=pointer]:
+              - /url: /gemini-api/docs/tools
+          - listitem [ref=e173]:
+            - link "Google Search" [ref=e174] [cursor=pointer]:
+              - /url: /gemini-api/docs/google-search
+          - listitem [ref=e176]:
+            - link "Google Maps" [ref=e177] [cursor=pointer]:
+              - /url: /gemini-api/docs/maps-grounding
+          - listitem [ref=e179]:
+            - link "Code execution" [ref=e180] [cursor=pointer]:
+              - /url: /gemini-api/docs/code-execution
+          - listitem [ref=e182]:
+            - link "URL context" [ref=e183] [cursor=pointer]:
+              - /url: /gemini-api/docs/url-context
+          - listitem [ref=e185]:
+            - link "Computer Use" [ref=e186] [cursor=pointer]:
+              - /url: /gemini-api/docs/computer-use
+          - listitem [ref=e189]:
+            - link "File Search" [ref=e190] [cursor=pointer]:
+              - /url: /gemini-api/docs/file-search
+          - listitem [ref=e192]:
+            - link "Combine Tools and Function calling" [ref=e193] [cursor=pointer]:
+              - /url: /gemini-api/docs/tool-combination
+          - listitem [ref=e196]:
+            - generic [ref=e197]: Live API
+          - listitem [ref=e199]:
+            - link "Overview" [ref=e200] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api
+          - listitem [ref=e203]:
+            - generic [ref=e204]:
+              - text: arrow_drop_down
+              - button "Get started " [ref=e205] [cursor=pointer]:
+                - generic [ref=e206]: Get started
+                - text: 
+          - listitem [ref=e207]:
+            - link "Capabilities" [ref=e208] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api/capabilities
+          - listitem [ref=e210]:
+            - link "Live Translation" [ref=e211] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api/live-translate
+          - listitem [ref=e213]:
+            - link "Tool use" [ref=e214] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api/tools
+          - listitem [ref=e216]:
+            - link "Session management" [ref=e217] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api/session-management
+          - listitem [ref=e219]:
+            - link "Ephemeral tokens" [ref=e220] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api/ephemeral-tokens
+          - listitem [ref=e223]:
+            - link "Best practices" [ref=e224] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api/best-practices
+          - listitem [ref=e226]:
+            - generic [ref=e227]: Optimization
+          - listitem [ref=e229]:
+            - link "Overview" [ref=e230] [cursor=pointer]:
+              - /url: /gemini-api/docs/optimization
+          - listitem [ref=e232]:
+            - link "Batch API" [ref=e233] [cursor=pointer]:
+              - /url: /gemini-api/docs/batch-api
+          - listitem [ref=e235]:
+            - link "Webhooks" [ref=e236] [cursor=pointer]:
+              - /url: /gemini-api/docs/webhooks
+          - listitem [ref=e239]:
+            - link "Flex inference" [ref=e240] [cursor=pointer]:
+              - /url: /gemini-api/docs/flex-inference
+          - listitem [ref=e243]:
+            - link "Priority inference" [ref=e244] [cursor=pointer]:
+              - /url: /gemini-api/docs/priority-inference
+          - listitem [ref=e247]:
+            - link "Context caching" [ref=e248] [cursor=pointer]:
+              - /url: /gemini-api/docs/caching
+          - listitem [ref=e250]:
+            - generic [ref=e251]: Guides
+          - listitem [ref=e253]:
+            - link "Interactions API" [ref=e254] [cursor=pointer]:
+              - /url: /gemini-api/docs/interactions-overview
+          - listitem [ref=e256]:
+            - link "Streaming" [ref=e257] [cursor=pointer]:
+              - /url: /gemini-api/docs/streaming
+          - listitem [ref=e259]:
+            - link "Background execution" [ref=e260] [cursor=pointer]:
+              - /url: /gemini-api/docs/background-execution
+          - listitem [ref=e262]:
+            - generic [ref=e263]:
+              - text: arrow_drop_down
+              - button "File input " [ref=e264] [cursor=pointer]:
+                - generic [ref=e265]: File input
+                - text: 
+          - listitem [ref=e266]:
+            - link "OpenAI compatibility" [ref=e267] [cursor=pointer]:
+              - /url: /gemini-api/docs/openai
+          - listitem [ref=e269]:
+            - link "Media resolution" [ref=e270] [cursor=pointer]:
+              - /url: /gemini-api/docs/media-resolution
+          - listitem [ref=e272]:
+            - link "Token counting" [ref=e273] [cursor=pointer]:
+              - /url: /gemini-api/docs/tokens
+          - listitem [ref=e275]:
+            - link "Prompt engineering" [ref=e276] [cursor=pointer]:
+              - /url: /gemini-api/docs/prompting-strategies
+          - listitem [ref=e278]:
+            - generic [ref=e279]:
+              - text: arrow_drop_down
+              - button "Logs and datasets " [ref=e280] [cursor=pointer]:
+                - generic [ref=e281]: Logs and datasets
+                - text: 
+          - listitem [ref=e282]:
+            - generic [ref=e283]:
+              - text: arrow_drop_down
+              - button "Safety " [ref=e284] [cursor=pointer]:
+                - generic [ref=e285]: Safety
+                - text: 
+          - listitem [ref=e286]:
+            - generic [ref=e287]:
+              - text: arrow_drop_down
+              - button "Frameworks " [ref=e288] [cursor=pointer]:
+                - generic [ref=e289]: Frameworks
+                - text: 
+          - listitem [ref=e290]:
+            - generic [ref=e291]: Resources
+          - listitem [ref=e293]:
+            - link "Release notes" [ref=e294] [cursor=pointer]:
+              - /url: /gemini-api/docs/changelog
+          - listitem [ref=e296]:
+            - link "Deprecations" [ref=e297] [cursor=pointer]:
+              - /url: /gemini-api/docs/deprecations
+          - listitem [ref=e299]:
+            - link "Libraries" [ref=e300] [cursor=pointer]:
+              - /url: /gemini-api/docs/libraries
+          - listitem [ref=e302]:
+            - generic [ref=e303]:
+              - text: arrow_drop_down
+              - button "Migration " [ref=e304] [cursor=pointer]:
+                - generic [ref=e305]: Migration
+                - text: 
+          - listitem [ref=e306]:
+            - link "Rate limits" [ref=e307] [cursor=pointer]:
+              - /url: /gemini-api/docs/rate-limits
+          - listitem [ref=e309]:
+            - link "Billing info" [ref=e310] [cursor=pointer]:
+              - /url: /gemini-api/docs/billing
+          - listitem [ref=e312]:
+            - link "API troubleshooting" [ref=e313] [cursor=pointer]:
+              - /url: /gemini-api/docs/troubleshooting
+          - listitem [ref=e315]:
+            - link "API errors" [ref=e316] [cursor=pointer]:
+              - /url: /gemini-api/docs/api-errors
+          - listitem [ref=e318]:
+            - link "Status" [ref=e319] [cursor=pointer]:
+              - /url: https://aistudio.google.com/status
+              - generic [ref=e321]: open_in_new
+          - listitem [ref=e322]:
+            - link "Partner and library integrations" [ref=e323] [cursor=pointer]:
+              - /url: /gemini-api/docs/partner-integration
+          - listitem [ref=e325]:
+            - generic [ref=e326]:
+              - text: arrow_drop_down
+              - button "Google AI Studio " [ref=e327] [cursor=pointer]:
+                - generic [ref=e328]: Google AI Studio
+                - text: 
+          - listitem [ref=e329]:
+            - generic [ref=e330]:
+              - text: arrow_drop_down
+              - button "Google Cloud Platform " [ref=e331] [cursor=pointer]:
+                - generic [ref=e332]: Google Cloud Platform
+                - text: 
+          - listitem [ref=e333]:
+            - generic [ref=e334]: Policies
+          - listitem [ref=e336]:
+            - link "Terms of service" [ref=e337] [cursor=pointer]:
+              - /url: /gemini-api/terms
+          - listitem [ref=e339]:
+            - link "Available regions" [ref=e340] [cursor=pointer]:
+              - /url: /gemini-api/docs/available-regions
+          - listitem [ref=e342]:
+            - link "Abuse monitoring" [ref=e343] [cursor=pointer]:
+              - /url: /gemini-api/docs/usage-policies
+          - listitem [ref=e345]:
+            - link "Feedback information" [ref=e346] [cursor=pointer]:
+              - /url: /gemini-api/docs/feedback-policies
+    - button "Hide side navigation" [expanded] [ref=e348] [cursor=pointer]:
+      - generic [ref=e349]: chevron_left
+    - generic [ref=e350]:
+      - main [ref=e351]:
+        - navigation "On this page" [ref=e354]:
+          - list [ref=e355]:
+            - listitem [ref=e356]:
+              - heading "On this page" [level=2] [ref=e357]
+            - listitem [ref=e359]:
+              - link "Use cases" [ref=e360] [cursor=pointer]:
+                - /url: "#use-cases"
+            - listitem [ref=e362]:
+              - link "Key features" [ref=e363] [cursor=pointer]:
+                - /url: "#key-features"
+            - listitem [ref=e365]:
+              - link "Technical specifications" [ref=e366] [cursor=pointer]:
+                - /url: "#technical-specifications"
+            - listitem [ref=e368]:
+              - link "Choose an implementation approach" [ref=e369] [cursor=pointer]:
+                - /url: "#implementation-approach"
+            - listitem [ref=e371]:
+              - link "Get started" [ref=e372] [cursor=pointer]:
+                - /url: "#get-started"
+            - listitem [ref=e374]:
+              - link "Partner integrations" [ref=e375] [cursor=pointer]:
+                - /url: "#partner-integrations"
+        - generic [ref=e377]:
+          - article [ref=e378]:
+            - generic [ref=e381]:
+              - text: The
+              - link "Interactions API" [ref=e382] [cursor=pointer]:
+                - /url: /gemini-api/docs/interactions-overview
+              - text: is now generally available. We recommend using this API for access to all the latest features and models.
+            - navigation [ref=e383]:
+              - list "Breadcrumb" [ref=e384]:
+                - listitem [ref=e385]:
+                  - link "Home" [ref=e386] [cursor=pointer]:
+                    - /url: https://ai.google.dev/
+                - listitem [ref=e387]:
+                  - generic [ref=e388]: chevron_right
+                  - link "Gemini API" [ref=e389] [cursor=pointer]:
+                    - /url: https://ai.google.dev/gemini-api
+                - listitem [ref=e390]:
+                  - generic [ref=e391]: chevron_right
+                  - link "Docs" [ref=e392] [cursor=pointer]:
+                    - /url: https://ai.google.dev/gemini-api/docs
+            - heading [level=1] [ref=e393]:
+              - text: Gemini Live API overview
+              - group "LLM Tools" [ref=e396]:
+                - button "Copy page as markdown" [ref=e398] [cursor=pointer]:
+                  - generic [ref=e399]: content_copy
+                - button "More LLM Tools options" [ref=e402] [cursor=pointer]: arrow_drop_down
+            - text: expand_more more_horiz
+            - generic [ref=e403]:
+              - paragraph
+              - paragraph
+              - complementary [ref=e404]:
+                - strong [ref=e405]: "Preview:"
+                - generic [ref=e406]:
+                  - text: The Live API is in
+                  - link "Preview" [ref=e407] [cursor=pointer]:
+                    - /url: https://cloud.google.com/products#product-launch-stages
+                  - text: .
+              - paragraph [ref=e408]: The Live API enables low-latency, real-time voice and vision interactions with Gemini. It processes continuous streams of audio, images, and text to deliver immediate, human-like spoken responses, creating a natural conversational experience for your users.
+              - paragraph [ref=e409]:
+                - img "Live API Overview" [ref=e410]
+              - generic [ref=e411]:
+                - link "Try the Live API in Google AI Studio" [ref=e412] [cursor=pointer]:
+                  - /url: https://aistudio.google.com/live
+                  - text: Try the Live API in Google AI Studio
+                  - generic: mic
+                - link "Clone example apps from GitHub" [ref=e413] [cursor=pointer]:
+                  - /url: https://github.com/google-gemini/gemini-live-api-examples
+                  - text: Clone example apps from GitHub
+                  - generic: code
+                - link "Use coding agent skills" [ref=e414] [cursor=pointer]:
+                  - /url: /gemini-api/docs/coding-agents
+                  - text: Use coding agent skills
+                  - generic: terminal
+              - heading "Use cases" [level=2] [ref=e415]
+              - paragraph [ref=e416]: "Live API can be used to build real-time voice agents for a variety of industries, including:"
+              - list [ref=e417]:
+                - listitem [ref=e418]:
+                  - strong [ref=e419]: "E-commerce and retail:"
+                  - text: Shopping assistants that offer personalized recommendations and support agents that resolve customer issues.
+                - listitem [ref=e420]:
+                  - strong [ref=e421]: "Gaming:"
+                  - text: Interactive non-player characters (NPCs), in-game help assistants, and real-time translation of in-game content.
+                - listitem [ref=e422]:
+                  - strong [ref=e423]: "Next-gen interfaces:"
+                  - text: Voice- and video-enabled experiences in robotics, smart glasses, and vehicles.
+                - listitem [ref=e424]:
+                  - strong [ref=e425]: "Healthcare:"
+                  - text: Health companions for patient support and education.
+                - listitem [ref=e426]:
+                  - strong [ref=e427]: "Financial services:"
+                  - text: AI advisors for wealth management and investment guidance.
+                - listitem [ref=e428]:
+                  - strong [ref=e429]: "Education:"
+                  - text: AI mentors and learner companions that provide personalized instruction and feedback.
+                - listitem [ref=e430]:
+                  - strong [ref=e431]: "Translation and localization:"
+                  - text: Real-time, low-latency translation of spoken conversations, enabling seamless multilingual communication.
+              - heading "Key features" [level=2] [ref=e432]
+              - paragraph [ref=e433]: "Live API offers a comprehensive set of features for building robust voice agents:"
+              - list [ref=e434]:
+                - listitem [ref=e435]:
+                  - link [ref=e436] [cursor=pointer]:
+                    - /url: /gemini-api/docs/live-guide#supported-languages
+                    - strong [ref=e437]: Multilingual support
+                  - text: ": Converse in 70 supported languages."
+                - listitem [ref=e438]:
+                  - link [ref=e439] [cursor=pointer]:
+                    - /url: /gemini-api/docs/live-guide#interruptions
+                    - strong [ref=e440]: Barge-in
+                  - text: ": Users can interrupt the model at any time for responsive interactions."
+                - listitem [ref=e441]:
+                  - link [ref=e442] [cursor=pointer]:
+                    - /url: /gemini-api/docs/live-tools
+                    - strong [ref=e443]: Tool use
+                  - text: ": Integrates tools like function calling and Google Search for dynamic interactions."
+                - listitem [ref=e444]:
+                  - link [ref=e445] [cursor=pointer]:
+                    - /url: /gemini-api/docs/live-guide#audio-transcription
+                    - strong [ref=e446]: Audio transcriptions
+                  - text: ": Provides text transcripts of both user input and model output."
+                - listitem [ref=e447]:
+                  - link [ref=e448] [cursor=pointer]:
+                    - /url: /gemini-api/docs/live-guide#proactive-audio
+                    - strong [ref=e449]: Proactive audio
+                  - text: ": Lets you control when the model responds and in what contexts."
+                - listitem [ref=e450]:
+                  - link [ref=e451] [cursor=pointer]:
+                    - /url: /gemini-api/docs/live-guide#affective-dialog
+                    - strong [ref=e452]: Affective dialog
+                  - text: ": Adapts response style and tone to match the user's input expression."
+                - listitem [ref=e453]:
+                  - link [ref=e454] [cursor=pointer]:
+                    - /url: /gemini-api/docs/live-api/live-translate
+                    - strong [ref=e455]: Live Translation
+                  - text: ": Real-time voice-to-voice translation in 70+ languages."
+              - heading "Technical specifications" [level=2] [ref=e456]
+              - paragraph [ref=e457]: "The following table outlines the technical specifications for the Live API:"
+              - table [ref=e459]:
+                - rowgroup [ref=e460]:
+                  - row [ref=e461]:
+                    - columnheader "Category" [ref=e462]
+                    - columnheader "Details" [ref=e463]
+                - rowgroup [ref=e464]:
+                  - row [ref=e465]:
+                    - cell "Input modalities" [ref=e466]
+                    - cell "Audio (raw 16-bit PCM audio, 16kHz, little-endian), images (JPEG <= 1FPS), text" [ref=e467]
+                  - row [ref=e468]:
+                    - cell "Output modalities" [ref=e469]
+                    - cell "Audio (raw 16-bit PCM audio, 24kHz, little-endian)" [ref=e470]
+                  - row [ref=e471]:
+                    - cell "Protocol" [ref=e472]
+                    - cell "Stateful WebSocket connection (WSS)" [ref=e473]
+              - heading "Choose an implementation approach" [level=2] [ref=e474]
+              - paragraph [ref=e475]: "When integrating with Live API, you'll need to choose one of the following implementation approaches:"
+              - list [ref=e476]:
+                - listitem [ref=e477]:
+                  - strong [ref=e478]: Server-to-server
+                  - text: ": Your backend connects to the Live API using"
+                  - link "WebSockets" [ref=e479] [cursor=pointer]:
+                    - /url: https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API
+                  - text: . Typically, your client sends stream data (audio, video, text) to your server, which then forwards it to the Live API.
+                - listitem [ref=e480]:
+                  - strong [ref=e481]: Client-to-server
+                  - text: ": Your frontend code connects directly to the Live API using"
+                  - link "WebSockets" [ref=e482] [cursor=pointer]:
+                    - /url: https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API
+                  - text: to stream data, bypassing your backend.
+              - complementary [ref=e483]:
+                - strong [ref=e484]: "Note:"
+                - generic [ref=e485]:
+                  - text: Client-to-server generally offers better performance for streaming audio and video, since it bypasses the need to send the stream to your backend first. It's also easier to set up since you don't need to implement a proxy that sends data from your client to your server and then your server to the API. However, for production environments, in order to mitigate security risks, we recommend using
+                  - link "ephemeral tokens" [ref=e486] [cursor=pointer]:
+                    - /url: /gemini-api/docs/ephemeral-tokens
+                  - text: instead of standard API keys.
+              - heading "Get started" [level=2] [ref=e487]
+              - paragraph [ref=e488]: "Select the guide that matches your development environment:"
+              - generic [ref=e489]:
+                - generic [ref=e493]:
+                  - generic [ref=e494]: Server-to-server
+                  - heading [level=3] [ref=e495]:
+                    - link "GenAI SDK tutorial" [ref=e496] [cursor=pointer]:
+                      - /url: /gemini-api/docs/live-api/get-started-sdk
+                  - paragraph [ref=e497]: Connect to the Gemini Live API using the GenAI SDK to build a real-time multimodal application with a Python backend.
+                - generic [ref=e501]:
+                  - generic [ref=e502]: Client-to-server
+                  - heading [level=3] [ref=e503]:
+                    - link "WebSocket tutorial" [ref=e504] [cursor=pointer]:
+                      - /url: /gemini-api/docs/live-api/get-started-websocket
+                  - paragraph [ref=e505]: Connect to the Gemini Live API using WebSockets to build a real-time multimodal application with a JavaScript frontend and ephemeral tokens.
+                - generic [ref=e509]:
+                  - generic [ref=e510]: Agent development kit
+                  - heading [level=3] [ref=e511]:
+                    - link "ADK tutorial" [ref=e512] [cursor=pointer]:
+                      - /url: https://google.github.io/adk-docs/streaming/
+                  - paragraph [ref=e513]: Create an agent and use the Agent Development Kit (ADK) Streaming to enable voice and video communication.
+              - generic [ref=e514]:
+                - heading "Partner integrations" [level=2] [ref=e515]
+                - paragraph [ref=e516]: To streamline the development of real-time audio and video apps, you can use a third-party integration that supports the Gemini Live API over WebRTC or WebSockets.
+                - generic [ref=e517]:
+                  - link [ref=e518] [cursor=pointer]:
+                    - /url: https://docs.livekit.io/agents/models/realtime/plugins/gemini/
+                    - paragraph [ref=e519]: LiveKit
+                    - paragraph [ref=e520]: Use the Gemini Live API with LiveKit Agents.
+                  - link [ref=e521] [cursor=pointer]:
+                    - /url: https://docs.pipecat.ai/guides/features/gemini-live
+                    - paragraph [ref=e522]: Pipecat by Daily
+                    - paragraph [ref=e523]: Create a real-time AI chatbot using Gemini Live and Pipecat.
+                  - link [ref=e524] [cursor=pointer]:
+                    - /url: https://docs.fishjam.io/tutorials/gemini-live-integration
+                    - paragraph [ref=e525]: Fishjam by Software Mansion
+                    - paragraph [ref=e526]: Create live video and audio streaming applications with Fishjam.
+                  - link [ref=e527] [cursor=pointer]:
+                    - /url: https://visionagents.ai/integrations/gemini
+                    - paragraph [ref=e528]: Vision Agents by Stream
+                    - paragraph [ref=e529]: Build real-time voice and video AI applications with Vision Agents.
+                  - link [ref=e530] [cursor=pointer]:
+                    - /url: https://voximplant.com/products/gemini-client
+                    - paragraph [ref=e531]: Voximplant
+                    - paragraph [ref=e532]: Connect inbound and outbound calls to Live API with Voximplant.
+                  - link [ref=e533] [cursor=pointer]:
+                    - /url: https://docs.agora.io/en/conversational-ai/models/mllm/gemini
+                    - paragraph [ref=e534]: Agora
+                    - paragraph [ref=e535]: Build real-time conversational AI applications with Agora.
+                  - link [ref=e536] [cursor=pointer]:
+                    - /url: https://firebase.google.com/docs/ai-logic/live-api?api=dev
+                    - paragraph [ref=e537]: Firebase AI SDK
+                    - paragraph [ref=e538]: Get started with the Gemini Live API using Firebase AI Logic.
+            - button "Send feedback" [ref=e540] [cursor=pointer]
+          - generic [ref=e541]:
+            - paragraph [ref=e542]:
+              - text: Except as otherwise noted, the content of this page is licensed under the
+              - link "Creative Commons Attribution 4.0 License" [ref=e543] [cursor=pointer]:
+                - /url: https://creativecommons.org/licenses/by/4.0/
+              - text: ", and code samples are licensed under the"
+              - link "Apache 2.0 License" [ref=e544] [cursor=pointer]:
+                - /url: https://www.apache.org/licenses/LICENSE-2.0
+              - text: . For details, see the
+              - link "Google Developers Site Policies" [ref=e545] [cursor=pointer]:
+                - /url: https://developers.google.com/site-policies
+              - text: . Java is a registered trademark of Oracle and/or its affiliates.
+            - paragraph [ref=e546]: Last updated 2026-06-12 UTC.
+      - generic:
+        - navigation "Footer links"
+      - navigation "Utility links" [ref=e550]:
+        - list [ref=e551]:
+          - listitem [ref=e552]:
+            - link "Terms" [ref=e553] [cursor=pointer]:
+              - /url: //policies.google.com/terms
+          - listitem [ref=e554]:
+            - text: "|"
+            - link "Privacy" [ref=e555] [cursor=pointer]:
+              - /url: //policies.google.com/privacy
+          - text: "|"
+        - generic "Select your language preference." [ref=e556]:
+          - button "Language" [ref=e557] [cursor=pointer]

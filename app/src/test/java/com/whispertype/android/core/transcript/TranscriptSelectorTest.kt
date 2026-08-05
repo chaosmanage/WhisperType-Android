@@ -3,6 +3,7 @@ package com.whispertype.android.core.transcript
 import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.core.model.ResultCandidate
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -97,6 +98,53 @@ class TranscriptSelectorTest {
         )
         for (p in preambles) {
             assertEquals("should reject preamble '$p'", TranscriptSelection.None, selector.select(listOf(candidate(raw = p))))
+        }
+    }
+
+    @Test
+    fun `rejects assistant greetings from the live model echo`() {
+        val greetings = listOf(
+            "Hello! I'm ready to help.",
+            "Hi there! How can I help you today?",
+            "Hello I'm WhisperType.",
+            "Hey there, what would you like to talk about?",
+            "Good morning! What can I help you with?",
+        )
+        for (g in greetings) {
+            assertEquals("should reject greeting '$g'", TranscriptSelection.None, selector.select(listOf(candidate(raw = g))))
+        }
+    }
+
+    @Test
+    fun `rejects assistant acknowledgments of the dictation prime`() {
+        val acks = listOf(
+            "Understood. Ready",
+            "Understood. Ready to begin.",
+            "Ready to begin.",
+            "I'm ready.",
+            "Let me know when you're ready.",
+            "Go ahead.",
+            "Understood, I will echo your words.",
+            "I understand.",
+            "I understand",
+            "Got it.",
+            "I see.",
+            "No problem.",
+        )
+        for (a in acks) {
+            assertEquals("should reject acknowledgment '$a'", TranscriptSelection.None, selector.select(listOf(candidate(raw = a))))
+        }
+    }
+
+    @Test
+    fun `preserves legitimate sentences that start like an acknowledgment`() {
+        val results = listOf(
+            "I understand the instructions clearly.",
+            "I see the difference between the two options.",
+            "Got it from the store yesterday.",
+        )
+        for (r in results) {
+            assertNotEquals("should accept sentence '$r'", TranscriptSelection.None, selector.select(listOf(candidate(raw = r))))
         }
     }
 

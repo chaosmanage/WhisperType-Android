@@ -17,6 +17,9 @@ interface GeminiLiveSession {
     /** Sends one audio chunk. Must not be called before [awaitReady] returns. */
     suspend fun sendAudio(chunk: AudioChunk): SendResult
 
+    /** Appends one client text turn to the open turn (no turnComplete). */
+    suspend fun sendTextTurn(text: String)
+
     /** Sends the single activity-end boundary. */
     suspend fun endActivity()
 

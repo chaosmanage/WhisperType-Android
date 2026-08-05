@@ -1,0 +1,559 @@
+- generic [active] [ref=e1]:
+  - link "Skip to main content" [ref=e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - generic [ref=e3]:
+    - banner:
+      - generic:
+        - generic [ref=e6]:
+          - text: menu
+          - generic [ref=e7]:
+            - link [ref=e8] [cursor=pointer]:
+              - /url: /
+              - img "Gemini API" [ref=e10]
+            - generic:
+              - list:
+                - listitem
+          - generic [ref=e15]:
+            - combobox "Search" [ref=e16]
+            - generic [ref=e21]: /
+          - generic [ref=e22]:
+            - button "Appearance:" [ref=e23] [cursor=pointer]: light_mode
+            - text: light_mode dark_mode brightness_medium
+          - generic "Select your language preference." [ref=e24]:
+            - button "Language" [ref=e25] [cursor=pointer]
+          - link "Get API key" [ref=e27] [cursor=pointer]:
+            - /url: https://aistudio.google.com/apikey
+          - link "Cookbook" [ref=e28] [cursor=pointer]:
+            - /url: https://github.com/google-gemini/cookbook
+          - link "Community" [ref=e29] [cursor=pointer]:
+            - /url: https://discuss.ai.google.dev/c/gemini-api/
+        - navigation "Lower tabs" [ref=e35]:
+          - link "Docs, selected" [ref=e37] [cursor=pointer]:
+            - /url: https://ai.google.dev/gemini-api/docs
+            - text: Docs
+          - link "API reference" [ref=e39] [cursor=pointer]:
+            - /url: https://ai.google.dev/api
+          - button "More Options" [ref=e41] [cursor=pointer]: arrow_drop_down More
+    - generic [ref=e43]:
+      - text: filter_list close
+      - navigation "Side menu" [ref=e44]:
+        - text: arrow_back
+        - list [ref=e47]:
+          - listitem [ref=e48]:
+            - generic [ref=e49]: Get started
+          - listitem [ref=e51]:
+            - link "Overview" [ref=e52] [cursor=pointer]:
+              - /url: /gemini-api/docs
+          - listitem [ref=e54]:
+            - link "Get Started" [ref=e55] [cursor=pointer]:
+              - /url: /gemini-api/docs/get-started
+          - listitem [ref=e57]:
+            - link "API keys" [ref=e58] [cursor=pointer]:
+              - /url: /gemini-api/docs/api-key
+          - listitem [ref=e60]:
+            - link "Pricing" [ref=e61] [cursor=pointer]:
+              - /url: /gemini-api/docs/pricing
+          - listitem [ref=e63]:
+            - link "Coding agent setup" [ref=e64] [cursor=pointer]:
+              - /url: /gemini-api/docs/coding-agents
+          - listitem [ref=e66]:
+            - generic [ref=e67]: Models
+          - listitem [ref=e69]:
+            - link "All models" [ref=e70] [cursor=pointer]:
+              - /url: /gemini-api/docs/models
+          - listitem [ref=e72]:
+            - link "Latest Gemini models" [ref=e73] [cursor=pointer]:
+              - /url: /gemini-api/docs/latest-model
+          - listitem [ref=e75]:
+            - link "Nano Banana" [ref=e76] [cursor=pointer]:
+              - /url: /gemini-api/docs/image-generation
+          - listitem [ref=e78]:
+            - link "Veo" [ref=e79] [cursor=pointer]:
+              - /url: /gemini-api/docs/veo
+          - listitem [ref=e81]:
+            - link "Gemini Omni Flash" [ref=e82] [cursor=pointer]:
+              - /url: /gemini-api/docs/omni
+          - listitem [ref=e84]:
+            - link "Lyria 3" [ref=e85] [cursor=pointer]:
+              - /url: /gemini-api/docs/music-generation
+          - listitem [ref=e87]:
+            - link "Lyria RealTime" [ref=e88] [cursor=pointer]:
+              - /url: /gemini-api/docs/realtime-music-generation
+          - listitem [ref=e90]:
+            - link "Imagen" [ref=e91] [cursor=pointer]:
+              - /url: /gemini-api/docs/imagen
+          - listitem [ref=e93]:
+            - link "Text-to-speech" [ref=e94] [cursor=pointer]:
+              - /url: /gemini-api/docs/speech-generation
+          - listitem [ref=e96]:
+            - link "Live" [ref=e97] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api
+          - listitem [ref=e99]:
+            - link "Live Translate" [ref=e100] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api/live-translate
+          - listitem [ref=e102]:
+            - link "Embeddings" [ref=e103] [cursor=pointer]:
+              - /url: /gemini-api/docs/embeddings
+          - listitem [ref=e105]:
+            - generic [ref=e106]:
+              - text: arrow_drop_down
+              - button "Robotics " [ref=e107] [cursor=pointer]:
+                - generic [ref=e108]: Robotics
+                - text: 
+          - listitem [ref=e109]:
+            - generic [ref=e110]: Core capabilities
+          - listitem [ref=e112]:
+            - link "Text" [ref=e113] [cursor=pointer]:
+              - /url: /gemini-api/docs/text-generation
+          - listitem [ref=e115]:
+            - generic [ref=e116]:
+              - text: arrow_drop_down
+              - button "Image " [ref=e117] [cursor=pointer]:
+                - generic [ref=e118]: Image
+                - text: 
+          - listitem [ref=e119]:
+            - generic [ref=e120]:
+              - text: arrow_drop_down
+              - button "Video " [ref=e121] [cursor=pointer]:
+                - generic [ref=e122]: Video
+                - text: 
+          - listitem [ref=e123]:
+            - link "Documents" [ref=e124] [cursor=pointer]:
+              - /url: /gemini-api/docs/document-processing
+          - listitem [ref=e126]:
+            - generic [ref=e127]:
+              - text: arrow_drop_down
+              - button "Speech and audio " [ref=e128] [cursor=pointer]:
+                - generic [ref=e129]: Speech and audio
+                - text: 
+          - listitem [ref=e130]:
+            - generic [ref=e131]:
+              - text: arrow_drop_down
+              - button "Thinking " [ref=e132] [cursor=pointer]:
+                - generic [ref=e133]: Thinking
+                - text: 
+          - listitem [ref=e134]:
+            - link "Structured outputs" [ref=e135] [cursor=pointer]:
+              - /url: /gemini-api/docs/structured-output
+          - listitem [ref=e137]:
+            - link "Function calling" [ref=e138] [cursor=pointer]:
+              - /url: /gemini-api/docs/function-calling
+          - listitem [ref=e140]:
+            - link "Long context" [ref=e141] [cursor=pointer]:
+              - /url: /gemini-api/docs/long-context
+          - listitem [ref=e143]:
+            - generic [ref=e144]: Agents
+          - listitem [ref=e146]:
+            - link "Overview" [ref=e147] [cursor=pointer]:
+              - /url: /gemini-api/docs/agents
+          - listitem [ref=e149]:
+            - link "Quickstart" [ref=e150] [cursor=pointer]:
+              - /url: /gemini-api/docs/managed-agents-quickstart
+          - listitem [ref=e152]:
+            - link "Antigravity Agent" [ref=e153] [cursor=pointer]:
+              - /url: /gemini-api/docs/antigravity-agent
+          - listitem [ref=e156]:
+            - link "Building managed agents" [ref=e157] [cursor=pointer]:
+              - /url: /gemini-api/docs/custom-agents
+          - listitem [ref=e159]:
+            - link "Environments" [ref=e160] [cursor=pointer]:
+              - /url: /gemini-api/docs/agent-environment
+          - listitem [ref=e162]:
+            - link "Hooks" [ref=e163] [cursor=pointer]:
+              - /url: /gemini-api/docs/agent-hooks
+          - listitem [ref=e165]:
+            - link "Deep Research Agent" [ref=e166] [cursor=pointer]:
+              - /url: /gemini-api/docs/deep-research
+          - listitem [ref=e169]:
+            - generic [ref=e170]: Tools
+          - listitem [ref=e172]:
+            - link "Overview" [ref=e173] [cursor=pointer]:
+              - /url: /gemini-api/docs/tools
+          - listitem [ref=e175]:
+            - link "Google Search" [ref=e176] [cursor=pointer]:
+              - /url: /gemini-api/docs/google-search
+          - listitem [ref=e178]:
+            - link "Google Maps" [ref=e179] [cursor=pointer]:
+              - /url: /gemini-api/docs/maps-grounding
+          - listitem [ref=e181]:
+            - link "Code execution" [ref=e182] [cursor=pointer]:
+              - /url: /gemini-api/docs/code-execution
+          - listitem [ref=e184]:
+            - link "URL context" [ref=e185] [cursor=pointer]:
+              - /url: /gemini-api/docs/url-context
+          - listitem [ref=e187]:
+            - link "Computer Use" [ref=e188] [cursor=pointer]:
+              - /url: /gemini-api/docs/computer-use
+          - listitem [ref=e191]:
+            - link "File Search" [ref=e192] [cursor=pointer]:
+              - /url: /gemini-api/docs/file-search
+          - listitem [ref=e194]:
+            - link "Combine Tools and Function calling" [ref=e195] [cursor=pointer]:
+              - /url: /gemini-api/docs/tool-combination
+          - listitem [ref=e198]:
+            - generic [ref=e199]: Live API
+          - listitem [ref=e201]:
+            - link "Overview" [ref=e202] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api
+          - listitem [ref=e205]:
+            - generic [ref=e206]:
+              - text: arrow_drop_down
+              - button "Get started " [ref=e207] [cursor=pointer]:
+                - generic [ref=e208]: Get started
+                - text: 
+          - listitem [ref=e209]:
+            - link "Capabilities" [ref=e210] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api/capabilities
+          - listitem [ref=e212]:
+            - link "Live Translation" [ref=e213] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api/live-translate
+          - listitem [ref=e215]:
+            - link "Tool use" [ref=e216] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api/tools
+          - listitem [ref=e218]:
+            - link "Session management" [ref=e219] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api/session-management
+          - listitem [ref=e221]:
+            - link "Ephemeral tokens" [ref=e222] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api/ephemeral-tokens
+          - listitem [ref=e225]:
+            - link "Best practices" [ref=e226] [cursor=pointer]:
+              - /url: /gemini-api/docs/live-api/best-practices
+          - listitem [ref=e228]:
+            - generic [ref=e229]: Optimization
+          - listitem [ref=e231]:
+            - link "Overview" [ref=e232] [cursor=pointer]:
+              - /url: /gemini-api/docs/optimization
+          - listitem [ref=e234]:
+            - link "Batch API" [ref=e235] [cursor=pointer]:
+              - /url: /gemini-api/docs/batch-api
+          - listitem [ref=e237]:
+            - link "Webhooks" [ref=e238] [cursor=pointer]:
+              - /url: /gemini-api/docs/webhooks
+          - listitem [ref=e241]:
+            - link "Flex inference" [ref=e242] [cursor=pointer]:
+              - /url: /gemini-api/docs/flex-inference
+          - listitem [ref=e245]:
+            - link "Priority inference" [ref=e246] [cursor=pointer]:
+              - /url: /gemini-api/docs/priority-inference
+          - listitem [ref=e249]:
+            - link "Context caching" [ref=e250] [cursor=pointer]:
+              - /url: /gemini-api/docs/caching
+          - listitem [ref=e252]:
+            - generic [ref=e253]: Guides
+          - listitem [ref=e255]:
+            - link "Interactions API" [ref=e256] [cursor=pointer]:
+              - /url: /gemini-api/docs/interactions-overview
+          - listitem [ref=e258]:
+            - link "Streaming" [ref=e259] [cursor=pointer]:
+              - /url: /gemini-api/docs/streaming
+          - listitem [ref=e261]:
+            - link "Background execution" [ref=e262] [cursor=pointer]:
+              - /url: /gemini-api/docs/background-execution
+          - listitem [ref=e264]:
+            - generic [ref=e265]:
+              - text: arrow_drop_down
+              - button "File input " [ref=e266] [cursor=pointer]:
+                - generic [ref=e267]: File input
+                - text: 
+          - listitem [ref=e268]:
+            - link "OpenAI compatibility" [ref=e269] [cursor=pointer]:
+              - /url: /gemini-api/docs/openai
+          - listitem [ref=e271]:
+            - link "Media resolution" [ref=e272] [cursor=pointer]:
+              - /url: /gemini-api/docs/media-resolution
+          - listitem [ref=e274]:
+            - link "Token counting" [ref=e275] [cursor=pointer]:
+              - /url: /gemini-api/docs/tokens
+          - listitem [ref=e277]:
+            - link "Prompt engineering" [ref=e278] [cursor=pointer]:
+              - /url: /gemini-api/docs/prompting-strategies
+          - listitem [ref=e280]:
+            - generic [ref=e281]:
+              - text: arrow_drop_down
+              - button "Logs and datasets " [ref=e282] [cursor=pointer]:
+                - generic [ref=e283]: Logs and datasets
+                - text: 
+          - listitem [ref=e284]:
+            - generic [ref=e285]:
+              - text: arrow_drop_down
+              - button "Safety " [ref=e286] [cursor=pointer]:
+                - generic [ref=e287]: Safety
+                - text: 
+          - listitem [ref=e288]:
+            - generic [ref=e289]:
+              - text: arrow_drop_down
+              - button "Frameworks " [ref=e290] [cursor=pointer]:
+                - generic [ref=e291]: Frameworks
+                - text: 
+          - listitem [ref=e292]:
+            - generic [ref=e293]: Resources
+          - listitem [ref=e295]:
+            - link "Release notes" [ref=e296] [cursor=pointer]:
+              - /url: /gemini-api/docs/changelog
+          - listitem [ref=e298]:
+            - link "Deprecations" [ref=e299] [cursor=pointer]:
+              - /url: /gemini-api/docs/deprecations
+          - listitem [ref=e301]:
+            - link "Libraries" [ref=e302] [cursor=pointer]:
+              - /url: /gemini-api/docs/libraries
+          - listitem [ref=e304]:
+            - generic [ref=e305]:
+              - text: arrow_drop_down
+              - button "Migration " [ref=e306] [cursor=pointer]:
+                - generic [ref=e307]: Migration
+                - text: 
+          - listitem [ref=e308]:
+            - link "Rate limits" [ref=e309] [cursor=pointer]:
+              - /url: /gemini-api/docs/rate-limits
+          - listitem [ref=e311]:
+            - link "Billing info" [ref=e312] [cursor=pointer]:
+              - /url: /gemini-api/docs/billing
+          - listitem [ref=e314]:
+            - link "API troubleshooting" [ref=e315] [cursor=pointer]:
+              - /url: /gemini-api/docs/troubleshooting
+          - listitem [ref=e317]:
+            - link "API errors" [ref=e318] [cursor=pointer]:
+              - /url: /gemini-api/docs/api-errors
+          - listitem [ref=e320]:
+            - link "Status" [ref=e321] [cursor=pointer]:
+              - /url: https://aistudio.google.com/status
+              - generic [ref=e323]: open_in_new
+          - listitem [ref=e324]:
+            - link "Partner and library integrations" [ref=e325] [cursor=pointer]:
+              - /url: /gemini-api/docs/partner-integration
+          - listitem [ref=e327]:
+            - generic [ref=e328]:
+              - text: arrow_drop_down
+              - button "Google AI Studio " [ref=e329] [cursor=pointer]:
+                - generic [ref=e330]: Google AI Studio
+                - text: 
+          - listitem [ref=e331]:
+            - generic [ref=e332]:
+              - text: arrow_drop_down
+              - button "Google Cloud Platform " [ref=e333] [cursor=pointer]:
+                - generic [ref=e334]: Google Cloud Platform
+                - text: 
+          - listitem [ref=e335]:
+            - generic [ref=e336]: Policies
+          - listitem [ref=e338]:
+            - link "Terms of service" [ref=e339] [cursor=pointer]:
+              - /url: /gemini-api/terms
+          - listitem [ref=e341]:
+            - link "Available regions" [ref=e342] [cursor=pointer]:
+              - /url: /gemini-api/docs/available-regions
+          - listitem [ref=e344]:
+            - link "Abuse monitoring" [ref=e345] [cursor=pointer]:
+              - /url: /gemini-api/docs/usage-policies
+          - listitem [ref=e347]:
+            - link "Feedback information" [ref=e348] [cursor=pointer]:
+              - /url: /gemini-api/docs/feedback-policies
+    - button "Hide side navigation" [expanded] [ref=e350] [cursor=pointer]:
+      - generic [ref=e351]: chevron_left
+    - generic [ref=e352]:
+      - main [ref=e353]:
+        - navigation "On this page" [ref=e356]:
+          - list [ref=e357]:
+            - listitem [ref=e358]:
+              - heading "On this page" [level=2] [ref=e359]
+            - listitem [ref=e361]:
+              - link "Session lifetime" [ref=e362] [cursor=pointer]:
+                - /url: "#maximum-session-duration"
+            - listitem [ref=e364]:
+              - link "Context window compression" [ref=e365] [cursor=pointer]:
+                - /url: "#context-window-compression"
+            - listitem [ref=e367]:
+              - link "Session resumption" [ref=e368] [cursor=pointer]:
+                - /url: "#session-resumption"
+            - listitem [ref=e370]:
+              - link "Receiving a message before the session disconnects" [ref=e371] [cursor=pointer]:
+                - /url: "#goaway-message"
+            - listitem [ref=e373]:
+              - link "Receiving a message when the generation is complete" [ref=e374] [cursor=pointer]:
+                - /url: "#generation-complete-message"
+            - listitem [ref=e376]:
+              - link "What's next" [ref=e377] [cursor=pointer]:
+                - /url: "#whats-next"
+        - generic [ref=e379]:
+          - article [ref=e380]:
+            - generic [ref=e383]:
+              - text: The
+              - link "Interactions API" [ref=e384] [cursor=pointer]:
+                - /url: /gemini-api/docs/interactions-overview
+              - text: is now generally available. We recommend using this API for access to all the latest features and models.
+            - navigation [ref=e385]:
+              - list "Breadcrumb" [ref=e386]:
+                - listitem [ref=e387]:
+                  - link "Home" [ref=e388] [cursor=pointer]:
+                    - /url: https://ai.google.dev/
+                - listitem [ref=e389]:
+                  - generic [ref=e390]: chevron_right
+                  - link "Gemini API" [ref=e391] [cursor=pointer]:
+                    - /url: https://ai.google.dev/gemini-api
+                - listitem [ref=e392]:
+                  - generic [ref=e393]: chevron_right
+                  - link "Docs" [ref=e394] [cursor=pointer]:
+                    - /url: https://ai.google.dev/gemini-api/docs
+            - heading [level=1] [ref=e395]:
+              - text: Session management with Live API
+              - group "LLM Tools" [ref=e398]:
+                - button "Copy page as markdown" [ref=e400] [cursor=pointer]:
+                  - generic [ref=e401]: content_copy
+                - button "More LLM Tools options" [ref=e404] [cursor=pointer]: arrow_drop_down
+            - text: expand_more more_horiz
+            - generic [ref=e405]:
+              - paragraph
+              - paragraph [ref=e406]:
+                - text: In the Live API, a session refers to a persistent connection where input and output are streamed continuously over the same connection (read more about
+                - link "how it works" [ref=e407] [cursor=pointer]:
+                  - /url: /gemini-api/docs/live
+                - text: ). This unique session design enables low latency and supports unique features, but can also introduce challenges, like session time limits, and early termination. This guide covers strategies for overcoming the session management challenges that can arise when using the Live API.
+              - heading "Session lifetime" [level=2] [ref=e408]
+              - paragraph [ref=e409]:
+                - text: Without compression, audio-only sessions are limited to 15 minutes, and audio-video sessions are limited to 2 minutes. Exceeding these limits will terminate the session (and therefore, the connection), but you can use
+                - link "context window compression" [ref=e410] [cursor=pointer]:
+                  - /url: "#context-window-compression"
+                - text: to extend sessions to an unlimited amount of time.
+              - paragraph [ref=e411]:
+                - text: The lifetime of a connection is limited as well, to around 10 minutes. When the connection terminates, the session terminates as well. In this case, you can configure a single session to stay active over multiple connections using
+                - link "session resumption" [ref=e412] [cursor=pointer]:
+                  - /url: "#session-resumption"
+                - text: . You'll also receive a
+                - link "GoAway message" [ref=e413] [cursor=pointer]:
+                  - /url: "#goaway-message"
+                - text: before the connection ends, allowing you to take further actions.
+              - heading "Context window compression" [level=2] [ref=e414]
+              - paragraph [ref=e415]:
+                - text: To enable longer sessions, and avoid abrupt connection termination, you can enable context window compression by setting the
+                - link "contextWindowCompression" [ref=e416] [cursor=pointer]:
+                  - /url: /api/live#BidiGenerateContentSetup.FIELDS.ContextWindowCompressionConfig.BidiGenerateContentSetup.context_window_compression
+                - text: field as part of the session configuration.
+              - paragraph [ref=e417]:
+                - text: In the
+                - link "ContextWindowCompressionConfig" [ref=e418] [cursor=pointer]:
+                  - /url: /api/live#contextwindowcompressionconfig
+                - text: ", you can configure a"
+                - link "sliding-window mechanism" [ref=e419] [cursor=pointer]:
+                  - /url: /api/live#ContextWindowCompressionConfig.FIELDS.ContextWindowCompressionConfig.SlidingWindow.ContextWindowCompressionConfig.sliding_window
+                - text: and the
+                - link "number of tokens" [ref=e420] [cursor=pointer]:
+                  - /url: /api/live#ContextWindowCompressionConfig.FIELDS.int64.ContextWindowCompressionConfig.trigger_tokens
+                - text: that triggers compression.
+              - generic [ref=e422]:
+                - tablist [ref=e423]:
+                  - generic [ref=e424]:
+                    - tab [selected] [ref=e425]:
+                      - button "Python" [expanded] [ref=e426] [cursor=pointer]
+                    - tab [ref=e427]:
+                      - button "JavaScript" [ref=e428] [cursor=pointer]
+                    - tab [ref=e429]:
+                      - button "More Options" [ref=e430] [cursor=pointer]: arrow_drop_down More
+                - tabpanel "Python" [ref=e431]:
+                  - code [ref=e434]: "from google.genai import types config = types.LiveConnectConfig( response_modalities=[\"AUDIO\"], context_window_compression=( # Configures compression with default parameters. types.ContextWindowCompressionConfig( sliding_window=types.SlidingWindow(), ) ), )"
+              - heading "Session resumption" [level=2] [ref=e435]
+              - paragraph [ref=e436]:
+                - text: To prevent session termination when the server periodically resets the WebSocket connection, configure the
+                - link "sessionResumption" [ref=e437] [cursor=pointer]:
+                  - /url: /api/live#BidiGenerateContentSetup.FIELDS.SessionResumptionConfig.BidiGenerateContentSetup.session_resumption
+                - text: field within the
+                - link "setup configuration" [ref=e438] [cursor=pointer]:
+                  - /url: /api/live#BidiGenerateContentSetup
+                - text: .
+              - paragraph [ref=e439]:
+                - text: Passing this configuration causes the server to send
+                - link "SessionResumptionUpdate" [ref=e440] [cursor=pointer]:
+                  - /url: /api/live#SessionResumptionUpdate
+                - text: messages, which can be used to resume the session by passing the last resumption token as the
+                - link [ref=e441] [cursor=pointer]:
+                  - /url: /api/live#SessionResumptionConfig.FIELDS.string.SessionResumptionConfig.handle
+                  - code [ref=e442]: SessionResumptionConfig.handle
+                - text: of the subsequent connection.
+              - paragraph [ref=e443]: Resumption tokens are valid for 2 hr after the last sessions termination.
+              - generic [ref=e445]:
+                - tablist [ref=e446]:
+                  - generic [ref=e447]:
+                    - tab [selected] [ref=e448]:
+                      - button "Python" [expanded] [ref=e449] [cursor=pointer]
+                    - tab [ref=e450]:
+                      - button "JavaScript" [ref=e451] [cursor=pointer]
+                    - tab [ref=e452]:
+                      - button "More Options" [ref=e453] [cursor=pointer]: arrow_drop_down More
+                - tabpanel "Python" [ref=e454]:
+                  - code [ref=e457]: "import asyncio from google import genai from google.genai import types client = genai.Client() model = \"gemini-3.1-flash-live-preview\" async def main(): print(f\"Connecting to the service with handle {previous_session_handle}...\") async with client.aio.live.connect( model=model, config=types.LiveConnectConfig( response_modalities=[\"AUDIO\"], session_resumption=types.SessionResumptionConfig( # The handle of the session to resume is passed here, # or else None to start a new session. handle=previous_session_handle ), ), ) as session: while True: await session.send_client_content( turns=types.Content( role=\"user\", parts=[types.Part(text=\"Hello world!\")] ) ) async for message in session.receive(): # Periodically, the server will send update messages that may # contain a handle for the current state of the session. if message.session_resumption_update: update = message.session_resumption_update if update.resumable and update.new_handle: # The handle should be retained and linked to the session. return update.new_handle # For the purposes of this example, placeholder input is continually fed # to the model. In non-sample code, the model inputs would come from # the user. if message.server_content and message.server_content.turn_complete: break if __name__ == \"__main__\": asyncio.run(main())"
+              - heading "Receiving a message before the session disconnects" [level=2] [ref=e458]
+              - paragraph [ref=e459]:
+                - text: The server sends a
+                - link "GoAway" [ref=e460] [cursor=pointer]:
+                  - /url: /api/live#GoAway
+                - text: message that signals that the current connection will soon be terminated. This message includes the
+                - link "timeLeft" [ref=e461] [cursor=pointer]:
+                  - /url: /api/live#GoAway.FIELDS.google.protobuf.Duration.GoAway.time_left
+                - text: ", indicating the remaining time and lets you take further action before the connection will be terminated as ABORTED."
+              - generic [ref=e463]:
+                - tablist [ref=e464]:
+                  - generic [ref=e465]:
+                    - tab [selected] [ref=e466]:
+                      - button "Python" [expanded] [ref=e467] [cursor=pointer]
+                    - tab [ref=e468]:
+                      - button "JavaScript" [ref=e469] [cursor=pointer]
+                    - tab [ref=e470]:
+                      - button "More Options" [ref=e471] [cursor=pointer]: arrow_drop_down More
+                - tabpanel "Python" [ref=e472]:
+                  - code [ref=e475]: "async for response in session.receive(): if response.go_away is not None: # The connection will soon be terminated print(response.go_away.time_left)"
+              - heading "Receiving a message when the generation is complete" [level=2] [ref=e476]
+              - paragraph [ref=e477]:
+                - text: The server sends a
+                - link "generationComplete" [ref=e478] [cursor=pointer]:
+                  - /url: /api/live#BidiGenerateContentServerContent.FIELDS.bool.BidiGenerateContentServerContent.generation_complete
+                - text: message that signals that the model finished generating the response.
+              - generic [ref=e480]:
+                - tablist [ref=e481]:
+                  - generic [ref=e482]:
+                    - tab [selected] [ref=e483]:
+                      - button "Python" [expanded] [ref=e484] [cursor=pointer]
+                    - tab [ref=e485]:
+                      - button "JavaScript" [ref=e486] [cursor=pointer]
+                    - tab [ref=e487]:
+                      - button "More Options" [ref=e488] [cursor=pointer]: arrow_drop_down More
+                - tabpanel "Python" [ref=e489]:
+                  - code [ref=e492]: "async for response in session.receive(): if response.server_content.generation_complete is True: # The generation is complete"
+              - heading "What's next" [level=2] [ref=e493]
+              - paragraph [ref=e494]:
+                - text: Explore more ways to work with the Live API in the full
+                - link "Capabilities" [ref=e495] [cursor=pointer]:
+                  - /url: /gemini-api/docs/live
+                - text: guide, the
+                - link "Tool use" [ref=e496] [cursor=pointer]:
+                  - /url: /gemini-api/docs/live-tools
+                - text: page, or the
+                - link "Live API cookbook" [ref=e497] [cursor=pointer]:
+                  - /url: https://colab.research.google.com/github/google-gemini/cookbook/blob/main/quickstarts/Get_started_LiveAPI.ipynb
+                - text: .
+            - button "Send feedback" [ref=e499] [cursor=pointer]
+          - generic [ref=e500]:
+            - paragraph [ref=e501]:
+              - text: Except as otherwise noted, the content of this page is licensed under the
+              - link "Creative Commons Attribution 4.0 License" [ref=e502] [cursor=pointer]:
+                - /url: https://creativecommons.org/licenses/by/4.0/
+              - text: ", and code samples are licensed under the"
+              - link "Apache 2.0 License" [ref=e503] [cursor=pointer]:
+                - /url: https://www.apache.org/licenses/LICENSE-2.0
+              - text: . For details, see the
+              - link "Google Developers Site Policies" [ref=e504] [cursor=pointer]:
+                - /url: https://developers.google.com/site-policies
+              - text: . Java is a registered trademark of Oracle and/or its affiliates.
+            - paragraph [ref=e505]: Last updated 2026-06-01 UTC.
+      - generic:
+        - navigation "Footer links"
+      - navigation "Utility links" [ref=e509]:
+        - list [ref=e510]:
+          - listitem [ref=e511]:
+            - link "Terms" [ref=e512] [cursor=pointer]:
+              - /url: //policies.google.com/terms
+          - listitem [ref=e513]:
+            - text: "|"
+            - link "Privacy" [ref=e514] [cursor=pointer]:
+              - /url: //policies.google.com/privacy
+          - text: "|"
+        - generic "Select your language preference." [ref=e515]:
+          - button "Language" [ref=e516] [cursor=pointer]

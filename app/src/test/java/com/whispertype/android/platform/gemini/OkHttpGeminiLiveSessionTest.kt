@@ -14,6 +14,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.AfterTest
@@ -21,6 +22,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -159,6 +161,22 @@ class OkHttpGeminiLiveSessionTest {
     }
 
     @Test
+    fun `sendTextTurn sends a user text turn without turnComplete`() = runBlocking {
+        val session = newSession()
+        session.awaitReady()
+
+        session.sendTextTurn("echo my words")
+        awaitMessages { serverSocket.clientMessages.any { it.contains("turns") } }
+        val msg = serverSocket.clientMessages.first { it.contains("turns") }
+        val content = Json.parseToJsonElement(msg).jsonObject["clientContent"]!!.jsonObject
+        assertFalse(content.containsKey("turnComplete"))
+        val text = content["turns"]!!.jsonArray.first().jsonObject["parts"]!!
+            .jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+        assertEquals("echo my words", text)
+        session.close()
+    }
+
+    @Test
     fun `endActivity sends a single turnComplete boundary`() = runBlocking {
         val session = newSession()
         session.awaitReady()
@@ -172,17 +190,21 @@ class OkHttpGeminiLiveSessionTest {
     }
 
     @Test
-    fun `modelTurn text emits TranscriptCandidates`() = runBlocking {
+    fun `modelTurn text emits TranscriptCandidates after inputTranscription`() = runBlocking {
         val session = newSession()
         val events = bufferEvents(session)
         session.awaitReady()
-        receiveWithTimeout(events) // consume Ready
+        receiveWithTimeout(events)
 
+        serverSocket.push("""{"serverContent":{"inputTranscription":{"text":"hello"}}}""")
         serverSocket.push("""{"serverContent":{"modelTurn":{"parts":[{"text":"hello world"}]}}}""")
         val event = receiveWithTimeout(events)
         assertIs<GeminiEvent.TranscriptCandidates>(event)
-        assertEquals(listOf("hello world"), event.candidates.map { it.raw })
-        assertEquals(null, event.candidates.first().cleaned)
+        assertEquals(listOf("hello"), event.candidates.map { it.raw })
+        val second = receiveWithTimeout(events)
+        assertIs<GeminiEvent.TranscriptCandidates>(second)
+        assertEquals(listOf("hello world"), second.candidates.map { it.raw })
+        assertEquals(null, second.candidates.first().cleaned)
         session.close()
     }
 
@@ -197,6 +219,30 @@ class OkHttpGeminiLiveSessionTest {
         val event = receiveWithTimeout(events)
         assertIs<GeminiEvent.TranscriptCandidates>(event)
         assertEquals(listOf("recognized speech"), event.candidates.map { it.raw })
+        session.close()
+    }
+
+    @Test
+    fun `outputTranscription is ignored until inputTranscription fired`() = runBlocking {
+        val session = newSession()
+        val events = bufferEvents(session)
+        session.awaitReady()
+        receiveWithTimeout(events)
+
+        serverSocket.push("""{"serverContent":{"outputTranscription":{"text":"I understand."}}}""")
+        serverSocket.push("""{"serverContent":{"inputTranscription":{"text":"the birch canoe"}}}""")
+        val event = receiveWithTimeout(events)
+        assertIs<GeminiEvent.TranscriptCandidates>(event)
+        assertEquals(
+            listOf("the birch canoe"),
+            event.candidates.map { it.raw },
+            "the pre-input echo must be dropped; only the input arrives",
+        )
+
+        serverSocket.push("""{"serverContent":{"outputTranscription":{"text":"the birch canoe slid"}}}""")
+        val second = receiveWithTimeout(events)
+        assertIs<GeminiEvent.TranscriptCandidates>(second)
+        assertEquals(listOf("the birch canoe slid"), second.candidates.map { it.raw })
         session.close()
     }
 

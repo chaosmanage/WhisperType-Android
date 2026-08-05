@@ -103,6 +103,14 @@ class TranscriptSelector {
         for (lead in GENERIC_LEAD_PREFIXES) {
             if (startsWithWordBoundary(t, lead) && wordCount > GENERIC_LEAD_MAX_WORDS) return true
         }
+        // Short standalone acknowledgments ("I understand.", "Got it.") are never
+        // dictation; the same words starting a longer sentence are legitimate
+        // speech, so only reject when the whole utterance stays short.
+        if (wordCount <= ACK_MAX_WORDS) {
+            for (ack in SHORT_ACK_PREFIXES) {
+                if (startsWithWordBoundary(t, ack)) return true
+            }
+        }
         return false
     }
 
@@ -201,6 +209,11 @@ class TranscriptSelector {
          */
         const val GENERIC_LEAD_MAX_WORDS: Int = 2
 
+        /** A short acknowledgment ("I understand.", "Got it.") is rejected only
+         *  while the whole utterance is at most this many words, so longer
+         *  legitimate sentences starting the same way are preserved. */
+        const val ACK_MAX_WORDS: Int = 3
+
         val REPLACEMENT_CHAR: Char = '\uFFFD'
 
         val DEVANAGARI_BLOCK: CharRange = '\u0900'..'\u097F'
@@ -231,6 +244,34 @@ class TranscriptSelector {
             "note",
             "disclaimer",
             "my apologies",
+            // Assistant greetings: the Live model's conversational reply (captured
+            // via outputTranscription) must never be inserted as dictation.
+            "hello! i'm",
+            "hello i'm",
+            "hi there",
+            "hi! i'm",
+            "hi, i'm",
+            "hey there",
+            "hello there",
+            "how can i help",
+            "how may i help",
+            "what can i help",
+            "good morning",
+            "good afternoon",
+            "good evening",
+            "nice to meet",
+            // Assistant acknowledgments of the dictation prime; never dictation.
+            "understood",
+            "understood,",
+            "ready to begin",
+            "let's begin",
+            "lets begin",
+            "i'm ready",
+            "i am ready",
+            "let me know",
+            "go ahead",
+            "i'm listening",
+            "i am listening",
         )
 
         val GENERIC_LEAD_PREFIXES: List<String> = listOf(
@@ -242,6 +283,15 @@ class TranscriptSelector {
             "alright",
             "absolutely",
             "yup",
+        )
+
+        /** Short standalone assistant acknowledgments (rejected only when the whole
+         *  utterance is short, see [ACK_MAX_WORDS]). */
+        val SHORT_ACK_PREFIXES: List<String> = listOf(
+            "i understand",
+            "i see",
+            "got it",
+            "no problem",
         )
     }
 }

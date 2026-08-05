@@ -19,6 +19,11 @@ class GeminiSessionConfig(
     /** When true, the setup enables `inputAudioTranscription` so the server
      *  returns `serverContent.inputTranscription.text` for the user's speech. */
     val inputAudioTranscription: Boolean = true,
+    /** When true, the setup enables `outputAudioTranscription` so the server
+     *  transcribes the model's audio reply (`serverContent.outputTranscription`).
+     *  Used as the echo fallback dictation source when `inputTranscription` is
+     *  not delivered. */
+    val outputAudioTranscription: Boolean = true,
     /** Optional instruction the model applies for the whole session. */
     val systemInstruction: String? = null,
     /** Input PCM16 sample rate advertised in the audio mime type. */

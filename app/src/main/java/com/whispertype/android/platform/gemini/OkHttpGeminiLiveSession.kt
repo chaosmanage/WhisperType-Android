@@ -45,6 +45,12 @@ class OkHttpGeminiLiveSession(
     private val ready = CompletableDeferred<Unit>()
     private val closed = AtomicBoolean(false)
 
+    /** True once the server delivered at least one inputTranscription this session.
+     *  Echo (outputTranscription) candidates are only trusted after that: when the
+     *  ASR is not transcribing the user's speech, the model's "echo" is an
+     *  acknowledgment/greeting, never dictation. */
+    private var sawInputTranscription = false
+
     private var socket: WebSocket? = client.newWebSocket(
         Request.Builder().url(wsUrl).build(),
         listener(),
@@ -74,6 +80,10 @@ class OkHttpGeminiLiveSession(
 
     override suspend fun endActivity() {
         socket?.send(GeminiLiveWire.buildTurnComplete())
+    }
+
+    override suspend fun sendTextTurn(text: String) {
+        socket?.send(GeminiLiveWire.buildTextTurn(text))
     }
 
     override fun events(): Flow<GeminiEvent> = _events.receiveAsFlow()
@@ -160,17 +170,23 @@ class OkHttpGeminiLiveSession(
     private fun onServerContent(message: GeminiLiveWire.ServerMessage.ServerContent) {
         GeminiLog.i(
             TAG,
-            "serverContent: inputTranscription=${message.inputTranscription?.take(80)} textParts=${message.textParts.size} turnComplete=${message.turnComplete} interrupted=${message.interrupted}",
+            "serverContent: inputTranscription=${message.inputTranscription?.take(80)} outputTranscription=${message.outputTranscription?.take(80)} textParts=${message.textParts.size} turnComplete=${message.turnComplete} interrupted=${message.interrupted}",
         )
         val candidates = ArrayList<ResultCandidate>()
         // Voice-to-text: the dictation source is inputTranscription (the user's
-        // speech as recognized by the model), not modelTurn text (the model's own
-        // output, which is audio for the voice-only Live models). modelTurn text
-        // is only a fallback for future text-capable models.
+        // speech as recognized by the server's ASR). outputTranscription — the
+        // transcription of the model's own audio reply — is only trusted as an
+        // echo supplement AFTER inputTranscription has fired this session; when
+        // the ASR is silent, the model's reply is an acknowledgment or greeting,
+        // never dictation. modelTurn text is only a fallback for future
+        // text-capable models.
         val inputTranscription = message.inputTranscription
         if (inputTranscription != null && inputTranscription.isNotEmpty()) {
+            sawInputTranscription = true
             candidates.add(ResultCandidate(raw = inputTranscription, cleaned = null, language = config.language))
-        } else if (message.textParts.isNotEmpty()) {
+        } else if (sawInputTranscription && message.outputTranscription != null && message.outputTranscription.isNotEmpty()) {
+            candidates.add(ResultCandidate(raw = message.outputTranscription, cleaned = null, language = config.language))
+        } else if (sawInputTranscription && message.textParts.isNotEmpty()) {
             message.textParts.forEach { part ->
                 candidates.add(ResultCandidate(raw = part, cleaned = null, language = config.language))
             }

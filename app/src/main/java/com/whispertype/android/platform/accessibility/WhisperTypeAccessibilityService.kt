@@ -159,6 +159,8 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
         if (!eligibility.eligible) {
             // Phase 3 per-condition diagnostic so a hidden bubble is explainable (§2.3).
             Log.i(TAG, "Bubble hidden; reasons=${EligibilityExplanation.blockingReasons(eligibility)}")
+        } else {
+            Log.i(TAG, "STAGE: bubble shown (eligible target + keyboard)")
         }
         val m = Message.obtain(null, RuntimeIpc.MSG_ELIGIBILITY).apply {
             data = RuntimeIpc.packEligibility(eligibility)

@@ -62,6 +62,19 @@ class GeminiLiveWireTest {
     }
 
     @Test
+    fun `buildSetup enables outputAudioTranscription by default`() {
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(config)).jsonObject
+        assertTrue(root["setup"]!!.jsonObject.containsKey("outputAudioTranscription"))
+    }
+
+    @Test
+    fun `buildSetup omits outputAudioTranscription when disabled`() {
+        val bare = GeminiSessionConfig(model = "m", outputAudioTranscription = false)
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(bare)).jsonObject
+        assertFalse(root["setup"]!!.jsonObject.containsKey("outputAudioTranscription"))
+    }
+
+    @Test
     fun `buildSetup omits systemInstruction when null`() {
         val bare = GeminiSessionConfig(model = "m")
         val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(bare)).jsonObject
@@ -81,6 +94,19 @@ class GeminiLiveWireTest {
         val root = Json.parseToJsonElement(GeminiLiveWire.buildTurnComplete()).jsonObject
         val clientContent = root["clientContent"]!!.jsonObject
         assertTrue(clientContent["turnComplete"]!!.jsonPrimitive.boolean)
+    }
+
+    @Test
+    fun `buildTextTurn appends a user text turn without turnComplete`() {
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildTextTurn("echo my words")).jsonObject
+        val clientContent = root["clientContent"]!!.jsonObject
+        assertFalse(clientContent.containsKey("turnComplete"))
+        val turns = clientContent["turns"]!!.jsonArray
+        assertEquals(1, turns.size)
+        val turn = turns.first().jsonObject
+        assertEquals("user", turn["role"]!!.jsonPrimitive.content)
+        val text = turn["parts"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+        assertEquals("echo my words", text)
     }
 
     // ------------------------------------------------------------------
@@ -123,6 +149,14 @@ class GeminiLiveWireTest {
         val msg = GeminiLiveWire.parseServerMessage(raw) as GeminiLiveWire.ServerMessage.ServerContent
         assertEquals("recognized speech", msg.inputTranscription)
         assertTrue(msg.textParts.isEmpty())
+    }
+
+    @Test
+    fun `serverContent outputTranscription is extracted`() {
+        val raw = """{"serverContent":{"outputTranscription":{"text":"echo of user speech"}}}"""
+        val msg = GeminiLiveWire.parseServerMessage(raw) as GeminiLiveWire.ServerMessage.ServerContent
+        assertEquals("echo of user speech", msg.outputTranscription)
+        assertNull(msg.inputTranscription)
     }
 
     @Test

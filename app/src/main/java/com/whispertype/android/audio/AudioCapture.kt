@@ -14,7 +14,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.ReceiveChannel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -123,7 +122,10 @@ class AudioCapture(
                     }
                     _amplitude.value = smoothedAmplitude(valid)
                 }
-                delay(LOOP_CADENCE_MILLIS)
+                // No artificial delay: AudioRecord's blocking read paces the stream
+                // at exactly real time. Any gap here would reach the Gemini Live
+                // ASR as choppy audio and break its voice-activity detection
+                // (inputTranscription silently never fires).
             }
         } catch (e: CancellationException) {
             throw e
@@ -200,8 +202,9 @@ class AudioCapture(
         }
 
         private const val QUEUE_CAPACITY = 64
-        private const val READ_BUFFER_BYTES = 5120
-        private const val LOOP_CADENCE_MILLIS = 50L
+        /** One 20 ms frame (640 bytes at 16 kHz mono PCM16): reads are blocking and
+         *  pace the stream at exactly real time. */
+        private const val READ_BUFFER_BYTES = 640
         private const val AMPLITUDE_SLICE_SAMPLES = 256
         private const val AMPLITUDE_ALPHA = 0.5f
         private const val MAX_PCM16_AMPLITUDE = 32768.0
