@@ -194,6 +194,17 @@ class MainActivity : ComponentActivity() {
                     ) {
                         Text(stringResource(R.string.home_open_settings))
                     }
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = stringResource(
+                            R.string.home_version,
+                            BuildConfig.VERSION_NAME,
+                            BuildConfig.VERSION_CODE,
+                            BuildConfig.GIT_COMMIT,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

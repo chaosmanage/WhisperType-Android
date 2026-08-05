@@ -18,6 +18,17 @@ kotlin {
 
 val signingPropertiesFile = rootProject.file("signing.properties")
 
+/** Short HEAD commit hash embedded into BuildConfig.GIT_COMMIT at build time. */
+fun gitCommitHash(): String {
+    return runCatching {
+        ProcessBuilder("git", "rev-parse", "--short", "HEAD")
+            .directory(rootProject.projectDir)
+            .redirectErrorStream(true)
+            .start()
+            .inputStream.bufferedReader().use { it.readText().trim() }
+    }.getOrNull().takeUnless { it.isNullOrEmpty() } ?: "unknown"
+}
+
 android {
     namespace = "com.whispertype.android"
     compileSdk = 36
@@ -28,6 +39,9 @@ android {
         targetSdk = 36
         versionCode = 21
         versionName = "0.3.0"
+
+        // Embedded git revision so the app can display the exact source commit.
+        buildConfigField("String", "GIT_COMMIT", "\"${gitCommitHash()}\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -72,7 +86,7 @@ android {
 
     buildFeatures {
         compose = true
-        buildConfig = false
+        buildConfig = true
     }
 
     packaging {
