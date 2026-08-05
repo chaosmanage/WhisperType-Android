@@ -80,10 +80,37 @@ Build id: `assembleDebug` on `rebuild/clean-runtime`, commit `4f6ef67`.
   detection (`true` / `false` / `null`-ambiguous), used by the cursor-aware commit.
 - `InsertionVerifierTest.kt` — host tests for the exactly-once / ambiguous contract.
 
-**Build identifier:** `rebuild/clean-runtime` @ `8850ecb`-based working tree,
+**Build identifier:** `rebuild/clean-runtime` @ `b470257`-based working tree,
 `app/build/outputs/apk/debug/app-debug.apk`
 SHA-256 `efea49050cce12a339bf97a1312a384e49957bb18c318037edf42e9969053e36`.
 
 **Tests run:** `assembleDebug` PASS; `testDebugUnitTest` PASS (0 failures);
 `lintDebug` PASS (0 errors). Physical gates remain NOT RUN.
+
+## Stage 1b — First physical run on Samsung S25 / Android 16 / SwiftKey — MIXED
+
+Device preflight (plan §8) passed: `SM-S921B`, Android 16 (SDK 36), 1080x2340 @
+480dpi, SwiftKey default. APK installed; `RECORD_AUDIO` / `POST_NOTIFICATIONS`
+granted; `SYSTEM_ALERT_WINDOW` op = `allow`.
+
+**PASS (on-device):**
+- `FlowRuntimeService` started foreground (microphone type, notification shown).
+- Accessibility service running in `:accessibility` process, bound by system.
+- Typed IPC connected (`Accessibility process registered its reply messenger`).
+- `TYPE_APPLICATION_OVERLAY` (2038) `addView()` returned without throwing — the
+  prior `BadTokenException` is resolved. `type=2038` WindowTokens in `dumpsys window`.
+
+**FAIL (on-device) — Phase 2 gate blocked:**
+- Compose composition throws `IllegalStateException: ViewTreeLifecycleOwner not
+  found from OverlayComposeContainer` the instant the window attaches, then the
+  service crash-loops. See `docs/REBUILD_FAILURE_REPORT.md`.
+
+Root cause: the stable Compose owners must be installed via `ViewTree*Owner.set()`
+(tag-based lookup), not by the container implementing the owner interfaces or via
+`CompositionLocalProvider`. Those `set()` APIs are not currently on the compile
+classpath. Next step: expose them via the correct dependency (or set the tags
+directly) and re-run the gate.
+
+Builder protocol: **stopped**. Do not add Gemini/audio (Phase 6) until this passes.
+
 

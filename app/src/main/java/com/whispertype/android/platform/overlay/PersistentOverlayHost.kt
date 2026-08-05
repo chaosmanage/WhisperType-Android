@@ -6,15 +6,12 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.Gravity
+import android.view.View
 import android.view.WindowManager
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
-import androidx.savedstate.compose.LocalSavedStateRegistryOwner
 import com.whispertype.android.core.contracts.OverlayController
 import com.whispertype.android.core.model.DictationState
 import com.whispertype.android.core.model.OverlayIntent
@@ -81,7 +78,7 @@ class PersistentOverlayHost(
     private val handler = Handler(Looper.getMainLooper())
 
     @Volatile
-    private var view: ComposeView? = null
+    private var view: View? = null
 
     @Volatile
     private var windowManager: WindowManager? = null
@@ -115,30 +112,30 @@ class PersistentOverlayHost(
             // obtained from the owning service context (same-process context that
             // runs FlowRuntimeService), never service.baseContext.
             val wm = serviceContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            // The ComposeView is wrapped in an OverlayComposeContainer which
+            // implements LifecycleOwner + SavedStateRegistryOwner + ViewModelStoreOwner.
+            // Compose's WindowRecomposer traverses the view tree upward from the
+            // ComposeView to find the owners, so wrapping them here makes the
+            // owners discoverable BEFORE the composition starts — fixing the
+            // "ViewTreeLifecycleOwner not found" crash (§2.2) without depending on
+            // the ViewTree*Owner.set() API.
+            val container = OverlayComposeContainer(serviceContext, owners)
             val composeView = ComposeView(serviceContext).apply {
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
-                // Stable owners are provided to the composition, mirroring Wispr's
-                // FlowService (LifecycleOwner + SavedStateRegistryOwner +
-                // ViewModelStoreOwner) and avoiding a bare ComposeView (§2.2).
                 setContent {
-                    CompositionLocalProvider(
-                        LocalLifecycleOwner provides owners,
-                        LocalSavedStateRegistryOwner provides owners,
-                        LocalViewModelStoreOwner provides owners,
-                    ) {
-                        val current by uiState.collectAsState()
-                        WhisperTypeOverlayContent(
-                            uiState = current,
-                            onIntent = { _intents.tryEmit(it) },
-                        )
-                    }
+                    val current by uiState.collectAsState()
+                    WhisperTypeOverlayContent(
+                        uiState = current,
+                        onIntent = { _intents.tryEmit(it) },
+                    )
                 }
             }
+            container.addView(composeView)
             owners.startOwners()
 
             // addView() success is recorded only after it returns without throwing.
-            wm.addView(composeView, buildLayoutParams(serviceContext, placement))
-            view = composeView
+            wm.addView(container, buildLayoutParams(serviceContext, placement))
+            view = container
             windowManager = wm
             retryCount = 0
             machine.attachSucceeded()
