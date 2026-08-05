@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -36,13 +37,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import androidx.lifecycle.lifecycleScope
+import com.whispertype.android.data.history.EncryptedHistoryRepository
+import com.whispertype.android.data.secrets.AndroidKeystoreKeyStore
+import com.whispertype.android.data.secrets.FileBlobStore
+import com.whispertype.android.data.secrets.JavaxAesGcmCipher
 import com.whispertype.android.data.secrets.KeystoreKeyProvider
 import com.whispertype.android.data.secrets.KeyProvider
 import com.whispertype.android.data.settings.SettingsRepository
 import com.whispertype.android.platform.accessibility.WhisperTypeAccessibilityService
 import com.whispertype.android.platform.runtime.FlowRuntimeService
+import com.whispertype.android.ui.history.HistoryScreen
 import com.whispertype.android.ui.settings.SettingsScreen
 import com.whispertype.android.ui.theme.WhisperTypeTheme
+import kotlinx.coroutines.launch
 
 /**
  * Feature host. Shows the overlay-permission onboarding when it is missing,
@@ -55,6 +63,16 @@ class MainActivity : ComponentActivity() {
 
     private val settingsRepository by lazy { SettingsRepository(applicationContext) }
     private val keyProvider by lazy { KeystoreKeyProvider(applicationContext) }
+    private val historyRepository by lazy {
+        EncryptedHistoryRepository(
+            keystore = AndroidKeystoreKeyStore(EncryptedHistoryRepository.DEFAULT_KEY_ALIAS),
+            cipher = JavaxAesGcmCipher(),
+            blobStore = FileBlobStore(applicationContext, EncryptedHistoryRepository.DEFAULT_FILE_NAME),
+            retentionDays = { cachedHistoryRetentionDays },
+        )
+    }
+    @Volatile
+    private var cachedHistoryRetentionDays = SettingsRepository.DEFAULT_RETENTION_DAYS
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,6 +92,9 @@ class MainActivity : ComponentActivity() {
         }
         if (canDrawOverlays()) {
             startRuntime()
+        }
+        lifecycleScope.launch {
+            settingsRepository.historyRetentionDays.collect { cachedHistoryRetentionDays = it }
         }
     }
 
@@ -163,17 +184,28 @@ class MainActivity : ComponentActivity() {
         isAccessibilityEnabled: () -> Boolean,
     ) {
         var showSettings by remember { mutableStateOf(false) }
+        var showHistory by remember { mutableStateOf(false) }
         var neededPermissions by remember { mutableStateOf(runtimePermissionsNeeded()) }
         val permissionLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions(),
         ) {
             neededPermissions = runtimePermissionsNeeded()
         }
-        if (showSettings) {
+        if (showHistory) {
+            HistoryScreen(
+                historyRepository = historyRepository,
+                onBack = { showHistory = false },
+                onCopied = { msg -> Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show() },
+            )
+        } else if (showSettings) {
             SettingsScreen(
                 settings = settings,
                 keyProvider = keyProvider,
                 onBack = { showSettings = false },
+                onOpenHistory = {
+                    showSettings = false
+                    showHistory = true
+                },
             )
         } else {
             Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -238,6 +270,13 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(stringResource(R.string.home_open_settings))
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = { showHistory = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.home_open_history))
                     }
                     Spacer(Modifier.height(16.dp))
                     Text(

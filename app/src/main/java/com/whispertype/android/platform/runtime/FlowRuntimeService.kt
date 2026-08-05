@@ -109,9 +109,9 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     /** Opt-in encrypted transcript history (0.4.0). */
     private val historyRepository: HistoryRepository by lazy {
         EncryptedHistoryRepository(
-            keystore = AndroidKeystoreKeyStore(HISTORY_KEY_ALIAS),
+            keystore = AndroidKeystoreKeyStore(EncryptedHistoryRepository.DEFAULT_KEY_ALIAS),
             cipher = JavaxAesGcmCipher(),
-            blobStore = FileBlobStore(this, HISTORY_FILE_NAME),
+            blobStore = FileBlobStore(this, EncryptedHistoryRepository.DEFAULT_FILE_NAME),
             retentionDays = { cachedHistoryRetentionDays },
         )
     }
@@ -495,8 +495,6 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         const val TAG = "FlowRuntimeService"
         const val NOTIFICATION_ID = 1001
         const val NOTIFICATION_CHANNEL_ID = "whispertype_runtime"
-        const val HISTORY_FILE_NAME = "dictation_history.json.enc"
-        const val HISTORY_KEY_ALIAS = "whispertype_history_key"
 
         /** Process-local service-liveness flag for the app UI (set in onCreate/onDestroy). */
         @Volatile

@@ -121,6 +121,11 @@ class EncryptedHistoryRepository(
 
     companion object {
         private const val MILLIS_PER_DAY = 86_400_000L
+
+        /** Shared production identity: keystore alias + blob file used by both the
+         *  runtime (writer) and the UI (reader) in the same process. */
+        const val DEFAULT_KEY_ALIAS = "whispertype_history_key"
+        const val DEFAULT_FILE_NAME = "dictation_history.json.enc"
     }
 }
 

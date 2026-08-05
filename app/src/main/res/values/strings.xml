@@ -87,4 +87,40 @@
     <string name="settings_key_saved" tools:ignore="UnusedResources">Key saved</string>
     <string name="settings_key_save_failed" tools:ignore="UnusedResources">Could not save key</string>
     <string name="settings_key_cleared" tools:ignore="UnusedResources">Key removed</string>
+
+    <!-- 0.4.0 settings: auto-stop, polish, dictionary, history, bubble -->
+    <string name="settings_auto_stop">Auto-stop timeout</string>
+    <string name="settings_auto_stop_desc">Stop automatically after silence or the maximum recording time.</string>
+    <string name="auto_stop_15s">15 seconds</string>
+    <string name="auto_stop_30s">30 seconds</string>
+    <string name="auto_stop_60s">60 seconds</string>
+    <string name="auto_stop_120s">2 minutes</string>
+    <string name="auto_stop_300s">5 minutes</string>
+    <string name="settings_polish">Output polish</string>
+    <string name="settings_polish_desc">How much the transcription is cleaned up (None = verbatim as spoken).</string>
+    <string name="polish_none">None (verbatim)</string>
+    <string name="polish_low">Low</string>
+    <string name="polish_medium">Medium</string>
+    <string name="polish_high">High</string>
+    <string name="settings_dictionary">Custom dictionary</string>
+    <string name="settings_dictionary_desc">Correct recurring words or spellings at insertion.</string>
+    <string name="settings_dictionary_add">Add</string>
+    <string name="settings_dictionary_word_hint">Word as spoken</string>
+    <string name="settings_dictionary_replacement_hint">Always write as (optional)</string>
+    <string name="settings_dictionary_empty">No dictionary entries yet.</string>
+    <string name="settings_dictionary_clear">Clear all</string>
+    <string name="settings_history_view">View history</string>
+    <string name="settings_bubble_reset">Reset bubble position</string>
+    <string name="settings_bubble_reset_desc">Return the mic bubble to its default position.</string>
+
+    <!-- History screen (0.4.0) -->
+    <string name="history_title">History</string>
+    <string name="history_back">Back</string>
+    <string name="history_empty">No history yet.</string>
+    <string name="history_delete">Delete</string>
+    <string name="history_delete_all">Delete all</string>
+    <string name="history_copy">Copy</string>
+    <string name="history_copied">Copied</string>
+    <string name="history_cleared">History cleared</string>
+    <string name="home_open_history">History</string>
 </resources>
