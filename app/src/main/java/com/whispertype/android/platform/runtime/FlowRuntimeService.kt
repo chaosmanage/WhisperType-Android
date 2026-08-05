@@ -317,6 +317,11 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         return sendInsert(sessionId, text, reply)
     }
 
+    override fun onSessionFinished(state: DictationState, metrics: MutableSessionMetrics) {
+        // Aggregate per-session outcome + stage latencies. Never transcript or audio.
+        Log.i(TAG, "SESSION DONE outcome=${state::class.simpleName} ${metrics.summary()}")
+    }
+
     // ------------------------------------------------------------------
     // Shared IPC + failure helpers
     // ------------------------------------------------------------------

@@ -46,6 +46,12 @@ interface DictationHost {
 
     /** Sends the insert request over IPC; false when accessibility is absent. */
     fun sendInsertion(sessionId: SessionId, text: String): Boolean
+
+    /**
+     * Per-session aggregate diagnostics at terminal state. Must never contain
+     * transcript text, audio, keys, or full server frames.
+     */
+    fun onSessionFinished(state: DictationState, metrics: MutableSessionMetrics)
 }
 
 /** Outcome of [DictationHost.resolveSession]. */
@@ -572,6 +578,7 @@ class DictationCoordinator(
     private fun resetToIdle(holder: ActiveLiveSession) {
         if (active === holder) {
             active = null
+            host.onSessionFinished(lastPublished, holder.metrics)
             publish(DictationState.Idle)
         }
     }

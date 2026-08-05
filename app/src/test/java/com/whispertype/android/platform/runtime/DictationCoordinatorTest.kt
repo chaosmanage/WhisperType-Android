@@ -112,6 +112,7 @@ class DictationCoordinatorTest {
         val insertions = mutableListOf<Pair<SessionId, String>>()
         val session = FakeSession()
         val capture = FakeCapture()
+        val finished = mutableListOf<Pair<DictationState, MutableSessionMetrics>>()
         var resolveResult: SessionResolve = SessionResolve.Ok(SessionResolution(session, LanguageMode.ENGLISH))
         var captureStart: CaptureStart = CaptureStart.Started(capture)
         var insertionAccepted = true
@@ -127,6 +128,10 @@ class DictationCoordinatorTest {
         override fun sendInsertion(sessionId: SessionId, text: String): Boolean {
             insertions += sessionId to text
             return insertionAccepted
+        }
+
+        override fun onSessionFinished(state: DictationState, metrics: MutableSessionMetrics) {
+            finished += state to metrics
         }
     }
 
