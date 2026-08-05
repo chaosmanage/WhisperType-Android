@@ -108,10 +108,11 @@ class AccessibilityTargetGateway(
         val before = readSurrounding(ic) ?: return null
         ic.commitText(text, NEW_CURSOR_POSITION, null)
         val after = readSurrounding(ic) ?: return null
-        // Confirmed if the surrounding text changed and now contains the commit.
-        val beforeText = before.getText().toString()
-        val afterText = after.getText().toString()
-        afterText.contains(text) && afterText != beforeText
+        InsertionVerifier.confirmed(
+            before = before.getText().toString(),
+            after = after.getText().toString(),
+            committed = text,
+        )
     } catch (_: Throwable) {
         null
     }

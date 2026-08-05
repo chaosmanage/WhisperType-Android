@@ -73,3 +73,17 @@ Build id: `assembleDebug` on `rebuild/clean-runtime`, commit `4f6ef67`.
 3. Run Phase 2 rotation/50-cycle gate.
 4. Run Phase 3/4 focus + insertion gates. Do not proceed to Gemini (Phase 6) until
    the overlay and static-insertion gates pass.
+
+## Stage 1a — Pure insertion verification + build evidence — DONE (code)
+
+- `platform/accessibility/InsertionVerifier.kt` — pure surrounding-text change
+  detection (`true` / `false` / `null`-ambiguous), used by the cursor-aware commit.
+- `InsertionVerifierTest.kt` — host tests for the exactly-once / ambiguous contract.
+
+**Build identifier:** `rebuild/clean-runtime` @ `8850ecb`-based working tree,
+`app/build/outputs/apk/debug/app-debug.apk`
+SHA-256 `efea49050cce12a339bf97a1312a384e49957bb18c318037edf42e9969053e36`.
+
+**Tests run:** `assembleDebug` PASS; `testDebugUnitTest` PASS (0 failures);
+`lintDebug` PASS (0 errors). Physical gates remain NOT RUN.
+
