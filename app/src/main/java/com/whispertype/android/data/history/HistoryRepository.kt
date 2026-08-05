@@ -2,24 +2,25 @@ package com.whispertype.android.data.history
 
 import kotlinx.coroutines.flow.Flow
 
-/**
- * Opt-in transcript history. History is disabled by default; while disabled no
- * transcript storage is initialized and [record] is a no-op. Storage is
- * encrypted, retention-controlled, and absent when disabled.
- */
+/** Opt-in, encrypted transcript history (text included). */
 interface HistoryRepository {
-    /** One aggregate, non-sensitive history entry. */
-    data class HistoryEvent(
+
+    data class HistoryEntry(
+        val id: String,
         val timestampMillis: Long,
+        val text: String,
         val language: String,
         val charCount: Int,
         val outcome: String,
     )
 
-    fun events(): Flow<List<HistoryEvent>>
+    /** Newest-first, retention-pruned entries. */
+    fun events(): Flow<List<HistoryEntry>>
 
-    /** Returns false when history is disabled; never throws for storage absence. */
-    suspend fun record(event: HistoryEvent): Boolean
+    /** Records one entry (prunes by retention + cap). False on storage failure. */
+    suspend fun record(entry: HistoryEntry): Boolean
+
+    suspend fun delete(id: String): Boolean
 
     suspend fun clear(): Boolean
 }
