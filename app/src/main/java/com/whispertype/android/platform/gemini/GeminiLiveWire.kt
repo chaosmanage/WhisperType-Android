@@ -158,42 +158,10 @@ object GeminiLiveWire {
             )
         }.toString()
 
-    /** One client text turn appended to the open turn (no turnComplete). Used to
-     *  prime the model's behavior without a systemInstruction, which the server
-     *  currently suppresses transcription for. */
-    fun buildTextTurn(text: String): String =
-        buildJsonObject {
-            put(
-                "clientContent",
-                buildJsonObject {
-                    put(
-                        "turns",
-                        kotlinx.serialization.json.buildJsonArray {
-                            add(
-                                buildJsonObject {
-                                    put("role", "user")
-                                    put(
-                                        "parts",
-                                        kotlinx.serialization.json.buildJsonArray {
-                                            add(buildJsonObject { put("text", text) })
-                                        },
-                                    )
-                                },
-                            )
-                        },
-                    )
-                },
-            )
-        }.toString()
-
-    // ------------------------------------------------------------------
-    // Server -> client
-    // ------------------------------------------------------------------
-
     /**
-     * Parses one server message. Returns [ServerMessage.Unknown] for messages
-     * that carry no action (tool calls, grounding, etc.) so the session can
-     * ignore them without erroring.
+     * Explicit realtime activity boundary: start of a push-to-talk utterance
+     * (manual activity detection). Sent as a realtime-input message before the
+     * first audio frame.
      */
     fun parseServerMessage(raw: String): ServerMessage =
         try {

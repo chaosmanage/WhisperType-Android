@@ -269,10 +269,10 @@ class FlowRuntimeService : Service(), OverlayOwners {
                 config = GeminiSessionConfig(
                     model = model,
                     language = language,
-                    // No systemInstruction: a systemInstruction suppresses the
-                    // server's outputTranscription delivery (verified 2026-08-05 on
-                    // the live endpoint). outputAudioTranscription transcribes the
-                    // model's spoken reply, which is the dictation echo source.
+                    // Release B production protocol: manual activity signaling
+                    // (automaticActivityDetection disabled by default) and no
+                    // text prime, no systemInstruction, no output transcription.
+                    // The dictation source is inputTranscription only.
                 ),
                 metrics = metrics,
             )
@@ -301,6 +301,18 @@ class FlowRuntimeService : Service(), OverlayOwners {
             }
             if (_sessionState.value !is DictationState.Starting) return
 
+            // Release B5: open the realtime activity before the microphone so the
+            // wire order is always setup, setupComplete, activityStart, audio,
+            // activityEnd. Fail promptly if the boundary cannot be queued.
+            when (val start = session.startActivity()) {
+                is SendResult.Rejected -> {
+                    failWith(sessionId, transportFailure(start.reason))
+                    return
+                }
+                SendResult.Accepted -> Unit
+            }
+            liveMetrics?.mark(MutableSessionMetrics.Event.ActivityStartQueued)
+
             if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
                 != android.content.pm.PackageManager.PERMISSION_GRANTED
             ) {
@@ -315,7 +327,7 @@ class FlowRuntimeService : Service(), OverlayOwners {
                 return
             }
 
-            // Phase 6: promote to microphone foreground mode before AudioRecord,
+            // Release B5: promote to microphone foreground mode before AudioRecord,
             // only now that RECORD_AUDIO is confirmed granted. specialUse stays in
             // the type set so the overlay service keeps running after dictation.
             startForeground(
@@ -323,13 +335,6 @@ class FlowRuntimeService : Service(), OverlayOwners {
                 buildNotification(),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
             )
-
-            // Prime the model as a dictation echo via a client text turn (kept
-            // inside the open turn, before any audio). A systemInstruction would
-            // suppress outputTranscription; this client turn does not, so the
-            // model's spoken echo is transcribed and becomes the dictation.
-            session.sendTextTurn(DICTATION_PRIME_TEXT)
-            Log.i(TAG, "STAGE: dictation prime sent")
 
             liveMetrics?.mark(MutableSessionMetrics.Event.CaptureStartRequested)
             val cap = AudioCapture()
@@ -515,8 +520,15 @@ class FlowRuntimeService : Service(), OverlayOwners {
             capture?.stop()
             audioJob?.join()
             liveMetrics?.mark(MutableSessionMetrics.Event.CaptureQuiesced)
-            session?.endActivity()
+            val endResult = session?.endActivity()
             liveMetrics?.mark(MutableSessionMetrics.Event.ActivityEndQueued)
+            if (endResult is SendResult.Rejected) {
+                // B6: a rejected boundary means no completion can arrive; fail
+                // promptly instead of entering an eight-second wait.
+                Log.w(TAG, "endActivity rejected: ${endResult.reason}")
+                selectAndInsert(sessionId)
+                return@launch
+            }
             Log.i(TAG, "endActivity sent")
         }
         // Safety net: if the server never sends turnComplete (empty turn, dropped
@@ -589,6 +601,14 @@ class FlowRuntimeService : Service(), OverlayOwners {
     private fun runtimeNoAccessibility(): DictationFailure = DictationFailure(
         code = "runtime_no_accessibility",
         message = "Accessibility is not connected yet.",
+        recoverable = true,
+    )
+
+    /** Typed failure for a rejected realtime boundary (Release B6): a completion
+     *  message can never arrive, so the session must fail without an 8s wait. */
+    private fun transportFailure(reason: String): DictationFailure = DictationFailure(
+        code = "gemini_transport",
+        message = "Gemini rejected the activity boundary ($reason).",
         recoverable = true,
     )
 
@@ -690,15 +710,6 @@ class FlowRuntimeService : Service(), OverlayOwners {
         const val RETURN_TO_IDLE_MS = 1200L
         const val TRAILING_TRANSCRIPT_GRACE_MS = 2000L
         const val FINALIZE_TIMEOUT_MS = 8000L
-
-        /** Client text turn (not a systemInstruction) priming the Live model to
-         *  speak the user's dictation verbatim; its outputTranscription becomes
-         *  the transcript. */
-        const val DICTATION_PRIME_TEXT =
-            "You are a verbatim dictation echo. When the user speaks, speak back " +
-                "ONLY their exact words, word for word, in the same language. Do not " +
-                "greet, do not comment, do not ask questions, do not paraphrase, and " +
-                "do not acknowledge this instruction."
 
         /** Process-local service-liveness flag for the app UI (set in onCreate/onDestroy). */
         @Volatile

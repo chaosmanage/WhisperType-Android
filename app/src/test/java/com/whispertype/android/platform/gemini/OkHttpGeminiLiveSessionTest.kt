@@ -92,12 +92,24 @@ class OkHttpGeminiLiveSessionTest {
         fail("condition not met within ${timeoutMs}ms; messages=${serverSocket.clientMessages}")
     }
 
+    private fun realtimeInputFrames(messages: List<String>): List<kotlinx.serialization.json.JsonObject> =
+        messages.mapNotNull { raw ->
+            val root = runCatching { Json.parseToJsonElement(raw).jsonObject }.getOrNull() ?: return@mapNotNull null
+            root["realtimeInput"]?.jsonObject
+        }
+
+    private fun countMessages(messages: List<String>, key: String): Int =
+        messages.count { raw ->
+            runCatching { Json.parseToJsonElement(raw).jsonObject["realtimeInput"]?.jsonObject?.containsKey(key) == true }
+                .getOrDefault(false)
+        }
+
     // ------------------------------------------------------------------
 
     @Test
-    fun `setup is the first client message and carries the configured model`() = runBlocking {
+    fun `setup is the first client message and carries the configured model and manual activity config`() = runBlocking {
         val session = newSession(
-            GeminiSessionConfig(model = "gemini-test-live", systemInstruction = "Transcribe only."),
+            GeminiSessionConfig(model = "gemini-test-live"),
         )
         session.awaitReady()
 
@@ -111,6 +123,11 @@ class OkHttpGeminiLiveSessionTest {
             (modalities as kotlinx.serialization.json.JsonArray).map { it.jsonPrimitive.content },
         )
         assertTrue(setup.containsKey("inputAudioTranscription"))
+        assertFalse(setup.containsKey("outputAudioTranscription"), "output transcription must be off by default")
+        val automaticActivityDetection = setup["realtimeInputConfig"]!!.jsonObject["automaticActivityDetection"]!!.jsonObject
+        assertTrue(automaticActivityDetection["disabled"]!!.jsonPrimitive.boolean)
+        assertFalse(setup.containsKey("systemInstruction"))
+        assertFalse(first.contains("turns"))
         session.close()
     }
 
@@ -125,7 +142,7 @@ class OkHttpGeminiLiveSessionTest {
     }
 
     @Test
-    fun `sendAudio before ready is rejected`() = runBlocking {
+    fun `startActivity before ready is rejected`() = runBlocking {
         val noAckServer = MockWebServer()
         noAckServer.enqueue(
             MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {}).build(),
@@ -133,8 +150,7 @@ class OkHttpGeminiLiveSessionTest {
         noAckServer.start()
         try {
             val session = newSession(target = noAckServer)
-            val chunk = AudioChunk(0, byteArrayOf(1, 2), sampleRateHz = 16_000)
-            assertEquals(SendResult.Rejected("session_not_ready"), session.sendAudio(chunk))
+            assertEquals(SendResult.Rejected("session_not_ready"), session.startActivity())
             session.close()
         } finally {
             activeClient?.dispatcher?.cancelAll()
@@ -144,89 +160,123 @@ class OkHttpGeminiLiveSessionTest {
     }
 
     @Test
-    fun `sendAudio sends base64 pcm with rate mime type`() = runBlocking {
+    fun `startActivity sends exactly one activityStart realtime-input message`() = runBlocking {
         val session = newSession()
         session.awaitReady()
+
+        assertEquals(SendResult.Accepted, session.startActivity())
+        awaitMessages { serverSocket.clientMessages.any { it.contains("activityStart") } }
+        assertEquals(1, countMessages(serverSocket.clientMessages, "activityStart"))
+        assertFalse(serverSocket.clientMessages.any { it.contains("clientContent") })
+        session.close()
+    }
+
+    @Test
+    fun `duplicate startActivity sends no second wire message`() = runBlocking {
+        val session = newSession()
+        session.awaitReady()
+        session.startActivity()
+        awaitMessages { serverSocket.clientMessages.any { it.contains("activityStart") } }
+
+        assertEquals(SendResult.Accepted, session.startActivity())
+        assertEquals(1, countMessages(serverSocket.clientMessages, "activityStart"))
+        session.close()
+    }
+
+    @Test
+    fun `audio before activity start is rejected`() = runBlocking {
+        val session = newSession()
+        session.awaitReady()
+
+        val chunk = AudioChunk(0, byteArrayOf(1, 2), sampleRateHz = 16_000)
+        assertEquals(SendResult.Rejected("audio_before_activity_start"), session.sendAudio(chunk))
+        assertEquals(0, countMessages(serverSocket.clientMessages, "realtimeInput"))
+        session.close()
+    }
+
+    @Test
+    fun `sendAudio sends base64 pcm with rate mime type after start`() = runBlocking {
+        val session = newSession()
+        session.awaitReady()
+        session.startActivity()
 
         val bytes = byteArrayOf(0x01, 0x02, 0x03, 0x04)
         val result = session.sendAudio(AudioChunk(0, bytes, sampleRateHz = 16_000))
         assertEquals(SendResult.Accepted, result)
 
-        awaitMessages { serverSocket.clientMessages.any { it.contains("realtimeInput") } }
-        val audio = Json.parseToJsonElement(serverSocket.clientMessages.first { it.contains("realtimeInput") })
-            .jsonObject["realtimeInput"]!!.jsonObject["audio"]!!.jsonObject
+        awaitMessages { serverSocket.clientMessages.any { it.contains("audio") } }
+        val audio = realtimeInputFrames(serverSocket.clientMessages).first { it.containsKey("audio") }["audio"]!!.jsonObject
         assertEquals(Base64.getEncoder().encodeToString(bytes), audio["data"]!!.jsonPrimitive.content)
         assertEquals("audio/pcm;rate=16000", audio["mimeType"]!!.jsonPrimitive.content)
         session.close()
     }
 
     @Test
-    fun `probe records complete client-message order setup-then-audio`() = runBlocking {
+    fun `dictation session sends exactly one activityStart then ordered audio then one activityEnd and no clientContent`() = runBlocking {
         val session = newSession()
         session.awaitReady()
-        awaitMessages { serverSocket.clientMessages.isNotEmpty() }
-
+        session.startActivity()
         session.sendAudio(AudioChunk(1, byteArrayOf(1, 2), sampleRateHz = 16_000))
         session.sendAudio(AudioChunk(2, byteArrayOf(3, 4), sampleRateHz = 16_000))
-        awaitMessages { serverSocket.clientMessages.size >= 3 }
+        assertEquals(SendResult.Accepted, session.endActivity())
+        awaitMessages { countMessages(serverSocket.clientMessages, "activityEnd") == 1 }
 
-        val setup = Json.parseToJsonElement(serverSocket.clientMessages[0]).jsonObject
-        assertTrue(setup.containsKey("setup"), "the setup message must be the first client message")
-
-        val realtime = serverSocket.clientMessages.drop(1).map {
-            Json.parseToJsonElement(it).jsonObject["realtimeInput"]!!.jsonObject
-        }
-        assertEquals(2, realtime.size)
-        assertEquals("AQI=", realtime[0]["audio"]!!.jsonObject["data"]!!.jsonPrimitive.content)
-        assertEquals("AwQ=", realtime[1]["audio"]!!.jsonObject["data"]!!.jsonPrimitive.content)
+        val frames = realtimeInputFrames(serverSocket.clientMessages)
+        assertEquals("activityStart", frames.first().keys.first())
+        val audioFrames = frames.filter { it.containsKey("audio") }
+        assertEquals(2, audioFrames.size)
+        assertEquals("AQI=", audioFrames[0]["audio"]!!.jsonObject["data"]!!.jsonPrimitive.content)
+        assertEquals("AwQ=", audioFrames[1]["audio"]!!.jsonObject["data"]!!.jsonPrimitive.content)
+        assertEquals("activityEnd", frames.last().keys.first())
+        assertTrue(serverSocket.clientMessages.none { it.contains("clientContent") })
+        assertTrue(serverSocket.clientMessages.none { it.contains("audioStreamEnd") })
         session.close()
     }
 
     @Test
-    fun `sendTextTurn sends a user text turn without turnComplete`() = runBlocking {
+    fun `duplicate endActivity sends no second wire message`() = runBlocking {
         val session = newSession()
         session.awaitReady()
-
-        session.sendTextTurn("echo my words")
-        awaitMessages { serverSocket.clientMessages.any { it.contains("turns") } }
-        val msg = serverSocket.clientMessages.first { it.contains("turns") }
-        val content = Json.parseToJsonElement(msg).jsonObject["clientContent"]!!.jsonObject
-        assertFalse(content.containsKey("turnComplete"))
-        val text = content["turns"]!!.jsonArray.first().jsonObject["parts"]!!
-            .jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
-        assertEquals("echo my words", text)
-        session.close()
-    }
-
-    @Test
-    fun `endActivity sends a single turnComplete boundary`() = runBlocking {
-        val session = newSession()
-        session.awaitReady()
-
+        session.startActivity()
         session.endActivity()
-        awaitMessages { serverSocket.clientMessages.any { it.contains("clientContent") } }
-        val content = Json.parseToJsonElement(serverSocket.clientMessages.first { it.contains("clientContent") })
-            .jsonObject["clientContent"]!!.jsonObject
-        assertTrue(content["turnComplete"]!!.jsonPrimitive.boolean)
+        awaitMessages { countMessages(serverSocket.clientMessages, "activityEnd") == 1 }
+
+        assertEquals(SendResult.Accepted, session.endActivity())
+        assertEquals(1, countMessages(serverSocket.clientMessages, "activityEnd"))
         session.close()
     }
 
     @Test
-    fun `modelTurn text emits TranscriptCandidates after inputTranscription`() = runBlocking {
+    fun `audio after activity end is rejected`() = runBlocking {
         val session = newSession()
-        val events = bufferEvents(session)
         session.awaitReady()
-        receiveWithTimeout(events)
+        session.startActivity()
+        session.endActivity()
+        awaitMessages { countMessages(serverSocket.clientMessages, "activityEnd") == 1 }
 
-        serverSocket.push("""{"serverContent":{"inputTranscription":{"text":"hello"}}}""")
-        serverSocket.push("""{"serverContent":{"modelTurn":{"parts":[{"text":"hello world"}]}}}""")
-        val event = receiveWithTimeout(events)
-        assertIs<GeminiEvent.TranscriptCandidates>(event)
-        assertEquals(listOf("hello"), event.candidates.map { it.raw })
-        val second = receiveWithTimeout(events)
-        assertIs<GeminiEvent.TranscriptCandidates>(second)
-        assertEquals(listOf("hello world"), second.candidates.map { it.raw })
-        assertEquals(null, second.candidates.first().cleaned)
+        val chunk = AudioChunk(3, byteArrayOf(1, 2), sampleRateHz = 16_000)
+        assertEquals(SendResult.Rejected("audio_after_activity_end"), session.sendAudio(chunk))
+        val audioCount = realtimeInputFrames(serverSocket.clientMessages).count { it.containsKey("audio") }
+        assertEquals(0, audioCount)
+        session.close()
+    }
+
+    @Test
+    fun `automatic VAD session uses audioStreamEnd completion instead of activity boundaries`() = runBlocking {
+        val session = newSession(GeminiSessionConfig(model = "test-model", automaticActivityDetectionDisabled = false))
+        session.awaitReady()
+        awaitMessages { serverSocket.clientMessages.isNotEmpty() }
+        val setup = Json.parseToJsonElement(serverSocket.clientMessages.first()).jsonObject["setup"]!!.jsonObject
+        assertFalse(setup.containsKey("realtimeInputConfig"))
+
+        assertEquals(SendResult.Accepted, session.startActivity())
+        assertEquals(SendResult.Accepted, session.endActivity())
+        awaitMessages { serverSocket.clientMessages.any { it.contains("audioStreamEnd") } }
+
+        val frames = realtimeInputFrames(serverSocket.clientMessages)
+        assertTrue(frames.none { it.containsKey("activityStart") })
+        assertTrue(frames.none { it.containsKey("activityEnd") })
+        assertTrue(frames.last().containsKey("audioStreamEnd"))
         session.close()
     }
 
@@ -245,26 +295,24 @@ class OkHttpGeminiLiveSessionTest {
     }
 
     @Test
-    fun `outputTranscription is ignored until inputTranscription fired`() = runBlocking {
+    fun `outputTranscription never emits a user candidate`() = runBlocking {
         val session = newSession()
         val events = bufferEvents(session)
         session.awaitReady()
         receiveWithTimeout(events)
 
         serverSocket.push("""{"serverContent":{"outputTranscription":{"text":"I understand."}}}""")
+        serverSocket.push("""{"serverContent":{"modelTurn":{"parts":[{"text":"hello world"}]}}}""")
         serverSocket.push("""{"serverContent":{"inputTranscription":{"text":"the birch canoe"}}}""")
         val event = receiveWithTimeout(events)
         assertIs<GeminiEvent.TranscriptCandidates>(event)
         assertEquals(
             listOf("the birch canoe"),
             event.candidates.map { it.raw },
-            "the pre-input echo must be dropped; only the input arrives",
+            "only the user's inputTranscription may ever become a candidate",
         )
-
-        serverSocket.push("""{"serverContent":{"outputTranscription":{"text":"the birch canoe slid"}}}""")
-        val second = receiveWithTimeout(events)
-        assertIs<GeminiEvent.TranscriptCandidates>(second)
-        assertEquals(listOf("the birch canoe slid"), second.candidates.map { it.raw })
+        // No additional candidate may arrive from the echo or model-turn frames.
+        assertNull(events.tryReceive().getOrNull(), "echo/model-turn must never emit a user candidate")
         session.close()
     }
 

@@ -9,6 +9,7 @@ import com.whispertype.android.core.model.ResultCandidate
 import com.whispertype.android.core.model.SendResult
 import java.util.Base64
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
@@ -28,13 +29,26 @@ class GeminiLiveException(val failure: DictationFailure) : Exception(failure.mes
 /**
  * [GeminiLiveSession] over an OkHttp [WebSocket] to the Gemini Live
  * `BidiGenerateContent` endpoint. Readiness is the server's `setupComplete`,
- * not socket-open ([awaitReady]). Setup is sent on open, audio is base64 PCM16
- * in `realtimeInput.audio` frames, and the turn ends with one
- * `clientContent.turnComplete` boundary ([endActivity]).
+ * not socket-open ([awaitReady]). Setup is sent on open; audio is base64 PCM16
+ * in `realtimeInput.audio` frames; the push-to-talk activity is delimited by an
+ * explicit `realtimeInput.activityStart` / `activityEnd` pair (manual activity
+ * detection, the production design), or `audioStreamEnd:true` under automatic
+ * VAD.
  *
- * Threading: OkHttp delivers listener callbacks on its dispatcher; this class
- * never blocks the caller's coroutine beyond the ready/event channels, and all
- * `send` calls are thread-safe OkHttp queue operations.
+ * Session state machine (Release B4):
+ *   Connecting -> Ready -> ActivityStarted -> ActivityEnded -> Closed
+ *
+ * Enforced rules:
+ *  - [startActivity] before Ready is rejected; a duplicate start sends no wire
+ *    message; start after end/close is rejected.
+ *  - [sendAudio] before start or after end is rejected.
+ *  - [endActivity] before start or after close is rejected; a duplicate end
+ *    sends no wire message.
+ *  - A failed `WebSocket.send` returns [SendResult.Rejected] immediately.
+ *  - [close] is idempotent and takes the session to Closed from any state.
+ *
+ * The outbound state is one [AtomicReference], so concurrent callers (the
+ * audio sender and the finalizer) cannot violate the state machine.
  */
 class OkHttpGeminiLiveSession(
     private val client: OkHttpClient,
@@ -43,15 +57,12 @@ class OkHttpGeminiLiveSession(
     private val metrics: MutableSessionMetrics? = null,
 ) : GeminiLiveSession {
 
+    private enum class State { Connecting, Ready, ActivityStarted, ActivityEnded, Closed }
+
     private val _events = Channel<GeminiEvent>(Channel.UNLIMITED)
     private val ready = CompletableDeferred<Unit>()
     private val closed = AtomicBoolean(false)
-
-    /** True once the server delivered at least one inputTranscription this session.
-     *  Echo (outputTranscription) candidates are only trusted after that: when the
-     *  ASR is not transcribing the user's speech, the model's "echo" is an
-     *  acknowledgment/greeting, never dictation. */
-    private var sawInputTranscription = false
+    private val state = AtomicReference(State.Connecting)
 
     private var socket: WebSocket? = client.newWebSocket(
         Request.Builder().url(wsUrl).build(),
@@ -72,8 +83,45 @@ class OkHttpGeminiLiveSession(
         }
     }
 
+    override suspend fun startActivity(): SendResult {
+        val current = state.get()
+        return when (current) {
+            State.Connecting -> SendResult.Rejected(REASON_NOT_READY)
+            State.Ready -> {
+                if (state.compareAndSet(State.Ready, State.ActivityStarted)) {
+                    val ws = socket
+                    if (ws == null) {
+                        state.set(State.Closed)
+                        return SendResult.Rejected(REASON_CLOSED)
+                    }
+                    if (config.automaticActivityDetectionDisabled) {
+                        val sent = ws.send(GeminiLiveWire.buildActivityStart())
+                        if (!sent) {
+                            state.set(State.Closed)
+                            return SendResult.Rejected(REASON_CLOSED)
+                        }
+                        metrics?.mark(MutableSessionMetrics.Event.ActivityStartQueued)
+                    }
+                    SendResult.Accepted
+                } else {
+                    // Lost the race to another starter or a close.
+                    sendResultFor(state.get())
+                }
+            }
+            State.ActivityStarted -> SendResult.Accepted // duplicate start: no second wire message
+            State.ActivityEnded -> SendResult.Rejected(REASON_ACTIVITY_ENDED)
+            State.Closed -> SendResult.Rejected(REASON_CLOSED)
+        }
+    }
+
     override suspend fun sendAudio(chunk: AudioChunk): SendResult {
-        if (!ready.isCompleted) return SendResult.Rejected(REASON_NOT_READY)
+        when (state.get()) {
+            State.Connecting -> return SendResult.Rejected(REASON_NOT_READY)
+            State.Ready -> return SendResult.Rejected(REASON_AUDIO_BEFORE_START)
+            State.ActivityEnded -> return SendResult.Rejected(REASON_AUDIO_AFTER_END)
+            State.Closed -> return SendResult.Rejected(REASON_CLOSED)
+            State.ActivityStarted -> Unit
+        }
         val ws = socket ?: return SendResult.Rejected(REASON_CLOSED)
         val dataBase64 = Base64.getEncoder().encodeToString(chunk.pcm16Bytes)
         val sent = ws.send(GeminiLiveWire.buildAudioChunk(dataBase64, chunk.sampleRateHz))
@@ -83,23 +131,58 @@ class OkHttpGeminiLiveSession(
         return if (sent) SendResult.Accepted else SendResult.Rejected(REASON_CLOSED)
     }
 
-    override suspend fun endActivity() {
-        socket?.send(GeminiLiveWire.buildTurnComplete())
-    }
-
-    override suspend fun sendTextTurn(text: String) {
-        socket?.send(GeminiLiveWire.buildTextTurn(text))
+    override suspend fun endActivity(): SendResult {
+        val current = state.get()
+        return when (current) {
+            State.Connecting -> SendResult.Rejected(REASON_NOT_READY)
+            State.Ready -> SendResult.Rejected(REASON_ACTIVITY_NOT_STARTED)
+            State.ActivityStarted -> {
+                if (state.compareAndSet(State.ActivityStarted, State.ActivityEnded)) {
+                    val ws = socket
+                    if (ws == null) {
+                        state.set(State.Closed)
+                        return SendResult.Rejected(REASON_CLOSED)
+                    }
+                    val message =
+                        if (config.automaticActivityDetectionDisabled) {
+                            GeminiLiveWire.buildActivityEnd()
+                        } else {
+                            GeminiLiveWire.buildAudioStreamEnd()
+                        }
+                    val sent = ws.send(message)
+                    if (!sent) {
+                        state.set(State.Closed)
+                        return SendResult.Rejected(REASON_CLOSED)
+                    }
+                    metrics?.mark(MutableSessionMetrics.Event.ActivityEndQueued)
+                    SendResult.Accepted
+                } else {
+                    sendResultFor(state.get())
+                }
+            }
+            State.ActivityEnded -> SendResult.Accepted // duplicate end: no second wire message
+            State.Closed -> SendResult.Rejected(REASON_CLOSED)
+        }
     }
 
     override fun events(): Flow<GeminiEvent> = _events.receiveAsFlow()
 
     override suspend fun close() {
         if (closed.compareAndSet(false, true)) {
+            state.set(State.Closed)
             socket?.close(NORMAL_CLOSE_CODE, "session closed")
             socket = null
             ready.completeExceptionally(CancellationException("Session closed"))
             _events.close()
         }
+    }
+
+    private fun sendResultFor(s: State): SendResult = when (s) {
+        State.Connecting -> SendResult.Rejected(REASON_NOT_READY)
+        State.Ready -> SendResult.Rejected(REASON_NOT_READY)
+        State.ActivityStarted -> SendResult.Accepted
+        State.ActivityEnded -> SendResult.Rejected(REASON_ACTIVITY_ENDED)
+        State.Closed -> SendResult.Rejected(REASON_CLOSED)
     }
 
     private fun listener(): WebSocketListener = object : WebSocketListener() {
@@ -124,6 +207,7 @@ class OkHttpGeminiLiveSession(
             when (val message = GeminiLiveWire.parseServerMessage(text)) {
                 GeminiLiveWire.ServerMessage.SetupComplete -> {
                     metrics?.mark(MutableSessionMetrics.Event.SetupComplete)
+                    state.compareAndSet(State.Connecting, State.Ready)
                     ready.complete(Unit)
                     _events.trySend(GeminiEvent.Ready)
                 }
@@ -179,37 +263,29 @@ class OkHttpGeminiLiveSession(
             TAG,
             "serverContent: inputTranscription=${message.inputTranscription?.take(80)} outputTranscription=${message.outputTranscription?.take(80)} textParts=${message.textParts.size} turnComplete=${message.turnComplete} interrupted=${message.interrupted}",
         )
-        val candidates = ArrayList<ResultCandidate>()
-        // Voice-to-text: the dictation source is inputTranscription (the user's
-        // speech as recognized by the server's ASR). outputTranscription — the
-        // transcription of the model's own audio reply — is only trusted as an
-        // echo supplement AFTER inputTranscription has fired this session; when
-        // the ASR is silent, the model's reply is an acknowledgment or greeting,
-        // never dictation. modelTurn text is only a fallback for future
-        // text-capable models.
+        // The dictation source is inputTranscription (the user's speech as
+        // recognized by the server's ASR). outputTranscription (the model's own
+        // audio reply) and modelTurn text are never user dictation: they can
+        // carry greetings, acknowledgments, or instruction echoes, so they are
+        // never selected as candidates. Only their presence is counted for
+        // diagnostics; their text is never logged.
+        val m = metrics
+        if (message.outputTranscription != null && message.outputTranscription.isNotEmpty() && m != null) {
+            m.outputTranscriptionCount += 1
+        }
         val inputTranscription = message.inputTranscription
         if (inputTranscription != null && inputTranscription.isNotEmpty()) {
-            sawInputTranscription = true
-            val m = metrics
             if (m != null) {
                 m.inputTranscriptionCount += 1
                 m.mark(MutableSessionMetrics.Event.FirstInputTranscript)
             }
-            candidates.add(ResultCandidate(raw = inputTranscription, cleaned = null, language = config.language))
-        } else if (sawInputTranscription && message.outputTranscription != null && message.outputTranscription.isNotEmpty()) {
-            val m = metrics
-            if (m != null) m.outputTranscriptionCount += 1
-            candidates.add(ResultCandidate(raw = message.outputTranscription, cleaned = null, language = config.language))
-        } else if (sawInputTranscription && message.textParts.isNotEmpty()) {
-            message.textParts.forEach { part ->
-                candidates.add(ResultCandidate(raw = part, cleaned = null, language = config.language))
-            }
-        }
-        if (candidates.isNotEmpty()) {
-            _events.trySend(GeminiEvent.TranscriptCandidates(candidates))
+            _events.trySend(
+                GeminiEvent.TranscriptCandidates(
+                    listOf(ResultCandidate(raw = inputTranscription, cleaned = null, language = config.language)),
+                ),
+            )
         }
         if (message.turnComplete) {
-            val m = metrics
             if (m != null) {
                 m.turnCompleteArrived = true
                 m.mark(MutableSessionMetrics.Event.TurnComplete)
@@ -237,6 +313,10 @@ class OkHttpGeminiLiveSession(
         const val NORMAL_CLOSE_CODE = 1000
         const val REASON_NOT_READY = "session_not_ready"
         const val REASON_CLOSED = "socket_closed"
+        const val REASON_AUDIO_BEFORE_START = "audio_before_activity_start"
+        const val REASON_AUDIO_AFTER_END = "audio_after_activity_end"
+        const val REASON_ACTIVITY_NOT_STARTED = "activity_not_started"
+        const val REASON_ACTIVITY_ENDED = "activity_ended"
         const val FAIL_SETUP = "gemini_setup"
         const val FAIL_TRANSPORT = "gemini_transport"
     }

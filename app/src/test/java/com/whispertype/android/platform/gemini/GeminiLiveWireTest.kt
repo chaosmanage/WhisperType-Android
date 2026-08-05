@@ -62,16 +62,17 @@ class GeminiLiveWireTest {
     }
 
     @Test
-    fun `buildSetup enables outputAudioTranscription by default`() {
-        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(config)).jsonObject
-        assertTrue(root["setup"]!!.jsonObject.containsKey("outputAudioTranscription"))
+    fun `buildSetup omits outputAudioTranscription by default`() {
+        val bare = GeminiSessionConfig(model = "m")
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(bare)).jsonObject
+        assertFalse(root["setup"]!!.jsonObject.containsKey("outputAudioTranscription"))
     }
 
     @Test
-    fun `buildSetup omits outputAudioTranscription when disabled`() {
-        val bare = GeminiSessionConfig(model = "m", outputAudioTranscription = false)
-        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(bare)).jsonObject
-        assertFalse(root["setup"]!!.jsonObject.containsKey("outputAudioTranscription"))
+    fun `buildSetup includes outputAudioTranscription when explicitly enabled`() {
+        val on = GeminiSessionConfig(model = "m", outputAudioTranscription = true)
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(on)).jsonObject
+        assertTrue(root["setup"]!!.jsonObject.containsKey("outputAudioTranscription"))
     }
 
     @Test
@@ -94,19 +95,6 @@ class GeminiLiveWireTest {
         val root = Json.parseToJsonElement(GeminiLiveWire.buildTurnComplete()).jsonObject
         val clientContent = root["clientContent"]!!.jsonObject
         assertTrue(clientContent["turnComplete"]!!.jsonPrimitive.boolean)
-    }
-
-    @Test
-    fun `buildTextTurn appends a user text turn without turnComplete`() {
-        val root = Json.parseToJsonElement(GeminiLiveWire.buildTextTurn("echo my words")).jsonObject
-        val clientContent = root["clientContent"]!!.jsonObject
-        assertFalse(clientContent.containsKey("turnComplete"))
-        val turns = clientContent["turns"]!!.jsonArray
-        assertEquals(1, turns.size)
-        val turn = turns.first().jsonObject
-        assertEquals("user", turn["role"]!!.jsonPrimitive.content)
-        val text = turn["parts"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
-        assertEquals("echo my words", text)
     }
 
     @Test
@@ -139,6 +127,14 @@ class GeminiLiveWireTest {
         val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(manual)).jsonObject
         val realtimeInputConfig = root["setup"]!!.jsonObject["realtimeInputConfig"]!!.jsonObject
         val automaticActivityDetection = realtimeInputConfig["automaticActivityDetection"]!!.jsonObject
+        assertTrue(automaticActivityDetection["disabled"]!!.jsonPrimitive.boolean)
+    }
+
+    @Test
+    fun `manual activity setup is the default production config`() {
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(GeminiSessionConfig(model = "m"))).jsonObject
+        val automaticActivityDetection = root["setup"]!!.jsonObject["realtimeInputConfig"]!!
+            .jsonObject["automaticActivityDetection"]!!.jsonObject
         assertTrue(automaticActivityDetection["disabled"]!!.jsonPrimitive.boolean)
     }
 

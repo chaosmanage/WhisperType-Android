@@ -21,15 +21,16 @@ class GeminiSessionConfig(
     val inputAudioTranscription: Boolean = true,
     /** When true, the setup enables `outputAudioTranscription` so the server
      *  transcribes the model's audio reply (`serverContent.outputTranscription`).
-     *  Used as the echo fallback dictation source when `inputTranscription` is
-     *  not delivered. */
-    val outputAudioTranscription: Boolean = true,
-    /** When true, the setup disables automatic activity detection
-     *  (`realtimeInputConfig.automaticActivityDetection.disabled`) so the client
-     *  must delimit push-to-talk utterances with explicit activityStart /
-     *  activityEnd realtime-input boundaries. Kept internal to probes/tests
-     *  during the Release A protocol experiment; never exposed as a user setting. */
-    val automaticActivityDetectionDisabled: Boolean = false,
+     *  Release B default is false: the model's own output is never a dictation
+     *  candidate, so requesting its transcription is unnecessary overhead. */
+    val outputAudioTranscription: Boolean = false,
+    /** When true (Release B default), the setup disables automatic activity
+     *  detection (`realtimeInputConfig.automaticActivityDetection.disabled`) so
+     *  the client must delimit push-to-talk utterances with explicit
+     *  activityStart / activityEnd realtime-input boundaries. WhisperType is
+     *  push-to-talk, so manual activity signaling is the preferred production
+     *  design. */
+    val automaticActivityDetectionDisabled: Boolean = true,
     /** Optional instruction the model applies for the whole session. */
     val systemInstruction: String? = null,
     /** Input PCM16 sample rate advertised in the audio mime type. */
