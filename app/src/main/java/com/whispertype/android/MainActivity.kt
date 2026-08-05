@@ -3,7 +3,6 @@ package com.whispertype.android
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -105,20 +104,6 @@ class MainActivity : ComponentActivity() {
                     }) {
                         Text(stringResource(R.string.overlay_permission_button))
                     }
-                }
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = {
-                    granted = canDrawOverlays()
-                    if (granted) {
-                        startRuntime()
-                        Toast.makeText(
-                            this@MainActivity,
-                            R.string.runtime_started_toast,
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                    }
-                }) {
-                    Text(stringResource(R.string.overlay_permission_button))
                 }
             }
         }

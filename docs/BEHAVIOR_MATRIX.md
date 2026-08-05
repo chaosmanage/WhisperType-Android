@@ -11,7 +11,7 @@ test that proves it, and any intentional difference.
 
 | Reference behavior | Evidence | WhisperType requirement | Implementation owner | Test | Difference / rationale |
 | --- | --- | --- | --- | --- | --- |
-| Persistent small floating bubble | Reference APK analysis + observed model | Persistent touchable `TYPE_ACCESSIBILITY_OVERLAY` bubble | platform-overlay | Overlay host + physical smoke | Original assets/branding, no keyboard-bound dock geometry |
+| Persistent small floating bubble | Reference APK analysis + observed model | Persistent touchable `TYPE_APPLICATION_OVERLAY` bubble (Wispr parity) | platform-overlay | Overlay host + physical smoke | Original assets/branding, no keyboard-bound dock geometry |
 | Bubble eligibility | Reference observation | Focused supported editor + visible soft keyboard + non-secure + service connected + mic + key | platform-accessibility | Eligibility matrix | Fail closed on uncertainty |
 | Bubble is small, edge-positioned | Reference observation | Small bubble, >=48dp target, edge-anchored | platform-overlay | Compose UI tests + bounds tests | Original geometry derived from density, not copied pixels |
 | Bubble tap starts dictation | Reference observation | Explicit tap captures immutable target, starts foreground mic service | platform-accessibility + dictation-service | Target capture tests + FGS startup | Session-scoped commands, no hidden listening |

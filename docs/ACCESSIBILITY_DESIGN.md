@@ -79,9 +79,18 @@ Because secure windows are never tracked, the classifier is always evaluated wit
 
 ## Technical spike results
 
-Implementation Plan Phase 0 (section 5) gated the design on these verified assumptions:
+Implementation Plan Phase 0 (section 5) gated the design on these assumptions:
 
 - A minimal app with the accessibility service, mic permission, foreground microphone service, and a Compose overlay is sufficient to validate the whole flow; no broader screen-reading behavior is requested.
-- Keyboard detection from `TYPE_INPUT_METHOD` windows with bottom-attachment and size validation is stable; the spike acceptance was 50 consecutive keyboard open/close cycles with bounds stable within approximately 8 dp/pixels of the visible keyboard edge, on Pixel (Gboard, SwiftKey) and Samsung (Gboard, SwiftKey, Samsung Keyboard).
-- `TYPE_ACCESSIBILITY_OVERLAY` with the flags above appears above the IME, passes outside touches through, and never steals focus — validated across rotation, keyboard resizing, one-handed mode, gesture and three-button navigation, screen lock/unlock, and app switching.
-- A foreground `microphone` service started from the dock tap while the app is backgrounded shows the recording notification and the system mic privacy indicator, and stops cleanly from the overlay.
+- Keyboard detection from `TYPE_INPUT_METHOD` windows with bottom-attachment and size validation — see the Wispr parity rebuild; the assumption is not yet device-validated.
+- The production overlay is now `TYPE_APPLICATION_OVERLAY` (with `SYSTEM_ALERT_WINDOW`), matching Wispr Flow, **not** `TYPE_ACCESSIBILITY_OVERLAY` (locked decision §3 / Phase 1). The previous "validated" claim for `TYPE_ACCESSIBILITY_OVERLAY` was incorrect and mirrored the `2038` misidentification; it has been removed.
+- A foreground `microphone` service started from the bubble tap while the app is backgrounded shows the recording notification and the system mic privacy indicator, and stops cleanly from the overlay.
+
+### Physical-device status
+
+The following were claimed as verified in earlier revisions and are **NOT RUN /
+withdrawn** pending a physical Samsung gate (WisprFlow-Parity-Rebuild-Plan §2.8):
+overlay layering above an active IME, touch pass-through without taking focus,
+keyboard open/close cycles, rotation, one-handed mode, gesture and three-button
+navigation, screen lock/unlock, and app switching. A compilation / unit-test /
+lint / APK-install result is never overlay or insertion evidence.

@@ -9,7 +9,7 @@ at tag `audit/pre-rebuild-v0.2`.
 | # | Decision | Rationale |
 | --- | --- | --- |
 | D1 | One `app` module with strict package boundaries; no Gradle modules yet | Contracts still stabilizing (PRD §7, §16.1) |
-| D2 | Persistent `TYPE_ACCESSIBILITY_OVERLAY` bubble, Wispr-style | PRD §2.2 supersedes dock geometry |
+| D2 | Persistent `TYPE_APPLICATION_OVERLAY` bubble (with `SYSTEM_ALERT_WINDOW`), Wispr-style | Wispr parity rebuild; PRD §2.2 supersedes dock geometry |
 | D3 | Foreground dictation service is the sole active-session owner | PRD §16.6; the application singleton must not own mic/socket/transaction |
 | D4 | Session-scoped commands and one canonical `SessionId` | PRD §8, §16.3 |
 | D5 | Insertion is serialized by the accessibility service and validated immediately before commit | PRD §16.9 |
@@ -21,7 +21,7 @@ at tag `audit/pre-rebuild-v0.2`.
 
 | # | Assumption | Evidence status | Disposition |
 | --- | --- | --- | --- |
-| A1 | `TYPE_ACCESSIBILITY_OVERLAY` reliably renders above SwiftKey's soft keyboard on Samsung Android 14+ | Unproven on physical device | Observation spike during Phase 2 physical gate |
+| A1 | `TYPE_APPLICATION_OVERLAY` (with `SYSTEM_ALERT_WINDOW`) reliably renders above SwiftKey's soft keyboard on Samsung Android 14+ | Unproven on physical device | Observation spike during Phase 1/2 physical gate |
 | A2 | Samsung/SwiftKey expose usable editor metadata (window id, selection) for a normal text field | Unproven on physical device | Observation spike during Phase 2 |
 | A3 | Foreground microphone promotion is allowed from an accessibility overlay tap context | Unproven on physical device | Observation spike during Phase 4 |
 | A4 | Gemini Live `BidiGenerateContent` ordering (setup ack before audio, one activity-end) is stable | Frozen doc + prior contract tests; must revalidate | Implementation spike in workstream B; doc revalidation in `GEMINI_LIVE_PROTOCOL.md` |

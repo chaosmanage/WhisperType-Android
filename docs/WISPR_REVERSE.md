@@ -36,7 +36,9 @@ interactive-window list on each change.
 new WindowManager.LayoutParams(-2, -2, 2038, 0x1000088, -3)
 ```
 
-- Type 2038 = `TYPE_ACCESSIBILITY_OVERLAY`.
+- Type `2038` = `TYPE_APPLICATION_OVERLAY` (not `TYPE_ACCESSIBILITY_OVERLAY`;
+  `2032` = `TYPE_ACCESSIBILITY_OVERLAY`). gated by `SYSTEM_ALERT_WINDOW`. — the
+  production overlay uses `TYPE_APPLICATION_OVERLAY` per the rebuild.
 - `WRAP_CONTENT` × `WRAP_CONTENT` — the bubble window is a small circle, never a
   full-rect blocker.
 - Flags `0x1000088` = `LAYOUT_IN_SCREEN | ... | NOT_FOCUSABLE`, and notably **no

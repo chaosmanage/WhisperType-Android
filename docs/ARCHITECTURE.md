@@ -37,7 +37,9 @@ The bridge seam (`DictationBridge`) is the only API the accessibility service an
 - **Dock** — `WRAP_CONTENT` sized circular mic button placed by `OverlayGeometryCalculator.dockRect()` against the keyboard top edge, clamped to the display, honoring position (left/center/right), size (48/56/64 dp), overlap mode, and opacity.
 - **Panel** — sized to exactly the IME bounds (`voicePanelRect` = `imeBounds`) and shown for `Starting`, `Listening`, `Finalizing`, `Inserting`, `CopyAvailable`, and `Error` presentations.
 
-The window type is `TYPE_ACCESSIBILITY_OVERLAY` with `FLAG_NOT_FOCUSABLE | FLAG_NOT_TOUCH_MODAL | FLAG_LAYOUT_IN_SCREEN` and `PixelFormat.TRANSLUCENT`, so touches outside the dock pass through and the overlay never steals focus or dismisses the keyboard. Windows are added/updated/removed only when geometry or presentation actually changes; removal is idempotent and every `WindowManager` call is wrapped to swallow `BadTokenException`/`InvalidDisplayException`/`IllegalArgumentException`.
+The window type is `TYPE_APPLICATION_OVERLAY` (gated by `SYSTEM_ALERT_WINDOW`,
+Wispr Flow parity) with `FLAG_NOT_FOCUSABLE | FLAG_NOT_TOUCH_MODAL |
+FLAG_LAYOUT_IN_SCREEN` and `PixelFormat.TRANSLUCENT`, so touches outside the bubble pass through and the overlay never steals focus or dismisses the keyboard. The overlay is a single persistent `WRAP_CONTENT` window whose Compose content is shown/hidden through state; it is added/removed only on service lifecycle or display recovery.
 
 The service's flow collector `combine`s bridge state, dock settings, IME bounds, and active input, then calls `overlayController.update(...)`. The dock is shown only when the presentation says so AND a non-secure `activeInput` exists AND valid IME bounds exist AND the focused package is not in `disabledApps`.
 
