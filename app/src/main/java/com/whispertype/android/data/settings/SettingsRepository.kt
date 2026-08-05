@@ -5,16 +5,23 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.whispertype.android.core.dictionary.DictionaryEntry
 import com.whispertype.android.core.model.LanguageMode
+import com.whispertype.android.core.model.TranscriptionStyle
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "settings",
 )
+
+private val dictionaryJson: Json = Json { ignoreUnknownKeys = true }
 
 /**
  * [SettingsProvider] backed by DataStore preferences. Primary constructor takes
@@ -33,6 +40,11 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         val appEnabled = booleanPreferencesKey("app_enabled")
         val onboardingCompleted = booleanPreferencesKey("onboarding_completed")
         val modelOverride = stringPreferencesKey("model_override")
+        val autoStopSeconds = intPreferencesKey("auto_stop_seconds")
+        val polishLevel = stringPreferencesKey("polish_level")
+        val dictionary = stringPreferencesKey("dictionary")
+        val bubbleX = floatPreferencesKey("bubble_x")
+        val bubbleY = floatPreferencesKey("bubble_y")
     }
 
     override val speechMode: Flow<LanguageMode> =
@@ -55,6 +67,24 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     override val modelOverride: Flow<String?> =
         dataStore.data.map { it[Keys.modelOverride] }
+
+    override val autoStopSeconds: Flow<Int> =
+        dataStore.data.map { it[Keys.autoStopSeconds] ?: DEFAULT_AUTO_STOP_SECONDS }
+
+    override val polishLevel: Flow<TranscriptionStyle> =
+        dataStore.data.map { prefs ->
+            val stored = prefs[Keys.polishLevel]
+            TranscriptionStyle.entries.firstOrNull { it.name == stored } ?: DEFAULT_POLISH_LEVEL
+        }
+
+    override val dictionary: Flow<List<DictionaryEntry>> =
+        dataStore.data.map { decodeDictionary(it[Keys.dictionary]) }
+
+    override val bubbleX: Flow<Float?> =
+        dataStore.data.map { it[Keys.bubbleX] }
+
+    override val bubbleY: Flow<Float?> =
+        dataStore.data.map { it[Keys.bubbleY] }
 
     suspend fun setSpeechMode(mode: LanguageMode) {
         dataStore.edit { it[Keys.speechMode] = mode.name }
@@ -82,7 +112,78 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         }
     }
 
+    suspend fun setAutoStopSeconds(seconds: Int) {
+        dataStore.edit { it[Keys.autoStopSeconds] = seconds }
+    }
+
+    suspend fun setPolishLevel(style: TranscriptionStyle) {
+        dataStore.edit { it[Keys.polishLevel] = style.name }
+    }
+
+    suspend fun addDictionaryEntry(entry: DictionaryEntry) {
+        dataStore.edit { prefs ->
+            val current = decodeDictionary(prefs[Keys.dictionary])
+            prefs[Keys.dictionary] = encodeDictionary(current.filterNot { it.match == entry.match } + entry)
+        }
+    }
+
+    suspend fun removeDictionaryEntry(match: String) {
+        dataStore.edit { prefs ->
+            val current = decodeDictionary(prefs[Keys.dictionary])
+            prefs[Keys.dictionary] = encodeDictionary(current.filterNot { it.match == match })
+        }
+    }
+
+    suspend fun clearDictionary() {
+        dataStore.edit { it.remove(Keys.dictionary) }
+    }
+
+    suspend fun setBubblePosition(x: Float?, y: Float?) {
+        dataStore.edit {
+            if (x == null) it.remove(Keys.bubbleX) else it[Keys.bubbleX] = x
+            if (y == null) it.remove(Keys.bubbleY) else it[Keys.bubbleY] = y
+        }
+    }
+
+    suspend fun resetBubblePosition() {
+        dataStore.edit {
+            it.remove(Keys.bubbleX)
+            it.remove(Keys.bubbleY)
+        }
+    }
+
+    /** Decodes the stored dictionary JSON; malformed or unset input yields an empty list. */
+    private fun decodeDictionary(raw: String?): List<DictionaryEntry> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return try {
+            dictionaryJson.decodeFromString(DictionaryPayload.serializer(), raw)
+                .entries
+                .map { DictionaryEntry(match = it.match, replace = it.replace) }
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
+    private fun encodeDictionary(entries: List<DictionaryEntry>): String =
+        dictionaryJson.encodeToString(
+            DictionaryPayload.serializer(),
+            DictionaryPayload(entries = entries.map { EntryDto(match = it.match, replace = it.replace) }),
+        )
+
     companion object {
         const val DEFAULT_RETENTION_DAYS = 30
+        const val DEFAULT_AUTO_STOP_SECONDS = 60
+        val DEFAULT_POLISH_LEVEL = TranscriptionStyle.MEDIUM
     }
 }
+
+@Serializable
+private data class DictionaryPayload(
+    val entries: List<EntryDto> = emptyList(),
+)
+
+@Serializable
+private data class EntryDto(
+    val match: String,
+    val replace: String,
+)

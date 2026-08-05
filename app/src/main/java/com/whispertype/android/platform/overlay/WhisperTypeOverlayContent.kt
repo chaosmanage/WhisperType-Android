@@ -1,6 +1,6 @@
 package com.whispertype.android.platform.overlay
 
-import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
@@ -30,7 +29,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -43,6 +44,7 @@ import com.whispertype.android.core.model.OverlayIntent
 import com.whispertype.android.core.model.OverlayUiState
 import com.whispertype.android.ui.theme.WhisperTypeColors
 import com.whispertype.android.ui.theme.WhisperTypeTheme
+import com.whispertype.android.ui.waveform.CircularWaveform
 
 /**
  * Renders the persistent overlay surface for [uiState] and forwards user
@@ -56,17 +58,24 @@ import com.whispertype.android.ui.theme.WhisperTypeTheme
 fun WhisperTypeOverlayContent(
     uiState: OverlayUiState,
     onIntent: (OverlayIntent) -> Unit,
+    onDragBubble: ((dx: Float, dy: Float) -> Unit)? = null,
 ) {
     WhisperTypeTheme {
         when (visibilityOf(uiState)) {
             OverlayVisibility.Hidden -> Unit
-            OverlayVisibility.IdleBubble -> IdleBubble(onIntent = onIntent)
-            OverlayVisibility.Starting -> StartingPanel(onIntent = onIntent)
-            OverlayVisibility.Listening -> ListeningPanel(onIntent = onIntent)
+            OverlayVisibility.IdleBubble -> IdleBubble(
+                onIntent = onIntent,
+                onDragBubble = onDragBubble,
+            )
+            OverlayVisibility.Starting -> StartingCapsule(onIntent = onIntent)
+            OverlayVisibility.Listening -> ListeningCapsule(
+                amplitude = (uiState.state as DictationState.Listening).amplitude,
+                onIntent = onIntent,
+            )
             OverlayVisibility.Finalizing ->
-                StatusPanel(stringResource(R.string.dictation_finalizing))
+                StatusCapsule(stringResource(R.string.dictation_finalizing))
             OverlayVisibility.Inserting ->
-                StatusPanel(stringResource(R.string.dictation_inserting))
+                StatusCapsule(stringResource(R.string.dictation_inserting))
             OverlayVisibility.Success -> Unit
             OverlayVisibility.CopyAvailable -> CopyAvailablePanel(onIntent = onIntent)
             OverlayVisibility.Error -> ErrorPanel(uiState.state as DictationState.Error, onIntent)
@@ -74,34 +83,48 @@ fun WhisperTypeOverlayContent(
     }
 }
 
-/** The idle mic bubble: a small rounded target with a >= 48dp touch area. */
+/** The idle mic bubble: a small rounded target with a >= 48dp touch area. A drag
+ *  moves the bubble (see [onDragBubble]); a tap without movement starts dictation. */
 @Composable
-private fun IdleBubble(onIntent: (OverlayIntent) -> Unit) {
+private fun IdleBubble(
+    onIntent: (OverlayIntent) -> Unit,
+    onDragBubble: ((dx: Float, dy: Float) -> Unit)?,
+) {
     val minSize = with(LocalDensity.current) { 48.dp }
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val startLabel = stringResource(R.string.dictation_start)
-    Surface(
-        onClick = { onIntent(OverlayIntent.START_DICTATION) },
-        modifier = Modifier
-            .sizeIn(minWidth = minSize, minHeight = minSize)
-            .testTag(stringResource(R.string.test_tag_bubble))
-            .semantics { contentDescription = startLabel },
-        shape = RoundedCornerShape(50),
-        color = if (pressed) {
-            WhisperTypeColors.IdleAccent.copy(alpha = 0.75f)
-        } else {
-            WhisperTypeColors.IdleAccent
+    Box(
+        modifier = Modifier.pointerInput(onDragBubble) {
+            detectDragGestures(onDrag = { change, dragAmount ->
+                change.consume()
+                onDragBubble?.invoke(dragAmount.x, dragAmount.y)
+            })
         },
-        interactionSource = interaction,
+        contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.padding(12.dp), contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = Icons.Filled.Mic,
-                contentDescription = null,
-                tint = WhisperTypeColors.Surface,
-                modifier = Modifier.size(24.dp),
-            )
+        Surface(
+            onClick = { onIntent(OverlayIntent.START_DICTATION) },
+            modifier = Modifier
+                .sizeIn(minWidth = minSize, minHeight = minSize)
+                .testTag(stringResource(R.string.test_tag_bubble))
+                .semantics { contentDescription = startLabel },
+            shape = RoundedCornerShape(50),
+            color = if (pressed) {
+                WhisperTypeColors.IdleAccent.copy(alpha = 0.75f)
+            } else {
+                WhisperTypeColors.IdleAccent
+            },
+            interactionSource = interaction,
+        ) {
+            Box(Modifier.padding(12.dp), contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Filled.Mic,
+                    contentDescription = null,
+                    tint = WhisperTypeColors.Surface,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
         }
     }
 }
@@ -121,39 +144,29 @@ private fun PanelSurface(content: @Composable () -> Unit) {
     }
 }
 
+/** Compact recording pill: live waveform plus Stop (primary accent) and Cancel. */
 @Composable
-private fun StartingPanel(onIntent: (OverlayIntent) -> Unit) {
-    PanelSurface {
-        Text(
-            text = stringResource(R.string.dictation_starting),
-            style = MaterialTheme.typography.labelLarge,
-            color = WhisperTypeColors.OnSurface,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ActionButton(
-                tag = stringResource(R.string.test_tag_cancel),
-                label = stringResource(R.string.dictation_cancel),
-                icon = Icons.Filled.Close,
-                onClick = { onIntent(OverlayIntent.CANCEL) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun ListeningPanel(onIntent: (OverlayIntent) -> Unit) {
-    PanelSurface {
-        WaveformPlaceholder()
-        Text(
-            text = stringResource(R.string.dictation_listening),
-            style = MaterialTheme.typography.labelLarge,
-            color = WhisperTypeColors.OnSurface,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun ListeningCapsule(
+    amplitude: Float?,
+    onIntent: (OverlayIntent) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.testTag(stringResource(R.string.test_tag_panel)),
+        shape = RoundedCornerShape(50),
+        color = WhisperTypeColors.SurfaceRaised,
+        tonalElevation = 4.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            CircularWaveform(amplitude = amplitude ?: 0f, size = 36.dp)
             ActionButton(
                 tag = stringResource(R.string.test_tag_stop),
                 label = stringResource(R.string.dictation_stop),
                 icon = Icons.Filled.Stop,
+                iconTint = WhisperTypeColors.RecordingAccent,
                 onClick = { onIntent(OverlayIntent.STOP) },
             )
             ActionButton(
@@ -166,17 +179,48 @@ private fun ListeningPanel(onIntent: (OverlayIntent) -> Unit) {
     }
 }
 
+/** Compact starting pill: a static waveform plus a Cancel button. */
 @Composable
-private fun StatusPanel(text: String) {
-    PanelSurface {
+private fun StartingCapsule(onIntent: (OverlayIntent) -> Unit) {
+    Surface(
+        modifier = Modifier.testTag(stringResource(R.string.test_tag_panel)),
+        shape = RoundedCornerShape(50),
+        color = WhisperTypeColors.SurfaceRaised,
+        tonalElevation = 4.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            CircularWaveform(amplitude = 0f, size = 36.dp)
+            ActionButton(
+                tag = stringResource(R.string.test_tag_cancel),
+                label = stringResource(R.string.dictation_cancel),
+                icon = Icons.Filled.Close,
+                onClick = { onIntent(OverlayIntent.CANCEL) },
+            )
+        }
+    }
+}
+
+/** Compact status pill: the message text only. */
+@Composable
+private fun StatusCapsule(text: String) {
+    Surface(
+        modifier = Modifier.testTag(stringResource(R.string.test_tag_panel)),
+        shape = RoundedCornerShape(50),
+        color = WhisperTypeColors.SurfaceRaised,
+        tonalElevation = 4.dp,
+    ) {
         Text(
             text = text,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             style = MaterialTheme.typography.labelLarge,
             color = WhisperTypeColors.OnSurface,
         )
     }
 }
-
 
 @Composable
 private fun CopyAvailablePanel(onIntent: (OverlayIntent) -> Unit) {
@@ -239,6 +283,7 @@ private fun ActionButton(
     label: String,
     icon: ImageVector,
     onClick: () -> Unit,
+    iconTint: Color = Color.Unspecified,
 ) {
     val minSize = with(LocalDensity.current) { 48.dp }
     TextButton(
@@ -247,32 +292,14 @@ private fun ActionButton(
             .testTag(tag)
             .sizeIn(minWidth = minSize, minHeight = minSize),
     ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = iconTint,
+            modifier = Modifier.size(18.dp),
+        )
         Spacer(Modifier.width(6.dp))
         Text(text = label)
-    }
-}
-
-/** Static waveform fallback (§17.4 reduced-motion safe); no looping animation. */
-@Composable
-private fun WaveformPlaceholder() {
-    val bars = listOf(8.dp, 20.dp, 12.dp, 24.dp, 10.dp, 16.dp)
-    Row(
-        modifier = Modifier.height(24.dp),
-        verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        bars.forEach { barHeight ->
-            Box(
-                Modifier
-                    .width(3.dp)
-                    .height(barHeight)
-                    .background(
-                        color = WhisperTypeColors.RecordingAccent,
-                        shape = RoundedCornerShape(2.dp),
-                    ),
-            )
-        }
     }
 }
 

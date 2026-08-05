@@ -51,9 +51,10 @@ interface DictationHost {
 
     /**
      * Per-session aggregate diagnostics at terminal state. Must never contain
-     * transcript text, audio, keys, or full server frames.
+     * audio, keys, or full server frames. [transcript] is the settled dictation
+     * text when one existed (used for opt-in history), or null otherwise.
      */
-    fun onSessionFinished(state: DictationState, metrics: MutableSessionMetrics)
+    fun onSessionFinished(state: DictationState, metrics: MutableSessionMetrics, transcript: String?)
 }
 
 /** Outcome of [DictationHost.resolveSession]. */
@@ -101,6 +102,12 @@ private class ActiveLiveSession(
     var deadlineJob: Job? = null
     var inserted: Boolean = false
 
+    /** The settled dictation text when one existed (opt-in history hook). */
+    var settledText: String? = null
+
+    /** Auto-stop watcher (silence + hard cap) while listening. */
+    var autoStopJob: Job? = null
+
     /** Retained even when the server sends it before STOP (Release E7). */
     var turnCompleteSeen: Boolean = false
 }
@@ -136,6 +143,17 @@ class DictationCoordinator(
         val captureShutdownTimeoutMs: Long = 1_500,
         /** Bounded pre-ready PCM frames buffered while a cold session connects (F5). */
         val preReadyMaxFrames: Int = 150,
+        /** Auto-stop: stop after this many seconds of silence (0 disables). The
+         *  runtime supplies the product default (60 s) via the settings-backed
+         *  provider. Disabled by default so host tests keep deterministic time. */
+        val autoStopSeconds: () -> Long = { 0L },
+        /** Auto-stop: hard recording cap in seconds (0 disables). The runtime
+         *  mirrors the same user option here, so the cap and the silence timeout
+         *  share the configured value ("both combined"). Kept as a separate knob
+         *  so each arm is independently testable and can diverge later. */
+        val maxRecordingSeconds: () -> Long = { 0L },
+        /** Mic amplitude (0..1) above which the user is considered speaking. */
+        val speechAmplitudeThreshold: Float = 0.02f,
     )
 
     @Volatile
@@ -260,6 +278,7 @@ class DictationCoordinator(
             holder.readyJob = scope.launch { awaitReadyAndStart(holder, ready) }
             holder.audioJob = scope.launch { streamAudio(holder, ready) }
             holder.amplitudeJob = scope.launch { publishAmplitude(holder) }
+            holder.autoStopJob = scope.launch { runAutoStop(holder) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -376,6 +395,33 @@ class DictationCoordinator(
             val state = lastPublished
             if (state is DictationState.Listening && state.sessionId == holder.sessionId) {
                 publish(state.copy(amplitude = level))
+            }
+        }
+    }
+
+    /**
+     * Auto-stop watcher (0.4.0): a hard recording cap ([Config.maxRecordingSeconds])
+     * and a silence auto-stop ([Config.autoStopSeconds]) — whichever fires first —
+     * both ending through the same [stop] path as a user STOP. Elapsed time is
+     * tracked in check-ticks so virtual-time tests drive it.
+     */
+    private suspend fun runAutoStop(holder: ActiveLiveSession) {
+        val silenceTimeoutMs = config.autoStopSeconds() * 1000L
+        val maxTimeoutMs = config.maxRecordingSeconds() * 1000L
+        if (silenceTimeoutMs <= 0 && maxTimeoutMs <= 0) return
+        val capture = holder.capture ?: return
+        var elapsedMs = 0L
+        var silenceMs = 0L
+        while (active === holder && isListening(holder)) {
+            delay(AUTO_STOP_CHECK_MS)
+            elapsedMs += AUTO_STOP_CHECK_MS
+            silenceMs += AUTO_STOP_CHECK_MS
+            if (capture.amplitude.value >= config.speechAmplitudeThreshold) silenceMs = 0L
+            val capHit = maxTimeoutMs > 0 && elapsedMs >= maxTimeoutMs
+            val silenceHit = silenceTimeoutMs > 0 && silenceMs >= silenceTimeoutMs
+            if (capHit || silenceHit) {
+                stop()
+                break
             }
         }
     }
@@ -513,6 +559,7 @@ class DictationCoordinator(
                 holder.metrics.lastRejection = diagnosis?.rule?.name
                 if (candidate != null && lenientAccept(holder, candidate, diagnosis)) {
                     holder.metrics.usedLenientFallback = true
+                    holder.settledText = candidate.raw
                     insertSettled(holder, candidate.raw)
                 } else {
                     failNoTranscript(holder)
@@ -526,6 +573,7 @@ class DictationCoordinator(
                     failNoTranscript(holder)
                     return
                 }
+                holder.settledText = selection.text
                 insertSettled(holder, selection.text)
             }
         }
@@ -618,6 +666,7 @@ class DictationCoordinator(
         holder.finalizationJob?.cancel()
         holder.audioJob?.cancel()
         holder.amplitudeJob?.cancel()
+        holder.autoStopJob?.cancel()
         holder.captureFailureJob?.cancel()
         holder.eventJob?.cancel()
         holder.capture?.let { capture ->
@@ -636,7 +685,7 @@ class DictationCoordinator(
     private fun resetToIdle(holder: ActiveLiveSession) {
         if (active === holder) {
             active = null
-            host.onSessionFinished(lastPublished, holder.metrics)
+            host.onSessionFinished(lastPublished, holder.metrics, holder.settledText)
             publish(DictationState.Idle)
         }
     }
@@ -692,6 +741,9 @@ class DictationCoordinator(
     )
 
     companion object {
+        /** Auto-stop watcher sampling interval (pure elapsed-time tick). */
+        const val AUTO_STOP_CHECK_MS = 200L
+
         /** Placeholder target used while the accessibility process resolves the real one. */
         fun EMPTY_TARGET(sessionId: SessionId): TargetSnapshot = TargetSnapshot(
             sessionId = sessionId,

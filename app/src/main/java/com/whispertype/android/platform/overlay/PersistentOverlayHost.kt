@@ -1,7 +1,9 @@
 package com.whispertype.android.platform.overlay
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.PixelFormat
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -17,6 +19,7 @@ import com.whispertype.android.core.model.DictationState
 import com.whispertype.android.core.model.OverlayIntent
 import com.whispertype.android.core.model.OverlayUiState
 import com.whispertype.android.core.model.TargetEligibility
+import com.whispertype.android.core.overlay.BubblePlacement
 import com.whispertype.android.ui.theme.WhisperTypeTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +33,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /**
  * The one persistent production overlay, rebuilt to the Wispr Flow parity model
@@ -60,6 +64,7 @@ class PersistentOverlayHost(
     eligibility: Flow<TargetEligibility>,
     private val placement: OverlayPlacement = OverlayPlacement(),
     private val maxRetries: Int = MAX_ATTACH_RETRIES,
+    private val onBubblePositionChange: ((x: Float, y: Float) -> Unit)? = null,
 ) : OverlayController {
 
     private val _uiState = MutableStateFlow(OverlayUiState.Hidden)
@@ -83,6 +88,13 @@ class PersistentOverlayHost(
     @Volatile
     private var windowManager: WindowManager? = null
 
+    @Volatile
+    private var bubblePositionDp: Pair<Float, Float>? = null
+
+    private var currentPixel: Pair<Int, Int>? = null
+
+    private var positionChangeDebounce: Runnable? = null
+
     private var retryCount = 0
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -95,6 +107,11 @@ class PersistentOverlayHost(
                 .stateIn(scope, SharingStarted.Eagerly, OverlayUiState.Hidden)
                 .collect { _uiState.value = it }
         }
+    }
+
+    /** Remembers the saved bubble top-left position (dp), or clears it when either axis is null. */
+    fun setBubblePosition(x: Float?, y: Float?) {
+        bubblePositionDp = if (x != null && y != null) x to y else null
     }
 
     /** Adds the single persistent overlay window; idempotent, main-thread only. */
@@ -127,6 +144,7 @@ class PersistentOverlayHost(
                     WhisperTypeOverlayContent(
                         uiState = current,
                         onIntent = { _intents.tryEmit(it) },
+                        onDragBubble = { dx, dy -> moveBy(dx, dy) },
                     )
                 }
             }
@@ -182,9 +200,11 @@ class PersistentOverlayHost(
 
     /**
      * Maps the pure Wispr [OverlayPlacement] into pixel LayoutParams using the
-     * display-context density. The overlay is a persistent `WRAP_CONTENT`
-     * application-overlay window anchored to the right edge near vertical center,
-     * with its horizontal inset derived from the edge margin.
+     * display-context density. With a saved [bubblePositionDp] the window is
+     * placed top-left at the saved (clamped) position; otherwise it keeps the
+     * default right-edge, vertically-centered anchor. The WRAP_CONTENT window is
+     * not yet measured, so the placement's bubble size (scaled by density) stands
+     * in for its dimensions when clamping.
      */
     private fun buildLayoutParams(
         context: Context,
@@ -195,6 +215,43 @@ class PersistentOverlayHost(
         val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        val bubblePx = (placement.bubbleDp * density).roundToInt()
+        val (displayW, displayH) = displaySizePx()
+        val savedPosition = bubblePositionDp?.let { saved ->
+            BubblePlacement.positionPx(
+                savedX = saved.first,
+                savedY = saved.second,
+                density = density,
+                windowW = bubblePx,
+                windowH = bubblePx,
+                displayW = displayW,
+                displayH = displayH,
+            )
+        }
+        val anchorGravity: Int
+        val anchorX: Int
+        val anchorY: Int
+        if (savedPosition != null) {
+            anchorGravity = Gravity.TOP or Gravity.START
+            anchorX = savedPosition.first
+            anchorY = savedPosition.second
+        } else {
+            // Right edge, around vertical center (Wispr §4.2). Gravity.END keeps the
+            // bubble at the locale-correct right edge; for Gravity.END the x offset is
+            // measured from that edge and a negative inset moves the window inward by
+            // the edge margin.
+            anchorGravity = Gravity.END or Gravity.CENTER_VERTICAL
+            anchorX = -marginPx
+            anchorY = 0
+        }
+        currentPixel = savedPosition ?: BubblePlacement.clamp(
+            displayW - bubblePx - marginPx,
+            (displayH - bubblePx) / 2,
+            bubblePx,
+            bubblePx,
+            displayW,
+            displayH,
+        )
         return WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -202,13 +259,65 @@ class PersistentOverlayHost(
             flags,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            // Right edge, around vertical center (Wispr §4.2). Gravity.END keeps the
-            // bubble at the locale-correct right edge; for Gravity.END the x offset is
-            // measured from that edge and a negative inset moves the window inward by
-            // the edge margin.
-            gravity = Gravity.END or Gravity.CENTER_VERTICAL
-            x = -marginPx
-            y = 0
+            this.gravity = anchorGravity
+            x = anchorX
+            y = anchorY
+        }
+    }
+
+    /** Current display bounds in pixels (API 30+ maximumWindowMetrics; minSdk 33). */
+    private fun displaySizePx(): Pair<Int, Int> {
+        val wm = serviceContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val bounds = wm.maximumWindowMetrics.bounds
+        return bounds.width() to bounds.height()
+    }
+
+    /**
+     * Moves the overlay window by a pixel delta, invoked from Compose drag events
+     * on the main thread. The first drag snapshots the default anchor position
+     * (dp) so subsequent deltas accumulate; after the drag settles the new dp
+     * position is reported via [onBubblePositionChange], debounced.
+     */
+    fun moveBy(dxPx: Float, dyPx: Float) {
+        val currentView = view ?: return
+        val wm = windowManager ?: return
+        val density = serviceContext.resources.displayMetrics.density
+        val bubblePx = (placement.bubbleDp * density).roundToInt()
+        val (displayW, displayH) = displaySizePx()
+        val startDp = bubblePositionDp ?: currentPixel?.let { it.first / density to it.second / density }
+            ?: return
+        val target = BubblePlacement.clamp(
+            (startDp.first + dxPx / density).roundToInt(),
+            (startDp.second + dyPx / density).roundToInt(),
+            bubblePx,
+            bubblePx,
+            displayW,
+            displayH,
+        )
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = target.first
+            y = target.second
+        }
+        wm.updateViewLayout(currentView, params)
+        currentPixel = target
+        bubblePositionDp = target.first / density to target.second / density
+        val callback = onBubblePositionChange
+        if (callback != null) {
+            positionChangeDebounce?.let(handler::removeCallbacks)
+            val xDp = target.first / density
+            val yDp = target.second / density
+            val runnable = Runnable { callback(xDp, yDp) }
+            positionChangeDebounce = runnable
+            handler.postDelayed(runnable, DRAG_SETTLE_DEBOUNCE_MS)
         }
     }
 
@@ -221,5 +330,6 @@ class PersistentOverlayHost(
         const val TAG = "PersistentOverlayHost"
         const val MAX_ATTACH_RETRIES = 3
         const val ATTACH_RETRY_DELAY_MS = 2000L
+        const val DRAG_SETTLE_DEBOUNCE_MS = 150L
     }
 }

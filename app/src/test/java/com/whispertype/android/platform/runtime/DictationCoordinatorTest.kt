@@ -88,6 +88,10 @@ class DictationCoordinatorTest {
         var stopRequested = false
         var stopCalls = 0
 
+        fun setAmplitude(level: Float) {
+            (amplitude as MutableStateFlow<Float>).value = level
+        }
+
         override fun start(): AudioStartResult = startResult
 
         override fun requestStop() {
@@ -113,6 +117,7 @@ class DictationCoordinatorTest {
         val session = FakeSession()
         val capture = FakeCapture()
         val finished = mutableListOf<Pair<DictationState, MutableSessionMetrics>>()
+        val finishedTranscripts = mutableListOf<String?>()
         var resolveResult: SessionResolve = SessionResolve.Ok(SessionResolution(session, LanguageMode.ENGLISH))
         var captureStart: CaptureStart = CaptureStart.Started(capture)
         var insertionAccepted = true
@@ -130,8 +135,9 @@ class DictationCoordinatorTest {
             return insertionAccepted
         }
 
-        override fun onSessionFinished(state: DictationState, metrics: MutableSessionMetrics) {
+        override fun onSessionFinished(state: DictationState, metrics: MutableSessionMetrics, transcript: String?) {
             finished += state to metrics
+            finishedTranscripts += transcript
         }
     }
 
@@ -590,5 +596,128 @@ class DictationCoordinatorTest {
         assertFalse(coordinator.retry(), "retry must be refused during an active session")
         coordinator.cancel()
         advanceUntilIdle()
+    }
+
+    // ------------------------------------------------------------------
+    // 0.4.0: auto-stop timeout (silence + hard cap) and history transcript
+    // ------------------------------------------------------------------
+
+    private fun coordinatorWith(
+        scope: kotlinx.coroutines.test.TestScope,
+        host: FakeHost,
+        autoStopSeconds: Long = 0,
+        maxRecordingSeconds: Long = 0,
+    ): DictationCoordinator =
+        DictationCoordinator(
+            scope = scope,
+            host = host,
+            config = DictationCoordinator.Config(
+                autoStopSeconds = { autoStopSeconds },
+                maxRecordingSeconds = { maxRecordingSeconds },
+            ),
+            metricsFactory = { sessionId -> MutableSessionMetrics(sessionId) { 0L } },
+        )
+
+    @Test
+    fun `auto-stop hard cap finalizes even with continuous speech`() = runTest {
+        val host = FakeHost()
+        host.capture.setAmplitude(0.5f) // continuous speech: silence never accumulates
+        val coordinator = coordinatorWith(this, host, maxRecordingSeconds = 2)
+        coordinator.start()
+        advanceTimeBy(1)
+        assertIs<DictationState.Listening>(states(host).last())
+
+        advanceTimeBy(2_200)
+        assertTrue(states(host).any { it is DictationState.Finalizing }, "cap must fire at N seconds")
+        assertEquals(1, host.session.endCalls)
+        advanceUntilIdle()
+        coordinator.cancel()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `auto-stop silence fires after N seconds of no speech`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinatorWith(this, host, autoStopSeconds = 2)
+        coordinator.start()
+        advanceTimeBy(1)
+        assertIs<DictationState.Listening>(states(host).last())
+        host.capture.setAmplitude(0f) // silence
+
+        advanceTimeBy(2_200)
+        assertTrue(states(host).any { it is DictationState.Finalizing }, "silence must auto-stop")
+        advanceUntilIdle()
+        coordinator.cancel()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `speech resets the silence timer so auto-stop waits for N seconds of quiet`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinatorWith(this, host, autoStopSeconds = 2)
+        coordinator.start()
+        advanceTimeBy(1)
+        assertIs<DictationState.Listening>(states(host).last())
+
+        // Speak at t=1s, go silent at t=2s.
+        advanceTimeBy(1_000)
+        host.capture.setAmplitude(0.5f)
+        advanceTimeBy(1_000)
+        host.capture.setAmplitude(0f)
+
+        // Silence is now ~0s: the 2s silence timer must NOT fire at t≈2.2s.
+        advanceTimeBy(200)
+        assertFalse(states(host).any { it is DictationState.Finalizing }, "recent speech must hold off silence auto-stop")
+
+        // ~2s of quiet later it fires.
+        advanceTimeBy(2_000)
+        assertTrue(states(host).any { it is DictationState.Finalizing })
+        advanceUntilIdle()
+        coordinator.cancel()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `auto-stop never fires before Listening`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinatorWith(this, host, autoStopSeconds = 1)
+        coordinator.start()
+        coordinator.cancel() // cancelled while connecting/starting
+        advanceTimeBy(2_000)
+        assertFalse(states(host).any { it is DictationState.Finalizing })
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `onSessionFinished carries the settled transcript`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        sendTranscript(host, "hello world")
+        advanceUntilIdle()
+
+        assertEquals(1, host.insertions.size)
+        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        advanceUntilIdle()
+        assertEquals(listOf<String?>("hello world"), host.finishedTranscripts)
+    }
+
+    @Test
+    fun `onSessionFinished transcript is null when nothing settled`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        coordinator.stop()
+        advanceUntilIdle()
+
+        assertTrue(host.insertions.isEmpty())
+        assertTrue(host.finishedTranscripts.isEmpty(), "a persistent retryable error has not reset yet")
+        coordinator.dismiss()
+        advanceUntilIdle()
+        assertEquals(listOf<String?>(null), host.finishedTranscripts)
     }
 }
