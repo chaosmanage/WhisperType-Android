@@ -26,8 +26,8 @@ android {
         applicationId = "com.whispertype.android"
         minSdk = 34
         targetSdk = 36
-        versionCode = 20
-        versionName = "0.2.18"
+        versionCode = 21
+        versionName = "0.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
