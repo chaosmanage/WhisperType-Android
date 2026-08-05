@@ -35,6 +35,15 @@ device-verified. This plan ships the next product layer:
 model via the Live WebSocket API. No other models, no REST `generateContent`
 fallback, no text-modality workaround.
 
+**Execution model (user-mandated):** build everything first — every module, every
+integration, every UI screen, every test, docs, and the full JVM gate
+(test + lint + assemble) — with **no device required at any point during
+development**. All on-device testing is consolidated into **one final phase
+(§13. Phase 10 — Device validation) that runs only after all development is
+complete**, when the user connects the phone/tablet. This lets the entire
+development run overnight unattended; nothing in Phases 1–9 requires a connected
+device.
+
 ---
 
 ## 2. Reference research — open-typeless (`tover0314-w/opentypeless`)
@@ -57,8 +66,8 @@ polish → type into any app. Feature mapping for this plan:
 
 1. `git checkout main && git checkout -b feature` (already done for this plan; push the branch so work is backed up).
 2. Write this document as `docs/IMPLEMENTATION_PLAN_3.md` — the first commit on `feature`.
-3. Baseline gate: `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` green on `feature`.
-4. Device baseline: S25 Stage 0 (per `docs/ON_DEVICE_TEST_PROTOCOL.md`) still green.
+3. Baseline gate: `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` green on `feature` (device-free).
+4. **No device baseline** — device verification is deferred entirely to Phase 10.
 
 ---
 
@@ -91,8 +100,11 @@ polish → type into any app. Feature mapping for this plan:
 
 ### 4.3 Acceptance (Phase 1 gate)
 
-- `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` green.
-- APK installs on the **Android 13 tablet**; Stage 0–7 pass; FGS notification shows; permission flow works on a fresh install; dictation works end-to-end.
+- `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` green (device-free;
+  lint confirms the `tools:targetApi` handling of the `specialUse` FGS type).
+- Android 13 runtime behavior (permission flow, FGS type guards) is covered by
+  JVM tests where extractable; **on-device verification is deferred to
+  Phase 10** on the Android 13 tablet.
 
 ---
 
@@ -436,13 +448,33 @@ Exhaustive reference, verified against the code:
 
 ---
 
-## 12. Phase 9 — Integration, versioning, validation
+## 12. Phase 9 — Integration and versioning (device-free)
 
 1. Version bump `0.4.0` (versionCode 23); `docs/PUSH_TO_DEVICE.md` refresh;
    `CHANGELOG.md` entry.
 2. Full gate after every wave: `:app:testDebugUnitTest :app:lintDebug
-   :app:assembleDebug`.
-3. **Device matrix** — S25 (existing) and the **Android 13 tablet**:
+   :app:assembleDebug` — **no device required**.
+3. Final development gate: everything green, APK assembled, docs complete.
+   **No on-device testing happens here** — all of it is deferred to Phase 10.
+4. Commit **per phase** on `feature`. **No merge to `main` until the user asks.**
+
+---
+
+## 13. Phase 10 — Device validation (deferred; run when the phone is connected)
+
+**Runs only after all development (Phases 1–9) is complete**, when the user
+connects the phone/tablet. Everything below uses the on-device protocol
+(`docs/ON_DEVICE_TEST_PROTOCOL.md`) and live `SESSION DONE` diagnostics. It is
+the single overnight-independent step: build everything, then validate once on
+hardware.
+
+1. **Install + Stage 0 preconditions** on both devices (S25 and the Android 13
+   tablet): version matches, permissions (incl. the new runtime RECORD_AUDIO /
+   POST_NOTIFICATIONS flow), accessibility, FGS notification, both processes up.
+2. **Android 13 tablet pass** — confirm the minSdk 33 build installs and runs;
+   if the inert `specialUse` FGS bit is rejected, apply the documented
+   two-argument `startForeground` fallback and rebuild.
+3. **Full device matrix**:
 
 | Scenario | Runs | Expected |
 | --- | ---: | --- |
@@ -452,21 +484,24 @@ Exhaustive reference, verified against the code:
 | Capsule UI + circular waveform | 5 | Stop/Cancel work; animation shows |
 | Auto-stop: silence (each option) | 5/option | auto-finalizes once |
 | Auto-stop: hard cap (each option) | 5/option | auto-finalizes once |
-| Polish NONE vs MEDIUM vs HIGH distinguishable | 10 | record per-level output quality |
+| Polish NONE vs LOW vs MEDIUM vs HIGH | 10 | record per-level output quality |
 | Hinglish still Latin at every polish level | 10 | never Devanagari |
 | Dictionary corrections applied | 10 | corrected spelling inserted |
 | History list/copy/delete/delete-all | 10 | correct entries, retention honored |
 | Rapid consecutive sessions | 10 | no stale-candidate errors |
 | Retry button on error | 5 | fresh session starts |
 
-4. Commit **per phase** on `feature`. **No merge to `main` until the user asks.**
+4. Record results per device in `docs/DEVICE_COMPATIBILITY.md`; any failures
+   become fixes on `feature` (re-run the JVM gate + the affected device cases).
+5. Only after this phase passes does the user decide on merging to `main`.
 
 ---
 
-## 13. Sub-agent orchestration (waves + file ownership)
+## 14. Sub-agent orchestration (waves + file ownership)
 
 Single-owner rule per file per wave to avoid conflicts. Each agent verifies its
-own tests; the lead runs the full gate after each wave.
+own tests; the lead runs the full JVM gate (test + lint + assemble) after each
+wave. **No wave requires a connected device.**
 
 | Wave | Agents (parallel) | Owns | Disjoint from |
 | --- | --- | --- | --- |
@@ -475,26 +510,28 @@ own tests; the lead runs the full gate after each wave.
 | 3 — Service + Android 13 | I: `FlowRuntimeService` (FGS SDK guards, history recording, dictionary apply, polish pass-through) + `AndroidManifest.xml` + `build.gradle.kts` · J: `MainActivity` (permissions + Home/Settings/History routing) | I: service/manifest/gradle · J: MainActivity | disjoint |
 | 4 — UI | K: `SettingsScreen` (all new sections) · L: `HistoryScreen` (new) | K: SettingsScreen + strings · L: new file + strings | disjoint |
 | 5 — Docs | M: `GEMINI_LIVE_WIRE_REFERENCE.md` · N: doc cleanup/update pass | docs/ only | disjoint |
-| 6 — Integration | Lead: full build/test/lint, version, installs, matrix prep | verification | — |
+| 6 — Integration | Lead: full build/test/lint, version, APK | verification (device-free) | — |
 
 ---
 
-## 14. Testing strategy
+## 15. Testing strategy
 
 - **JVM unit tests** — every pure module (placement, corrections, history repo,
   styles, metrics, coordinator virtual-time tests incl. auto-stop, selector,
-  accumulator). No device, no live key.
+  accumulator). No device, no live key. This is the entire automated gate for
+  Phases 1–9.
 - **Lint** — `warningsAsErrors`; manifest `tools:targetApi` resolves the
   `specialUse` NewApi errors.
-- **Instrumented/device** — matrix above; accessibility/overlay behaviors remain
-  physical-device mandatory.
+- **Device tier** — consolidated into Phase 10 (§13), run only after all
+  development is complete, on both the S25 and the Android 13 tablet.
+  Accessibility/overlay/FGS behaviors remain physical-device mandatory there.
 - **No secrets policy** — the wire reference and all docs stay free of API keys,
   authenticated URLs, transcripts, and audio; `SESSION DONE`/history storage
   rules unchanged (history text is user-opt-in, encrypted).
 
 ---
 
-## 15. Risks and open items
+## 16. Risks and open items
 
 1. **FGS on API 33** — the inert `specialUse` bit is expected to be ignored;
    verified empirically on the tablet with the documented two-argument
@@ -515,7 +552,7 @@ own tests; the lead runs the full gate after each wave.
 
 ---
 
-## 16. Expected end state (0.4.0)
+## 17. Expected end state (0.4.0)
 
 - Installs and works on **Android 13+** (tablet verified) and Android 14–16.
 - The mic bubble is **freely draggable** to any screen position, persists, and
