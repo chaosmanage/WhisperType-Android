@@ -22,35 +22,26 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import com.whispertype.android.R
 import com.whispertype.android.audio.AudioCapture
+import com.whispertype.android.audio.AudioPipeline
 import com.whispertype.android.audio.AudioStartResult
-import com.whispertype.android.core.contracts.GeminiLiveSession
-import com.whispertype.android.core.model.CancelReason
 import com.whispertype.android.core.model.DictationFailure
 import com.whispertype.android.core.model.DictationState
-import com.whispertype.android.core.model.GeminiEvent
 import com.whispertype.android.core.model.InsertionResult
 import com.whispertype.android.core.model.MutableSessionMetrics
 import com.whispertype.android.core.model.OverlayIntent
-import com.whispertype.android.core.model.ResultCandidate
-import com.whispertype.android.core.model.SendResult
 import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.TargetEligibility
-import com.whispertype.android.core.transcript.TranscriptSelection
-import com.whispertype.android.core.transcript.TranscriptSelector
 import com.whispertype.android.data.secrets.KeystoreKeyProvider
 import com.whispertype.android.data.secrets.KeyProvider
 import com.whispertype.android.data.settings.SettingsProvider
 import com.whispertype.android.data.settings.SettingsRepository
-import com.whispertype.android.platform.gemini.GeminiLiveException
 import com.whispertype.android.platform.gemini.GeminiSessionConfig
 import com.whispertype.android.platform.gemini.GeminiSessionFactory
 import com.whispertype.android.platform.ipc.RuntimeIpc
 import com.whispertype.android.platform.overlay.OverlayOwners
 import com.whispertype.android.platform.overlay.PersistentOverlayHost
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -61,19 +52,17 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
- * The main-process foreground service that owns the overlay runtime (locked
- * decision §3 / §4.1, Wispr FlowService parity): overlay lifecycle, session
- * state, and the Gemini Live connection later. It implements the stable
- * Compose owners ([OverlayOwners]) and hosts the one persistent application
- * overlay. Focus / target capture / insertion are delegated over typed IPC to
- * the separate `:accessibility` process.
+ * The main-process foreground service that owns the overlay runtime: overlay
+ * lifecycle, session state, and the Gemini Live connection. It implements the
+ * stable Compose owners ([OverlayOwners]) and hosts the one persistent overlay.
  *
- * Static-insertion stage (Phases 1-4): tapping the bubble routes a static test
- * string through the accessibility process which commits it at the cursor via
- * [android.view.inputmethod.InputConnection] semantics; the result is reflected
- * back here so the overlay can render Success / Ambig / Error.
+ * Live dictation orchestration is delegated to a host-testable
+ * [DictationCoordinator]; this service is its Android-facing [DictationHost]
+ * (IPC insertion, key/settings resolution, microphone/foreground capture,
+ * overlay state publication). The static-insertion fallback (no API key) stays
+ * here for the keyless field-matrix gates.
  */
-class FlowRuntimeService : Service(), OverlayOwners {
+class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
 
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val savedStateRegistryController = SavedStateRegistryController.create(this)
@@ -100,38 +89,12 @@ class FlowRuntimeService : Service(), OverlayOwners {
     // never during the Service constructor when the base Context is unattached.
     private val keyProvider: KeyProvider by lazy { KeystoreKeyProvider(this) }
     private val settings: SettingsProvider by lazy { SettingsRepository(this) }
-    private val transcriptSelector = TranscriptSelector()
 
-    /** Live Gemini session, capture, and their jobs while a dictation session is active. */
-    private var liveSession: GeminiLiveSession? = null
-    private var liveCapture: AudioCapture? = null
-    private var liveAudioJob: Job? = null
-    private var liveSessionJob: Job? = null
-    private var amplitudeJob: Job? = null
-    private val liveCandidates = mutableListOf<ResultCandidate>()
+    /** Live-session orchestration (Release C). */
+    private val coordinator = DictationCoordinator(scope, this)
 
-    /** Session-local monotonic diagnostics for the active dictation (Release A). */
-    private var liveMetrics: MutableSessionMetrics? = null
-
-    /** Peak input amplitude (0..1) of the current capture, for mic diagnostics. */
-    @Volatile
-    private var peakAmplitude = 0f
-
-    /** Number of 20 ms audio chunks accepted by the session this turn. */
-    @Volatile
-    private var chunksSent = 0L
-
-    /** Peak RMS of the actual PCM bytes handed to the session this turn (0..32768). */
-    @Volatile
-    private var peakChunkRms = 0.0
-
-    /**
-     * Pending delayed selection after TurnComplete. inputTranscription is a
-     * separate serverContent message with no guaranteed ordering and may trail
-     * turnComplete, so an empty-candidate turnComplete waits a short grace
-     * window before selecting/failing.
-     */
-    private var pendingSelection: Job? = null
+    /** Session id of an in-flight static-insertion fallback (keyless installs). */
+    private var staticSessionId: SessionId? = null
 
     private val incomingHandler = object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(msg: Message) {
@@ -148,7 +111,10 @@ class FlowRuntimeService : Service(), OverlayOwners {
                 }
                 RuntimeIpc.MSG_INSERT_RESULT -> {
                     val b = msg.data
-                    if (b != null) onInsertionResult(RuntimeIpc.unpackInsertionResult(b))
+                    if (b != null) onInsertionResult(
+                        SessionId(b.getString(RuntimeIpc.KEY_SESSION_ID) ?: return@handleMessage),
+                        RuntimeIpc.unpackInsertionResult(b),
+                    )
                 }
                 else -> Log.w(TAG, "Unhandled IPC message ${msg.what}")
             }
@@ -166,7 +132,7 @@ class FlowRuntimeService : Service(), OverlayOwners {
         // Start as a special-use FGS (no runtime permission required) so the
         // overlay service can run before RECORD_AUDIO is granted. The service
         // is promoted to the microphone type only during dictation, once the
-        // permission is confirmed (see runLiveSession).
+        // permission is confirmed (see startCapture).
         startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         startOverlay()
         Log.i(TAG, "FlowRuntimeService started (main process)")
@@ -189,8 +155,8 @@ class FlowRuntimeService : Service(), OverlayOwners {
     private fun onOverlayIntent(intent: OverlayIntent) {
         when (intent) {
             OverlayIntent.START_DICTATION -> startDictation()
-            OverlayIntent.STOP -> stopDictation()
-            OverlayIntent.CANCEL -> cancelDictation()
+            OverlayIntent.STOP -> coordinator.stop()
+            OverlayIntent.CANCEL -> coordinator.cancel()
             OverlayIntent.COPY, OverlayIntent.DISMISS -> Unit
         }
     }
@@ -201,7 +167,7 @@ class FlowRuntimeService : Service(), OverlayOwners {
      * field-matrix gates stay exercisable on a keyless install.
      */
     private fun startDictation() {
-        if (keyProvider.hasKey()) startLiveDictation() else startStaticInsertion()
+        if (keyProvider.hasKey()) coordinator.start() else startStaticInsertion()
     }
 
     /**
@@ -210,368 +176,102 @@ class FlowRuntimeService : Service(), OverlayOwners {
      */
     private fun startStaticInsertion() {
         val reply = a11yReply ?: run {
-            failWith(SessionId.new(), runtimeNoAccessibility())
+            failWithStatic(SessionId.new(), runtimeNoAccessibility())
             return
         }
         val sessionId = SessionId.new()
-        _sessionState.value = DictationState.Starting(sessionId, EMPTY_TARGET(sessionId))
-        sendInsert(sessionId, STATIC_TEST_TEXT, reply)
-    }
-
-    // ------------------------------------------------------------------
-    // Phase 6: live Gemini dictation loop
-    // ------------------------------------------------------------------
-
-    /**
-     * Live loop (PRD §6): bubble tap creates a Gemini Live session, awaits its
-     * setup acknowledgement, promotes the service to microphone foreground mode
-     * before [AudioRecord], then streams exact 16 kHz PCM16 frames. STOP drains
-     * accepted audio and sends one activity-end boundary; the resulting raw /
-     * cleaned candidates are validated and the selection goes through the proven
-     * insertion transaction.
-     */
-    private fun startLiveDictation() {
-        val sessionId = SessionId.new()
-        Log.i(TAG, "STAGE: dictation requested session=$sessionId")
-        liveCandidates.clear()
-        peakAmplitude = 0f
-        chunksSent = 0L
-        peakChunkRms = 0.0
-        pendingSelection?.cancel()
-        pendingSelection = null
-        val metrics = MutableSessionMetrics(sessionId)
-        liveMetrics = metrics
-        metrics.mark(MutableSessionMetrics.Event.Tap)
-        _sessionState.value = DictationState.Starting(sessionId, EMPTY_TARGET(sessionId))
-        liveSessionJob = scope.launch {
-            metrics.mark(MutableSessionMetrics.Event.KeyLoadStarted)
-            val key = keyProvider.provideKey()
-            metrics.mark(MutableSessionMetrics.Event.KeyLoaded)
-            if (key.isNullOrEmpty()) {
-                failWith(
-                    sessionId,
-                    DictationFailure(
-                        code = "runtime_no_api_key",
-                        message = "Add your Gemini API key in Settings first.",
-                        recoverable = true,
-                    ),
-                )
-                return@launch
-            }
-            val language = settings.speechMode.first()
-            val model = settings.modelOverride.first()
-                ?.takeIf { it.isNotBlank() }
-                ?: GeminiSessionFactory.DEFAULT_MODEL
-            metrics.mark(MutableSessionMetrics.Event.SettingsReady)
-            metrics.mark(MutableSessionMetrics.Event.SocketCreated)
-            val session = GeminiSessionFactory.create(
-                apiKey = key,
-                config = GeminiSessionConfig(
-                    model = model,
-                    language = language,
-                    // Release B production protocol: manual activity signaling
-                    // (automaticActivityDetection disabled by default) and no
-                    // text prime, no systemInstruction, no output transcription.
-                    // The dictation source is inputTranscription only.
-                ),
-                metrics = metrics,
-            )
-            liveSession = session
-            runLiveSession(sessionId, session)
+        staticSessionId = sessionId
+        _sessionState.value = DictationState.Starting(sessionId, DictationCoordinator.EMPTY_TARGET(sessionId))
+        if (!sendInsert(sessionId, STATIC_TEST_TEXT, reply)) {
+            staticSessionId = null
+            failWithStatic(sessionId, runtimeNoAccessibility())
         }
     }
 
-    private suspend fun runLiveSession(sessionId: SessionId, session: GeminiLiveSession) {
-        var capture: AudioCapture? = null
-        var audioJob: Job? = null
-        try {
-            try {
-                session.awaitReady()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                val failure = (e as? GeminiLiveException)?.failure
-                    ?: DictationFailure(
-                        code = "gemini_setup",
-                        message = "Could not reach Gemini. Check your network and API key.",
-                        recoverable = true,
-                    )
-                failWith(sessionId, failure)
-                return
-            }
-            if (_sessionState.value !is DictationState.Starting) return
+    // ------------------------------------------------------------------
+    // DictationHost
+    // ------------------------------------------------------------------
 
-            // Release B5: open the realtime activity before the microphone so the
-            // wire order is always setup, setupComplete, activityStart, audio,
-            // activityEnd. Fail promptly if the boundary cannot be queued.
-            when (val start = session.startActivity()) {
-                is SendResult.Rejected -> {
-                    failWith(sessionId, transportFailure(start.reason))
-                    return
-                }
-                SendResult.Accepted -> Unit
-            }
-            liveMetrics?.mark(MutableSessionMetrics.Event.ActivityStartQueued)
+    override fun publish(state: DictationState) {
+        _sessionState.value = state
+    }
 
-            if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
-                != android.content.pm.PackageManager.PERMISSION_GRANTED
-            ) {
-                failWith(
-                    sessionId,
-                    DictationFailure(
-                        code = "runtime_mic_permission",
-                        message = "Microphone permission was revoked.",
-                        recoverable = true,
-                    ),
-                )
-                return
-            }
-
-            // Release B5: promote to microphone foreground mode before AudioRecord,
-            // only now that RECORD_AUDIO is confirmed granted. specialUse stays in
-            // the type set so the overlay service keeps running after dictation.
-            startForeground(
-                NOTIFICATION_ID,
-                buildNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
-            )
-
-            liveMetrics?.mark(MutableSessionMetrics.Event.CaptureStartRequested)
-            val cap = AudioCapture()
-            capture = cap
-            liveCapture = cap
-            when (val start = cap.start()) {
-                is AudioStartResult.Failed -> {
-                    failWith(sessionId, start.failure)
-                    return
-                }
-                AudioStartResult.Started -> {
-                    liveMetrics?.mark(MutableSessionMetrics.Event.CaptureStarted)
-                }
-            }
-
-            _sessionState.value = DictationState.Listening(sessionId)
-            audioJob = scope.launch {
-                for (chunk in cap.chunks) {
-                    liveMetrics?.capturedFrames = (liveMetrics?.capturedFrames ?: 0L) + 1
-                    if (session.sendAudio(chunk) is SendResult.Accepted) {
-                        chunksSent++
-                        liveMetrics?.acceptedFrames = (liveMetrics?.acceptedFrames ?: 0L) + 1
-                        if (liveMetrics?.firstAudioQueuedAt == null) {
-                            liveMetrics?.mark(MutableSessionMetrics.Event.FirstAudioQueued)
-                        }
-                        val rms = pcm16Rms(chunk.pcm16Bytes)
-                        if (rms > peakChunkRms) peakChunkRms = rms
-                        if (chunksSent == 1L) {
-                            Log.i(TAG, "STAGE: first audio chunk sent (mic producing data)")
-                        } else if (chunksSent % 50 == 0L) {
-                            Log.i(TAG, "audio progress: chunksSent=$chunksSent peakChunkRms=$peakChunkRms peakAmp=$peakAmplitude")
-                        }
-                    } else {
-                        liveMetrics?.rejectedFrames = (liveMetrics?.rejectedFrames ?: 0L) + 1
-                    }
-                }
-            }
-            liveAudioJob = audioJob
-            // Mic-level diagnostic + live waveform: AudioCapture exposes its own
-            // amplitude flow; drive peakAmplitude and the overlay amplitude from
-            // it (GeminiEvent.Amplitude is not emitted by the session).
-            amplitudeJob = scope.launch {
-                cap.amplitude.collect { level ->
-                    if (level > peakAmplitude) peakAmplitude = level
-                    val cur = _sessionState.value
-                    if (cur is DictationState.Listening && cur.sessionId == sessionId) {
-                        _sessionState.value = cur.copy(amplitude = level)
-                    }
-                }
-            }
-
-            session.events().collect { event -> onLiveEvent(sessionId, event) }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            failWith(
-                sessionId,
+    override suspend fun resolveSession(metrics: MutableSessionMetrics): SessionResolve {
+        metrics.mark(MutableSessionMetrics.Event.KeyLoadStarted)
+        val key = keyProvider.provideKey()
+        metrics.mark(MutableSessionMetrics.Event.KeyLoaded)
+        if (key.isNullOrEmpty()) {
+            return SessionResolve.Failed(
                 DictationFailure(
-                    code = "gemini_events",
-                    message = "The Gemini session stopped unexpectedly.",
+                    code = "runtime_no_api_key",
+                    message = "Add your Gemini API key in Settings first.",
                     recoverable = true,
                 ),
             )
-        } finally {
-            audioJob?.cancel()
-            amplitudeJob?.cancel()
-            capture?.stop()
-            liveAudioJob = null
-            liveCapture = null
-            session.close()
-            liveSession = null
         }
+        val language = settings.speechMode.first()
+        val model = settings.modelOverride.first()
+            ?.takeIf { it.isNotBlank() }
+            ?: GeminiSessionFactory.DEFAULT_MODEL
+        metrics.mark(MutableSessionMetrics.Event.SettingsReady)
+        metrics.mark(MutableSessionMetrics.Event.SocketCreated)
+        val session = GeminiSessionFactory.create(
+            apiKey = key,
+            config = GeminiSessionConfig(
+                model = model,
+                language = language,
+                // Release B production protocol: manual activity signaling
+                // (automaticActivityDetection disabled by default) and no
+                // text prime, no systemInstruction, no output transcription.
+                // The dictation source is inputTranscription only.
+            ),
+            metrics = metrics,
+        )
+        return SessionResolve.Ok(SessionResolution(session = session, language = language))
     }
 
-    private fun onLiveEvent(sessionId: SessionId, event: GeminiEvent) {
-        when (event) {
-            GeminiEvent.Ready -> Unit
-            is GeminiEvent.Amplitude -> {
-                if (event.level > peakAmplitude) peakAmplitude = event.level
-                val current = _sessionState.value
-                if (current is DictationState.Listening && current.sessionId == sessionId) {
-                    _sessionState.value = current.copy(amplitude = event.level)
-                }
-            }
-            is GeminiEvent.TranscriptCandidates -> {
-                liveCandidates.addAll(event.candidates)
-                Log.i(TAG, "Candidates received: ${event.candidates.size}; first=${event.candidates.first().raw.take(80)}")
-            }
-            GeminiEvent.TurnComplete -> if (_sessionState.value is DictationState.Finalizing) {
-                if (liveCandidates.isEmpty()) {
-                    // inputTranscription is a separate serverContent message with no
-                    // guaranteed ordering; it can trail turnComplete. Wait a short
-                    // grace window before declaring no-transcript.
-                    Log.i(TAG, "TurnComplete with empty candidates; waiting ${TRAILING_TRANSCRIPT_GRACE_MS}ms for trailing inputTranscription")
-                    pendingSelection?.cancel()
-                    pendingSelection = scope.launch {
-                        delay(TRAILING_TRANSCRIPT_GRACE_MS)
-                        if (_sessionState.value is DictationState.Finalizing) {
-                            Log.i(TAG, "Grace elapsed; candidates now ${liveCandidates.size}")
-                            selectAndInsert(sessionId)
-                        }
-                    }
-                } else {
-                    Log.i(TAG, "TurnComplete with ${liveCandidates.size} candidates")
-                    selectAndInsert(sessionId)
-                }
-            }
-            is GeminiEvent.Failed -> {
-                failWith(sessionId, event.failure)
-                closeLiveSession()
-            }
-            GeminiEvent.SessionEnd -> if (_sessionState.value !is DictationState.Inserting) {
-                failWith(
-                    sessionId,
-                    DictationFailure(
-                        code = "gemini_transport",
-                        message = "The Gemini session closed.",
-                        recoverable = true,
-                    ),
-                )
+    override fun startCapture(metrics: MutableSessionMetrics): CaptureStart {
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+            != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            return CaptureStart.Failed(
+                DictationFailure(
+                    code = "runtime_mic_permission",
+                    message = "Microphone permission was revoked.",
+                    recoverable = true,
+                ),
+            )
+        }
+        // Promote to microphone foreground mode before AudioRecord, only now that
+        // RECORD_AUDIO is confirmed granted. specialUse stays in the type set so
+        // the overlay service keeps running after dictation.
+        startForeground(
+            NOTIFICATION_ID,
+            buildNotification(),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+        )
+        metrics.mark(MutableSessionMetrics.Event.CaptureStartRequested)
+        val cap = AudioCapture()
+        return when (val start = cap.start()) {
+            is AudioStartResult.Failed -> CaptureStart.Failed(start.failure)
+            AudioStartResult.Started -> {
+                metrics.mark(MutableSessionMetrics.Event.CaptureStarted)
+                CaptureStart.Started(cap)
             }
         }
     }
 
-    private fun selectAndInsert(sessionId: SessionId) {
-        pendingSelection?.cancel()
-        pendingSelection = null
-        val selection = transcriptSelector.select(liveCandidates.toList())
-        when (selection) {
-            is TranscriptSelection.None -> {
-                Log.w(TAG, "Selection: NONE (candidates=${liveCandidates.size}, peakAmp=$peakAmplitude)")
-                failWith(
-                    sessionId,
-                    DictationFailure(
-                        code = "gemini_no_transcript",
-                        message = "No transcript could be recognized. Try again.",
-                        recoverable = true,
-                    ),
-                )
-                closeLiveSession()
-            }
-            is TranscriptSelection.Cleaned, is TranscriptSelection.Raw -> {
-                Log.i(TAG, "Selection: ${selection::class.simpleName} text=${selection.text.take(80)}")
-                val reply = a11yReply
-                if (reply == null) {
-                    failWith(sessionId, runtimeNoAccessibility())
-                    closeLiveSession()
-                    return
-                }
-                liveMetrics?.mark(MutableSessionMetrics.Event.TranscriptSettled)
-                _sessionState.value = DictationState.Inserting(sessionId)
-                liveMetrics?.mark(MutableSessionMetrics.Event.InsertionRequested)
-                sendInsert(sessionId, selection.text, reply)
-                closeLiveSession()
-            }
-        }
-    }
-
-    /** Closes the live session socket; the collect loop then ends and cleans up. */
-    private fun closeLiveSession() {
-        pendingSelection?.cancel()
-        pendingSelection = null
-        liveSession?.let { session -> scope.launch { session.close() } }
-    }
-
-    /**
-     * STOPS the live turn (Listening -> Finalizing): drain any trailing partial
-     * frame, close the capture, wait for all accepted audio to be transmitted,
-     * then send the single activity-end boundary. Selection + insertion happen
-     * when the server's TurnComplete arrives in [onLiveEvent].
-     */
-    private fun stopDictation() {
-        val current = _sessionState.value as? DictationState.Listening ?: return
-        val sessionId = current.sessionId
-        _sessionState.value = DictationState.Finalizing(sessionId)
-        val capture = liveCapture
-        val session = liveSession
-        val audioJob = liveAudioJob
-        liveMetrics?.mark(MutableSessionMetrics.Event.Stop)
-        Log.i(TAG, "stopDictation: peakAmp=$peakAmplitude candidates=${liveCandidates.size} chunksSent=$chunksSent peakChunkRms=$peakChunkRms")
-        scope.launch {
-            capture?.forceRemainingChunk()
-            capture?.stop()
-            audioJob?.join()
-            liveMetrics?.mark(MutableSessionMetrics.Event.CaptureQuiesced)
-            val endResult = session?.endActivity()
-            liveMetrics?.mark(MutableSessionMetrics.Event.ActivityEndQueued)
-            if (endResult is SendResult.Rejected) {
-                // B6: a rejected boundary means no completion can arrive; fail
-                // promptly instead of entering an eight-second wait.
-                Log.w(TAG, "endActivity rejected: ${endResult.reason}")
-                selectAndInsert(sessionId)
-                return@launch
-            }
-            Log.i(TAG, "endActivity sent")
-        }
-        // Safety net: if the server never sends turnComplete (empty turn, dropped
-        // socket, server quirk), force selection so the panel never sticks on
-        // Finalizing. selectAndInsert cancels this job when it runs.
-        pendingSelection?.cancel()
-        pendingSelection = scope.launch {
-            delay(FINALIZE_TIMEOUT_MS)
-            if (_sessionState.value is DictationState.Finalizing) {
-                Log.w(TAG, "Finalize timeout after ${FINALIZE_TIMEOUT_MS}ms; forcing selection (candidates=${liveCandidates.size})")
-                selectAndInsert(sessionId)
-            }
-        }
-    }
-
-    /** CANCELS the live turn (no insertion) and tears down the session. */
-    private fun cancelDictation() {
-        val current = _sessionState.value
-        val sessionId = when (current) {
-            is DictationState.Starting -> current.sessionId
-            is DictationState.Listening -> current.sessionId
-            is DictationState.Finalizing -> current.sessionId
-            is DictationState.Inserting -> current.sessionId
-            else -> null
-        } ?: return
-        _sessionState.value = DictationState.Cancelled(sessionId, CancelReason.USER)
-        pendingSelection?.cancel()
-        pendingSelection = null
-        liveSessionJob?.cancel()
-        liveCapture?.stop()
-        liveAudioJob?.cancel()
-        liveSession?.let { scope.launch { it.close() } }
-        scope.launch {
-            delay(RETURN_TO_IDLE_MS)
-            resetToIdle()
-        }
+    override fun sendInsertion(sessionId: SessionId, text: String): Boolean {
+        val reply = a11yReply ?: return false
+        return sendInsert(sessionId, text, reply)
     }
 
     // ------------------------------------------------------------------
     // Shared IPC + failure helpers
     // ------------------------------------------------------------------
 
-    private fun sendInsert(sessionId: SessionId, text: String, reply: Messenger) {
+    /** Returns false when the insert request could not be handed to accessibility. */
+    private fun sendInsert(sessionId: SessionId, text: String, reply: Messenger): Boolean {
         val m = Message.obtain(null, RuntimeIpc.MSG_INSERT).apply {
             data = Bundle().apply {
                 putString(RuntimeIpc.KEY_SESSION_ID, sessionId.value)
@@ -579,18 +279,41 @@ class FlowRuntimeService : Service(), OverlayOwners {
             }
             replyTo = incomingMessenger
         }
-        try {
+        return try {
             reply.send(m)
+            true
         } catch (e: RemoteException) {
-            failWith(sessionId, DictationFailure(
-                code = "runtime_ipc_failed",
-                message = "Could not reach the accessibility service.",
-                recoverable = true,
-            ))
+            Log.w(TAG, "Could not deliver insert request: ${e.message}")
+            false
         }
     }
 
-    private fun failWith(sessionId: SessionId, failure: DictationFailure) {
+    private fun onInsertionResult(sessionId: SessionId, result: InsertionResult) {
+        if (coordinator.isActive) {
+            coordinator.onInsertionResult(sessionId, result)
+            return
+        }
+        if (staticSessionId == sessionId) {
+            staticSessionId = null
+            Log.i(TAG, "Static insertion result=$result")
+            _sessionState.value = when (result) {
+                InsertionResult.Inserted -> DictationState.Success(sessionId)
+                InsertionResult.Ambiguous -> DictationState.Error(sessionId, DictationFailure(
+                    code = "insert_ambiguous",
+                    message = "Could not confirm the text was inserted. Use Copy to grab it.",
+                    recoverable = true,
+                    retryAllowed = false,
+                ))
+                is InsertionResult.Failed -> DictationState.Error(sessionId, result.failure)
+            }
+            scope.launch {
+                delay(RETURN_TO_IDLE_MS)
+                resetToIdle()
+            }
+        }
+    }
+
+    private fun failWithStatic(sessionId: SessionId, failure: DictationFailure) {
         _sessionState.value = DictationState.Error(sessionId, failure)
         scope.launch {
             delay(RETURN_TO_IDLE_MS)
@@ -603,41 +326,6 @@ class FlowRuntimeService : Service(), OverlayOwners {
         message = "Accessibility is not connected yet.",
         recoverable = true,
     )
-
-    /** Typed failure for a rejected realtime boundary (Release B6): a completion
-     *  message can never arrive, so the session must fail without an 8s wait. */
-    private fun transportFailure(reason: String): DictationFailure = DictationFailure(
-        code = "gemini_transport",
-        message = "Gemini rejected the activity boundary ($reason).",
-        recoverable = true,
-    )
-
-    private fun onInsertionResult(result: InsertionResult) {
-        Log.i(TAG, "STAGE: insertion result=$result")
-        val metrics = liveMetrics
-        metrics?.mark(MutableSessionMetrics.Event.InsertionResult)
-        metrics?.let { Log.i(TAG, "SESSION METRICS ${it.summary()}") }
-        val current = _sessionState.value
-        val sessionId = when (current) {
-            is DictationState.Starting -> current.sessionId
-            is DictationState.Inserting -> current.sessionId
-            else -> SessionId.new()
-        }
-        _sessionState.value = when (result) {
-            InsertionResult.Inserted -> DictationState.Success(sessionId)
-            InsertionResult.Ambiguous -> DictationState.Error(sessionId, DictationFailure(
-                code = "insert_ambiguous",
-                message = "Could not confirm the text was inserted. Use Copy to grab it.",
-                recoverable = true,
-                retryAllowed = false,
-            ))
-            is InsertionResult.Failed -> DictationState.Error(sessionId, result.failure)
-        }
-        scope.launch {
-            delay(RETURN_TO_IDLE_MS)
-            resetToIdle()
-        }
-    }
 
     private suspend fun resetToIdle() {
         if (_sessionState.value is DictationState.Idle) return
@@ -667,7 +355,7 @@ class FlowRuntimeService : Service(), OverlayOwners {
     }
 
     // ------------------------------------------------------------------
-    // Foreground notification (Phase 6 promotes this to microphone mode)
+    // Foreground notification
     // ------------------------------------------------------------------
 
     private fun createNotificationChannel() {
@@ -689,47 +377,15 @@ class FlowRuntimeService : Service(), OverlayOwners {
             .build()
     }
 
-    /** RMS of signed little-endian PCM16 bytes, in [0, 32768]. Aggregate only; never logs audio. */
-    private fun pcm16Rms(bytes: ByteArray): Double {
-        if (bytes.size < 2) return 0.0
-        var sum = 0.0
-        var i = 0
-        while (i + 1 < bytes.size) {
-            val sample = (bytes[i].toInt() and 0xFF) or (bytes[i + 1].toInt() shl 8)
-            sum += sample.toDouble() * sample
-            i += 2
-        }
-        return Math.sqrt(sum / (i / 2))
-    }
-
     companion object {
         const val TAG = "FlowRuntimeService"
         const val NOTIFICATION_ID = 1001
         const val NOTIFICATION_CHANNEL_ID = "whispertype_runtime"
         const val STATIC_TEST_TEXT = "WhisperType static insertion test"
         const val RETURN_TO_IDLE_MS = 1200L
-        const val TRAILING_TRANSCRIPT_GRACE_MS = 2000L
-        const val FINALIZE_TIMEOUT_MS = 8000L
 
         /** Process-local service-liveness flag for the app UI (set in onCreate/onDestroy). */
         @Volatile
         var isRunning: Boolean = false
-
-        /** Placeholder target used while the accessibility process resolves the real one. */
-        fun EMPTY_TARGET(sessionId: SessionId): com.whispertype.android.core.model.TargetSnapshot =
-            com.whispertype.android.core.model.TargetSnapshot(
-                sessionId = sessionId,
-                packageName = "",
-                displayId = 0,
-                windowId = -1,
-                editorIdentity = "",
-                generation = 0L,
-                inputTypeMask = 0,
-                isSecure = false,
-                isUncertain = false,
-                selectionStart = null,
-                selectionEnd = null,
-                capturedAtMillis = 0L,
-            )
     }
 }

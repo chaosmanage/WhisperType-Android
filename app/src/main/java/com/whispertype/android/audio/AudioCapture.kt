@@ -1,8 +1,8 @@
 package com.whispertype.android.audio
 
+import android.annotation.SuppressLint
 import android.media.AudioRecord
 import android.media.MediaRecorder
-import android.annotation.SuppressLint
 import com.whispertype.android.core.audio.GemAudioFormat
 import com.whispertype.android.core.model.AudioChunk
 import com.whispertype.android.core.model.DictationFailure
@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** Low-level PCM16 producer. Implementations are not required to be thread-safe. */
 interface PcmSource {
@@ -37,35 +38,43 @@ sealed interface AudioStartResult {
 }
 
 /**
- * Producer pipeline: [PcmSource] -> [Chunker] -> [BoundedAudioQueue], with a
- * ~20 Hz amplitude [StateFlow]. [stop] is idempotent and releases the source
- * exactly once. Read/permission/init failures surface as typed failures on a
- * failure flow, never as raw throws.
+ * [AudioPipeline] implementation: [PcmSource] -> [Chunker] -> [BoundedAudioQueue],
+ * with a ~20 Hz amplitude [StateFlow].
+ *
+ * Release C6: the producer owns the [Chunker] exclusively — no external caller
+ * reads `remaining()`. [requestStop] unblocks the producer's blocking read and
+ * lets it process already-returned bytes, emit all complete frames, emit the
+ * zero-padded partial frame from `remaining()`, and close the chunk channel.
+ * [awaitQuiescence] joins that orderly drain with a bounded timeout; [stop] is
+ * the hard-cancel fallback.
+ *
+ * Read/permission/init failures surface as typed failures on [failures], never
+ * as raw throws.
  */
 class AudioCapture(
     private val sampleRateHz: Int = GemAudioFormat.SAMPLE_RATE_HZ,
     private val sourceFactory: () -> PcmSource? = { createDefaultSource() },
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-) {
+) : AudioPipeline {
     private val queue = BoundedAudioQueue<AudioChunk>(QUEUE_CAPACITY)
 
-    /** Bounded FIFO of 20 ms frames (capacity 64). Closed by [stop]. */
-    val chunks: ReceiveChannel<AudioChunk> = queue.channel
+    /** Bounded FIFO of 20 ms frames (capacity 64). Closed by the producer on shutdown. */
+    override val chunks: ReceiveChannel<AudioChunk> = queue.channel
 
     private val _amplitude = MutableStateFlow(0f)
 
     /** Smoothed input level in [0, 1], updated at ~20 Hz. */
-    val amplitude: StateFlow<Float> = _amplitude.asStateFlow()
+    override val amplitude: StateFlow<Float> = _amplitude.asStateFlow()
 
     private val _failures = MutableSharedFlow<DictationFailure>(replay = 1, extraBufferCapacity = 4)
 
     /** Typed terminal failures (mic init/read); the latest is replayed to late subscribers. */
-    val failures: SharedFlow<DictationFailure> = _failures.asSharedFlow()
+    override val failures: SharedFlow<DictationFailure> = _failures.asSharedFlow()
 
     private val chunker = Chunker(sampleRateHz)
 
     private val started = AtomicBoolean(false)
-    private val stopped = AtomicBoolean(false)
+    private val stopRequested = AtomicBoolean(false)
     private val released = AtomicBoolean(false)
 
     @Volatile
@@ -75,7 +84,7 @@ class AudioCapture(
     private var producerJob: Job? = null
 
     /** Starts capture. Safe to call once; subsequent calls return [AudioStartResult.Started]. */
-    fun start(): AudioStartResult {
+    override fun start(): AudioStartResult {
         if (!started.compareAndSet(false, true)) return AudioStartResult.Started
         val acquired = sourceFactory()
         if (acquired == null) {
@@ -88,32 +97,34 @@ class AudioCapture(
         return AudioStartResult.Started
     }
 
-    /** Stops the producer, releases the source exactly once, and closes the queue. Idempotent. */
-    fun stop() {
-        if (!stopped.compareAndSet(false, true)) return
+    /** Marks stop requested and releases the source so the blocking read unblocks. Idempotent. */
+    override fun requestStop() {
+        if (!stopRequested.compareAndSet(false, true)) return
+        source?.release()
+    }
+
+    /** Joins the orderly producer drain with a bounded timeout. Returns true when quiesced. */
+    override suspend fun awaitQuiescence(timeoutMs: Long): Boolean {
+        val job = producerJob ?: return true
+        return withTimeoutOrNull(timeoutMs) { job.join() } != null
+    }
+
+    /** Idempotent hard stop: cancels the producer, releases the source, closes the queue. */
+    override fun stop() {
+        stopRequested.set(true)
         producerJob?.cancel()
         if (released.compareAndSet(false, true)) source?.release()
         queue.close()
     }
 
-    /**
-     * Drains any partial final frame from the chunker and trySends it to the queue.
-     * Call during finalization, before or without [stop], to avoid dropping trailing audio.
-     */
-    fun forceRemainingChunk(): AudioChunk? {
-        val chunk = chunker.remaining()
-        if (chunk != null) queue.trySend(chunk)
-        return chunk
-    }
-
     private suspend fun producerLoop(source: PcmSource) {
         val buffer = ByteArray(READ_BUFFER_BYTES)
         try {
-            while (!stopped.get()) {
+            while (!stopRequested.get()) {
                 val read = source.read(buffer)
                 if (read < 0) {
                     _failures.tryEmit(DictationFailure(MIC_READ, "Microphone read failed", recoverable = true))
-                    return
+                    break
                 }
                 if (read > 0) {
                     val valid = if (read < buffer.size) buffer.copyOf(read) else buffer
@@ -127,10 +138,18 @@ class AudioCapture(
                 // ASR as choppy audio and break its voice-activity detection
                 // (inputTranscription silently never fires).
             }
+            // Orderly shutdown: emit the zero-padded partial frame exactly once,
+            // then close the channel so the ordered sender drains and stops.
+            if (stopRequested.get()) {
+                chunker.remaining()?.let { queue.send(it) }
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             _failures.tryEmit(DictationFailure(MIC_READ, "Microphone read failed", recoverable = true))
+        } finally {
+            queue.close()
+            if (released.compareAndSet(false, true)) source.release()
         }
     }
 

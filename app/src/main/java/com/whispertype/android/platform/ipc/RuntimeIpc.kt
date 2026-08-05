@@ -79,7 +79,8 @@ object RuntimeIpc {
     )
 
     /** Packs a typed insertion result into a Bundle (see [unpackInsertionResult]). */
-    fun packInsertionResult(result: InsertionResult, b: Bundle = Bundle()): Bundle {
+    fun packInsertionResult(result: InsertionResult, sessionId: String? = null, b: Bundle = Bundle()): Bundle {
+        if (sessionId != null) b.putString(KEY_SESSION_ID, sessionId)
         when (result) {
             InsertionResult.Inserted -> b.putBoolean(KEY_CONNECTION_PRESENT, true)
             InsertionResult.Ambiguous -> b.putBoolean(KEY_CONNECTION_PRESENT, false)

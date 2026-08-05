@@ -210,7 +210,7 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
                 gateway.insert(localizedTarget, text)
             }
             val reply = Message.obtain(null, RuntimeIpc.MSG_INSERT_RESULT).apply {
-                data = RuntimeIpc.packInsertionResult(result)
+                data = RuntimeIpc.packInsertionResult(result, sessionId = sessionId.value)
             }
             try {
                 replyTo.send(reply)
