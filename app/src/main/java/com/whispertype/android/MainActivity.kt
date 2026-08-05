@@ -1,11 +1,15 @@
 package com.whispertype.android
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -104,6 +108,22 @@ class MainActivity : ComponentActivity() {
         return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
     }
 
+    /** Runtime permissions required for dictation on Android 13+ (minSdk 33). */
+    private fun runtimePermissionsNeeded(): List<String> = buildList {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            add(Manifest.permission.RECORD_AUDIO)
+        }
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    private fun hasMicPermission(): Boolean =
+        checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    private fun hasNotificationPermission(): Boolean =
+        checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
     // ------------------------------------------------------------------
     // Screens
     // ------------------------------------------------------------------
@@ -143,6 +163,12 @@ class MainActivity : ComponentActivity() {
         isAccessibilityEnabled: () -> Boolean,
     ) {
         var showSettings by remember { mutableStateOf(false) }
+        var neededPermissions by remember { mutableStateOf(runtimePermissionsNeeded()) }
+        val permissionLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestMultiplePermissions(),
+        ) {
+            neededPermissions = runtimePermissionsNeeded()
+        }
         if (showSettings) {
             SettingsScreen(
                 settings = settings,
@@ -185,6 +211,25 @@ class MainActivity : ComponentActivity() {
                                 label = stringResource(R.string.home_status_key),
                                 on = keyProvider.hasKey(),
                             )
+                            HorizontalDivider()
+                            StatusRow(
+                                label = stringResource(R.string.home_status_mic),
+                                on = hasMicPermission(),
+                            )
+                            HorizontalDivider()
+                            StatusRow(
+                                label = stringResource(R.string.home_status_notifications),
+                                on = hasNotificationPermission(),
+                            )
+                        }
+                    }
+                    if (neededPermissions.isNotEmpty()) {
+                        Spacer(Modifier.height(12.dp))
+                        Button(
+                            onClick = { permissionLauncher.launch(neededPermissions.toTypedArray()) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(stringResource(R.string.home_grant_permissions))
                         }
                     }
                     Spacer(Modifier.height(24.dp))

@@ -1,5 +1,6 @@
 package com.whispertype.android.platform.runtime
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,6 +8,7 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Binder
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
@@ -24,6 +26,8 @@ import com.whispertype.android.R
 import com.whispertype.android.audio.AudioCapture
 import com.whispertype.android.audio.AudioPipeline
 import com.whispertype.android.audio.AudioStartResult
+import com.whispertype.android.core.dictionary.DictionaryCorrections
+import com.whispertype.android.core.dictionary.DictionaryEntry
 import com.whispertype.android.core.model.DictationFailure
 import com.whispertype.android.core.model.DictationState
 import com.whispertype.android.core.model.InsertionResult
@@ -32,9 +36,14 @@ import com.whispertype.android.core.model.MutableSessionMetrics
 import com.whispertype.android.core.model.OverlayIntent
 import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.TargetEligibility
+import com.whispertype.android.core.model.TranscriptionStyle
+import com.whispertype.android.data.history.EncryptedHistoryRepository
+import com.whispertype.android.data.history.HistoryRepository
+import com.whispertype.android.data.secrets.AndroidKeystoreKeyStore
+import com.whispertype.android.data.secrets.FileBlobStore
+import com.whispertype.android.data.secrets.JavaxAesGcmCipher
 import com.whispertype.android.data.secrets.KeystoreKeyProvider
 import com.whispertype.android.data.secrets.KeyProvider
-import com.whispertype.android.data.settings.SettingsProvider
 import com.whispertype.android.data.settings.SettingsRepository
 import com.whispertype.android.platform.gemini.GeminiLiveException
 import com.whispertype.android.platform.gemini.GeminiSessionConfig
@@ -91,14 +100,32 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     // Context-dependent; lazy so they initialize on first use (in onCreate),
     // never during the Service constructor when the base Context is unattached.
     private val keyProvider: KeyProvider by lazy { KeystoreKeyProvider(this) }
-    private val settings: SettingsProvider by lazy { SettingsRepository(this) }
+    private val settings: SettingsRepository by lazy { SettingsRepository(this) }
 
     /** One long-lived OkHttpClient shared by every session (Release D3). Its
      *  dispatcher/connection pool must never be shut down per session. */
     private val sharedOkHttpClient: OkHttpClient by lazy { GeminiSessionFactory.defaultClient() }
 
-    /** Live-session orchestration (Release C). */
-    private val coordinator = DictationCoordinator(scope, this)
+    /** Opt-in encrypted transcript history (0.4.0). */
+    private val historyRepository: HistoryRepository by lazy {
+        EncryptedHistoryRepository(
+            keystore = AndroidKeystoreKeyStore(HISTORY_KEY_ALIAS),
+            cipher = JavaxAesGcmCipher(),
+            blobStore = FileBlobStore(this, HISTORY_FILE_NAME),
+            retentionDays = { cachedHistoryRetentionDays },
+        )
+    }
+
+    /** Live-session orchestration (Release C). Auto-stop knobs read the cached
+     *  settings value lazily so the product default (60 s) applies immediately. */
+    private val coordinator = DictationCoordinator(
+        scope,
+        this,
+        config = DictationCoordinator.Config(
+            autoStopSeconds = { cachedAutoStopSeconds.toLong() },
+            maxRecordingSeconds = { cachedAutoStopSeconds.toLong() },
+        ),
+    )
 
     /** Eligibility-driven warm Live session pool (Release F). */
     private val warmManager = WarmLiveSessionManager(scope, createSession = { createColdSession() })
@@ -110,6 +137,27 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
 
     @Volatile
     private var cachedModelOverride: String? = null
+
+    @Volatile
+    private var cachedHistoryEnabled: Boolean = false
+
+    @Volatile
+    private var cachedHistoryRetentionDays: Int = SettingsRepository.DEFAULT_RETENTION_DAYS
+
+    @Volatile
+    private var cachedPolishLevel: TranscriptionStyle = TranscriptionStyle.MEDIUM
+
+    @Volatile
+    private var cachedAutoStopSeconds: Int = SettingsRepository.DEFAULT_AUTO_STOP_SECONDS
+
+    @Volatile
+    private var cachedDictionary: List<DictionaryEntry> = emptyList()
+
+    @Volatile
+    private var cachedBubbleX: Float? = null
+
+    @Volatile
+    private var cachedBubbleY: Float? = null
 
     private val incomingHandler = object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(msg: Message) {
@@ -146,15 +194,22 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         isRunning = true
         createNotificationChannel()
         // Start as a special-use FGS (no runtime permission required) so the
-        // overlay service can run before RECORD_AUDIO is granted. The service
-        // is promoted to the microphone type only during dictation, once the
-        // permission is confirmed (see startCapture).
-        startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        // overlay service can run before RECORD_AUDIO is granted. On API 33 the
+        // specialUse bit is inert but accepted (manifest-declared); the service
+        // is promoted to include the microphone type during dictation.
+        startForeground(NOTIFICATION_ID, buildNotification(), overlayFgsTypes())
         startOverlay()
         // Collect the runtime settings snapshot eagerly (Release D2) so the tap
         // path reads in-memory values instead of blocking on DataStore.
         scope.launch { settings.speechMode.collect { cachedSpeechMode = it } }
         scope.launch { settings.modelOverride.collect { cachedModelOverride = it } }
+        scope.launch { settings.historyEnabled.collect { cachedHistoryEnabled = it } }
+        scope.launch { settings.historyRetentionDays.collect { cachedHistoryRetentionDays = it } }
+        scope.launch { settings.polishLevel.collect { cachedPolishLevel = it } }
+        scope.launch { settings.autoStopSeconds.collect { cachedAutoStopSeconds = it } }
+        scope.launch { settings.dictionary.collect { cachedDictionary = it } }
+        scope.launch { settings.bubbleX.collect { cachedBubbleX = it } }
+        scope.launch { settings.bubbleY.collect { cachedBubbleY = it } }
         Log.i(TAG, "FlowRuntimeService started (main process)")
     }
 
@@ -164,7 +219,11 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             owners = this,
             sessionState = sessionState,
             eligibility = eligibility,
+            onBubblePositionChange = { x, y ->
+                scope.launch { settings.setBubblePosition(x, y) }
+            },
         )
+        host.setBubblePosition(cachedBubbleX, cachedBubbleY)
         overlayHost = host
         host.attach()
         scope.launch {
@@ -235,11 +294,11 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             config = GeminiSessionConfig(
                 model = model,
                 language = language,
-                systemInstruction = language.liveInstruction(),
+                systemInstruction = language.liveInstruction(cachedPolishLevel),
                 // Release B production protocol: manual activity signaling
                 // (automaticActivityDetection disabled by default) and no text
-                // prime. Hinglish mode re-adds a targeted systemInstruction that
-                // biases the Live transcription to Latin script.
+                // prime. The systemInstruction carries the polish level and (for
+                // Hinglish) the Latin-script rule.
             ),
             client = sharedOkHttpClient,
             metrics = metrics,
@@ -266,7 +325,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             config = GeminiSessionConfig(
                 model = model,
                 language = language,
-                systemInstruction = language.liveInstruction(),
+                systemInstruction = language.liveInstruction(cachedPolishLevel),
             ),
             client = sharedOkHttpClient,
         )
@@ -302,7 +361,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         startForeground(
             NOTIFICATION_ID,
             buildNotification(),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+            dictationFgsTypes(),
         )
         // AudioRecord construction and startRecording run off the main thread
         // (Release D4); failures surface as typed mic-init failures.
@@ -321,13 +380,45 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
 
     override fun sendInsertion(sessionId: SessionId, text: String): Boolean {
         val reply = a11yReply ?: return false
-        return sendInsert(sessionId, text, reply)
+        // Custom-dictionary correction rules (client-side) applied to the final text.
+        val corrected = DictionaryCorrections.apply(text, cachedDictionary)
+        return sendInsert(sessionId, corrected, reply)
     }
 
     override fun onSessionFinished(state: DictationState, metrics: MutableSessionMetrics, transcript: String?) {
         // Aggregate per-session outcome + stage latencies. Never transcript or audio.
         Log.i(TAG, "SESSION DONE outcome=${state::class.simpleName} ${metrics.summary()}")
+        // Opt-in history: record the settled transcript when enabled.
+        if (cachedHistoryEnabled && !transcript.isNullOrBlank()) {
+            scope.launch {
+                historyRepository.record(
+                    HistoryRepository.HistoryEntry(
+                        id = "",
+                        timestampMillis = System.currentTimeMillis(),
+                        text = transcript,
+                        language = cachedSpeechMode.name,
+                        charCount = transcript.length,
+                        outcome = state::class.simpleName ?: "Unknown",
+                    ),
+                )
+            }
+        }
     }
+
+    // ------------------------------------------------------------------
+    // Foreground-service types (Android 13+)
+    // ------------------------------------------------------------------
+
+    /** Persistent overlay FGS type: specialUse (honored API 34+, inert on API 33
+     *  where the bit is accepted because it is manifest-declared). */
+    @SuppressLint("InlinedApi")
+    private fun overlayFgsTypes(): Int = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+
+    /** Dictation FGS type: specialUse + microphone (RECORD_AUDIO is confirmed
+     *  granted before this is used). */
+    @SuppressLint("InlinedApi")
+    private fun dictationFgsTypes(): Int =
+        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
 
     // ------------------------------------------------------------------
     // Shared IPC + failure helpers
@@ -404,6 +495,8 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         const val TAG = "FlowRuntimeService"
         const val NOTIFICATION_ID = 1001
         const val NOTIFICATION_CHANNEL_ID = "whispertype_runtime"
+        const val HISTORY_FILE_NAME = "dictation_history.json.enc"
+        const val HISTORY_KEY_ALIAS = "whispertype_history_key"
 
         /** Process-local service-liveness flag for the app UI (set in onCreate/onDestroy). */
         @Volatile
