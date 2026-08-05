@@ -32,6 +32,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         val historyRetentionDays = intPreferencesKey("history_retention_days")
         val appEnabled = booleanPreferencesKey("app_enabled")
         val onboardingCompleted = booleanPreferencesKey("onboarding_completed")
+        val modelOverride = stringPreferencesKey("model_override")
     }
 
     override val speechMode: Flow<LanguageMode> =
@@ -52,6 +53,9 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
     override val onboardingCompleted: Flow<Boolean> =
         dataStore.data.map { it[Keys.onboardingCompleted] ?: false }
 
+    override val modelOverride: Flow<String?> =
+        dataStore.data.map { it[Keys.modelOverride] }
+
     suspend fun setSpeechMode(mode: LanguageMode) {
         dataStore.edit { it[Keys.speechMode] = mode.name }
     }
@@ -70,6 +74,12 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     suspend fun setOnboardingCompleted(completed: Boolean) {
         dataStore.edit { it[Keys.onboardingCompleted] = completed }
+    }
+
+    suspend fun setModelOverride(model: String?) {
+        dataStore.edit {
+            if (model.isNullOrBlank()) it.remove(Keys.modelOverride) else it[Keys.modelOverride] = model.trim()
+        }
     }
 
     companion object {

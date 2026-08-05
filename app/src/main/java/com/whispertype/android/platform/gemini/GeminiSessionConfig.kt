@@ -9,10 +9,16 @@ import com.whispertype.android.core.model.LanguageMode
  * never depend on a hard-coded endpoint.
  */
 class GeminiSessionConfig(
-    /** Full model identifier without the `models/` prefix, e.g. `gemini-2.5-flash-live-preview`. */
+    /** Full model identifier without the `models/` prefix, e.g. `gemini-3.1-flash-live-preview`. */
     val model: String,
-    /** Server audio/text output modalities. WhisperType requests text-only transcription. */
-    val responseModalities: List<String> = listOf("TEXT"),
+    /** Server audio/text output modalities. WhisperType is voice-to-text, so the
+     *  Live model runs in AUDIO modality (the supported mode for the
+     *  voice-only Live models); the dictation text is read from the server's
+     *  `inputTranscription`, not from the model's own (audio) output. */
+    val responseModalities: List<String> = listOf("AUDIO"),
+    /** When true, the setup enables `inputAudioTranscription` so the server
+     *  returns `serverContent.inputTranscription.text` for the user's speech. */
+    val inputAudioTranscription: Boolean = true,
     /** Optional instruction the model applies for the whole session. */
     val systemInstruction: String? = null,
     /** Input PCM16 sample rate advertised in the audio mime type. */

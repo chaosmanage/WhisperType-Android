@@ -64,6 +64,10 @@
     <string name="settings_speech_mode">Speech mode</string>
     <string name="language_english">English</string>
     <string name="language_hinglish">Hinglish</string>
+    <string name="settings_model">Gemini model</string>
+    <string name="settings_model_desc">Optional. Leave blank to use the default (gemini-3.1-flash-live-preview).</string>
+    <string name="settings_model_hint">Model name, e.g. gemini-3.1-flash-live-preview</string>
+    <string name="settings_model_save">Save model</string>
     <string name="settings_history">Save dictation history</string>
     <string name="settings_history_desc">Keep a private local record of your dictation.</string>
     <string name="settings_history_retention">Keep history for</string>

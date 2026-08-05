@@ -68,6 +68,8 @@ connect() ──► handshake ──► send setup ──► send realtimeInput.
 
 ## 3. Server messages
 
+All server→client messages arrive as **binary WebSocket frames** (opcode `0x2`); the payload is UTF-8 JSON. Clients must read the binary-frame callback (e.g. OkHttp `onMessage(WebSocket, ByteString)`), not only text frames — the failure in `FAILURE_GEMINI_WIRE.md` was exactly this.
+
 | Field | Meaning |
 | --- | --- |
 | `setupComplete` | Handshake acknowledged; session is open. |

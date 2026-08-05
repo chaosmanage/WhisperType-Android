@@ -31,6 +31,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.ByteString.Companion.encodeUtf8
 
 /**
  * End-to-end WebSocket protocol tests against MockWebServer's WebSocket
@@ -104,9 +105,10 @@ class OkHttpGeminiLiveSessionTest {
         assertEquals("models/gemini-test-live", setup["model"]!!.jsonPrimitive.content)
         val modalities = setup["generationConfig"]!!.jsonObject["responseModalities"]!!
         assertEquals(
-            listOf("TEXT"),
+            listOf("AUDIO"),
             (modalities as kotlinx.serialization.json.JsonArray).map { it.jsonPrimitive.content },
         )
+        assertTrue(setup.containsKey("inputAudioTranscription"))
         session.close()
     }
 
@@ -217,7 +219,7 @@ class OkHttpGeminiLiveSessionTest {
             MockResponse.Builder()
                 .webSocketUpgrade(object : WebSocketListener() {
                     override fun onOpen(webSocket: WebSocket, response: Response) {
-                        webSocket.send("""{"setupError":{"error":{"message":"API key not valid."}}}""")
+                        webSocket.send("""{"setupError":{"error":{"message":"API key not valid."}}}""".encodeUtf8())
                     }
 
                     override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -247,6 +249,32 @@ class OkHttpGeminiLiveSessionTest {
     }
 
     @Test
+    fun `close during setup fails awaitReady with the close reason`() = runBlocking {
+        val closing = MockWebServer()
+        closing.enqueue(
+            MockResponse.Builder()
+                .webSocketUpgrade(object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        webSocket.close(1008, "API key not valid. Please pass a valid API key.")
+                    }
+                })
+                .build(),
+        )
+        closing.start()
+        try {
+            val session = newSession(target = closing)
+            val error = assertFailsWith<GeminiLiveException> { session.awaitReady() }
+            assertEquals("gemini_setup", error.failure.code)
+            assertTrue(error.failure.message.contains("API key not valid"))
+            session.close()
+        } finally {
+            activeClient?.dispatcher?.cancelAll()
+            activeClient?.connectionPool?.evictAll()
+            closing.close()
+        }
+    }
+
+    @Test
     fun `close is idempotent`() = runBlocking {
         val session = newSession()
         session.awaitReady()
@@ -262,7 +290,9 @@ class OkHttpGeminiLiveSessionTest {
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
             socket = webSocket
-            webSocket.send("""{"setupComplete":{}}""")
+            // The live Gemini endpoint sends server->client messages as binary
+            // frames; mirror that so the session's binary onMessage is covered.
+            webSocket.send("""{"setupComplete":{}}""".encodeUtf8())
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -274,7 +304,7 @@ class OkHttpGeminiLiveSessionTest {
         }
 
         fun push(message: String) {
-            socket?.send(message)
+            socket?.send(message.encodeUtf8())
         }
     }
 }

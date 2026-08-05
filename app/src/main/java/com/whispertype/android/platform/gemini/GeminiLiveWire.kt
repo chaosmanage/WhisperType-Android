@@ -52,6 +52,12 @@ object GeminiLiveWire {
                     )
                 },
             )
+            // Voice-to-text: enable transcription of the user's speech so the
+            // server returns serverContent.inputTranscription.text (the dictation
+            // source). The model's own output stays audio and is never read.
+            if (config.inputAudioTranscription) {
+                put("inputAudioTranscription", buildJsonObject {})
+            }
             config.systemInstruction?.let { instruction ->
                 put(
                     "systemInstruction",
@@ -107,6 +113,7 @@ object GeminiLiveWire {
             when {
                 root.containsKey("setupComplete") -> ServerMessage.SetupComplete
                 root.containsKey("setupError") -> parseSetupError(root)
+                root.containsKey("error") -> parseTopLevelError(root)
                 root.containsKey("serverContent") -> parseServerContent(root)
                 root.containsKey("goAway") -> ServerMessage.GoAway
                 else -> ServerMessage.Unknown(raw)
@@ -118,6 +125,13 @@ object GeminiLiveWire {
     private fun parseSetupError(root: JsonObject): ServerMessage {
         val error = root["setupError"]?.jsonObject
         val message = error?.get("error")?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull
+        return ServerMessage.SetupError(
+            message ?: "Unknown setup error",
+        )
+    }
+
+    private fun parseTopLevelError(root: JsonObject): ServerMessage {
+        val message = root["error"]?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull
         return ServerMessage.SetupError(
             message ?: "Unknown setup error",
         )

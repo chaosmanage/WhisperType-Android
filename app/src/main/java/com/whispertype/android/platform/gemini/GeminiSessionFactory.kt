@@ -12,7 +12,7 @@ import okhttp3.OkHttpClient
 object GeminiSessionFactory {
 
     /** Default Live model used when the caller does not pin one. */
-    const val DEFAULT_MODEL = "gemini-2.5-flash-live-preview"
+    const val DEFAULT_MODEL = "gemini-3.1-flash-live-preview"
 
     fun create(
         apiKey: String,

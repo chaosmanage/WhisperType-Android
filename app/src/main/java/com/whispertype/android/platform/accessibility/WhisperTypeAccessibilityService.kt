@@ -234,6 +234,7 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
         } catch (_: Throwable) {
             false
         }
+        Log.d(TAG, "Keyboard window probe: hasIme=$hasIme windows=${windows?.size}")
         tracker.updateKeyboardVisible(hasIme)
     }
 

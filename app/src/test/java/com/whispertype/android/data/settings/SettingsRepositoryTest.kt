@@ -43,7 +43,29 @@ class SettingsRepositoryTest {
             assertEquals(SettingsRepository.DEFAULT_RETENTION_DAYS, repo.historyRetentionDays.first())
             assertTrue(repo.appEnabled.first())
             assertFalse(repo.onboardingCompleted.first())
+            assertEquals(null, repo.modelOverride.first())
         }
+
+    @Test
+    fun `model override defaults to null and setter updates it`() = runTest {
+        val repo = newRepository()
+
+        assertEquals(null, repo.modelOverride.first())
+
+        repo.setModelOverride("gemini-3.1-flash-live-preview")
+        assertEquals("gemini-3.1-flash-live-preview", repo.modelOverride.first())
+
+        repo.setModelOverride(null)
+        assertEquals(null, repo.modelOverride.first())
+    }
+
+    @Test
+    fun `blank model override is stored as unset`() = runTest {
+        val repo = newRepository()
+
+        repo.setModelOverride("   ")
+        assertEquals(null, repo.modelOverride.first())
+    }
 
     @Test
     fun `history is disabled by default`() = runTest {

@@ -94,8 +94,10 @@ class FlowRuntimeService : Service(), OverlayOwners {
     /** Reply messenger registered by the accessibility process. */
     private var a11yReply: Messenger? = null
 
-    private val keyProvider: KeyProvider = KeystoreKeyProvider(this)
-    private val settings: SettingsProvider = SettingsRepository(this)
+    // Context-dependent; lazy so they initialize on first use (in onCreate),
+    // never during the Service constructor when the base Context is unattached.
+    private val keyProvider: KeyProvider by lazy { KeystoreKeyProvider(this) }
+    private val settings: SettingsProvider by lazy { SettingsRepository(this) }
     private val transcriptSelector = TranscriptSelector()
 
     /** Live Gemini session, capture, and their jobs while a dictation session is active. */
@@ -216,9 +218,12 @@ class FlowRuntimeService : Service(), OverlayOwners {
                 return@launch
             }
             val language = settings.speechMode.first()
+            val model = settings.modelOverride.first()
+                ?.takeIf { it.isNotBlank() }
+                ?: GeminiSessionFactory.DEFAULT_MODEL
             val session = GeminiSessionFactory.create(
                 apiKey = key,
-                config = GeminiSessionConfig(model = GeminiSessionFactory.DEFAULT_MODEL, language = language),
+                config = GeminiSessionConfig(model = model, language = language),
             )
             liveSession = session
             runLiveSession(sessionId, session)

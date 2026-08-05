@@ -13,4 +13,5 @@ interface SettingsProvider {
     val historyRetentionDays: Flow<Int>
     val appEnabled: Flow<Boolean>
     val onboardingCompleted: Flow<Boolean>
+    val modelOverride: Flow<String?>
 }

@@ -19,6 +19,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.ByteString
 
 /** Transport-level failure carrying a typed, non-sensitive [DictationFailure]. */
 class GeminiLiveException(val failure: DictationFailure) : Exception(failure.message)
@@ -50,7 +51,17 @@ class OkHttpGeminiLiveSession(
     )
 
     override suspend fun awaitReady() {
-        withTimeout(READY_TIMEOUT_MS) { ready.await() }
+        try {
+            withTimeout(READY_TIMEOUT_MS) { ready.await() }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            throw GeminiLiveException(
+                failure(
+                    FAIL_SETUP,
+                    "Timed out waiting for the Gemini session to start.",
+                    recoverable = true,
+                ),
+            )
+        }
     }
 
     override suspend fun sendAudio(chunk: AudioChunk): SendResult {
@@ -79,10 +90,21 @@ class OkHttpGeminiLiveSession(
     private fun listener(): WebSocketListener = object : WebSocketListener() {
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            webSocket.send(GeminiLiveWire.buildSetup(config))
+            GeminiLog.i(TAG, "onOpen code=${response.code} url=${redactUrl(wsUrl)}")
+            val setup = GeminiLiveWire.buildSetup(config)
+            val sent = webSocket.send(setup)
+            GeminiLog.i(TAG, "setupSent=$sent setup=$setup")
+        }
+
+        // The Gemini Live server sends every server->client message as a BINARY
+        // frame (opcode 0x2), so OkHttp routes it to this overload rather than
+        // the text one. Both decode to the same parser.
+        override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+            onMessage(webSocket, bytes.utf8())
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            GeminiLog.i(TAG, "onMessage ${text.take(200)}")
             when (val message = GeminiLiveWire.parseServerMessage(text)) {
                 GeminiLiveWire.ServerMessage.SetupComplete -> {
                     ready.complete(Unit)
@@ -104,6 +126,7 @@ class OkHttpGeminiLiveSession(
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            GeminiLog.w(TAG, "onFailure ${t.message} httpCode=${response?.code}")
             ready.completeExceptionally(t)
             if (!closed.get()) {
                 _events.trySend(
@@ -112,8 +135,23 @@ class OkHttpGeminiLiveSession(
             }
         }
 
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            GeminiLog.i(TAG, "onClosing code=$code reason=$reason at=${System.currentTimeMillis()}")
+            if (!closed.get() && !ready.isCompleted) {
+                ready.completeExceptionally(
+                    GeminiLiveException(failure(FAIL_SETUP, reason.ifBlank { "Connection closed (code $code) before setup." }, recoverable = true)),
+                )
+            }
+        }
+
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            GeminiLog.i(TAG, "onClosed code=$code reason=$reason")
             if (!closed.get()) {
+                if (!ready.isCompleted) {
+                    ready.completeExceptionally(
+                        GeminiLiveException(failure(FAIL_SETUP, reason.ifBlank { "Connection closed (code $code) before setup." }, recoverable = true)),
+                    )
+                }
                 _events.trySend(GeminiEvent.SessionEnd)
             }
         }
@@ -121,14 +159,17 @@ class OkHttpGeminiLiveSession(
 
     private fun onServerContent(message: GeminiLiveWire.ServerMessage.ServerContent) {
         val candidates = ArrayList<ResultCandidate>()
-        if (message.textParts.isNotEmpty()) {
+        // Voice-to-text: the dictation source is inputTranscription (the user's
+        // speech as recognized by the model), not modelTurn text (the model's own
+        // output, which is audio for the voice-only Live models). modelTurn text
+        // is only a fallback for future text-capable models.
+        val inputTranscription = message.inputTranscription
+        if (inputTranscription != null && inputTranscription.isNotEmpty()) {
+            candidates.add(ResultCandidate(raw = inputTranscription, cleaned = null, language = config.language))
+        } else if (message.textParts.isNotEmpty()) {
             message.textParts.forEach { part ->
                 candidates.add(ResultCandidate(raw = part, cleaned = null, language = config.language))
             }
-        }
-        val inputTranscription = message.inputTranscription
-        if (candidates.isEmpty() && inputTranscription != null && inputTranscription.isNotEmpty()) {
-            candidates.add(ResultCandidate(raw = inputTranscription, cleaned = null, language = config.language))
         }
         if (candidates.isNotEmpty()) {
             _events.trySend(GeminiEvent.TranscriptCandidates(candidates))
@@ -146,7 +187,13 @@ class OkHttpGeminiLiveSession(
             retryAllowed = recoverable,
         )
 
+    private fun redactUrl(url: String): String {
+        // Strip the api key query parameter; never log authenticated URLs (§FR-6).
+        return url.replace(Regex("key=[^&]*"), "key=<redacted>")
+    }
+
     private companion object {
+        const val TAG = "OkHttpGeminiLiveSession"
         const val READY_TIMEOUT_MS = 15_000L
         const val NORMAL_CLOSE_CODE = 1000
         const val REASON_NOT_READY = "session_not_ready"

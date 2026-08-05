@@ -17,7 +17,7 @@ class GeminiLiveWireTest {
 
     private val config = GeminiSessionConfig(
         model = "gemini-test-live",
-        responseModalities = listOf("TEXT"),
+        responseModalities = listOf("AUDIO"),
         systemInstruction = "Transcribe speech only.",
         inputSampleRateHz = 16_000,
         language = LanguageMode.HINGLISH,
@@ -40,11 +40,25 @@ class GeminiLiveWireTest {
         val setup = root["setup"]!!.jsonObject
         val generationConfig = setup["generationConfig"]!!.jsonObject
         val modalities = generationConfig["responseModalities"]!!.jsonArray
-        assertEquals(listOf("TEXT"), modalities.map { it.jsonPrimitive.content })
+        assertEquals(listOf("AUDIO"), modalities.map { it.jsonPrimitive.content })
 
         val instruction = setup["systemInstruction"]!!.jsonObject["parts"]!!
             .jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
         assertEquals("Transcribe speech only.", instruction)
+    }
+
+    @Test
+    fun `buildSetup enables inputAudioTranscription by default`() {
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(config)).jsonObject
+        val setup = root["setup"]!!.jsonObject
+        assertTrue(setup.containsKey("inputAudioTranscription"))
+    }
+
+    @Test
+    fun `buildSetup omits inputAudioTranscription when disabled`() {
+        val bare = GeminiSessionConfig(model = "m", inputAudioTranscription = false)
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(bare)).jsonObject
+        assertFalse(root["setup"]!!.jsonObject.containsKey("inputAudioTranscription"))
     }
 
     @Test
@@ -84,6 +98,13 @@ class GeminiLiveWireTest {
         val raw = """{"setupError":{"error":{"message":"API key not valid.","status":"INVALID_ARGUMENT"}}}"""
         val msg = GeminiLiveWire.parseServerMessage(raw) as GeminiLiveWire.ServerMessage.SetupError
         assertEquals("API key not valid.", msg.message)
+    }
+
+    @Test
+    fun `top-level error parses to SetupError`() {
+        val raw = """{"error":{"code":404,"message":"models/gemini-2.5-flash-live-preview not found","status":"NOT_FOUND"}}"""
+        val msg = GeminiLiveWire.parseServerMessage(raw) as GeminiLiveWire.ServerMessage.SetupError
+        assertEquals("models/gemini-2.5-flash-live-preview not found", msg.message)
     }
 
     @Test
