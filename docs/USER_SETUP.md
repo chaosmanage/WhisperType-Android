@@ -6,8 +6,8 @@ When you focus a normal text field, a small WhisperType microphone control appea
 
 ## Requirements
 
-- Android 14 or newer.
-- A supported Pixel or Samsung device.
+- Android 13 or newer (0.4.0 targets Android 13+ with a runtime RECORD_AUDIO + POST_NOTIFICATIONS permission flow).
+- A supported Pixel or Samsung device, or an Android 13+ tablet.
 - Gboard, SwiftKey, or Samsung Keyboard in standard docked mode.
 - Internet access for Gemini Live.
 - A Gemini API key.
@@ -145,7 +145,47 @@ Available controls:
 - Elapsed-time visibility.
 - Cancel button side.
 
-The control cannot be moved freely over arbitrary app content. It stays attached to safe keyboard-relative positions.
+The mic bubble is freely draggable: drag it with your finger to place it anywhere on screen. Its position persists across sessions and device restarts. To restore the default position, use `WhisperType → Settings → Reset bubble position`.
+
+## Set the auto-stop timeout
+
+Open:
+
+`WhisperType → Settings → Auto-stop timeout`
+
+Choose 15, 30, 60, 120, or 300 seconds. The default is 60.
+
+Recording stops automatically after you have been silent for the chosen interval. A hard cap also stops any session that reaches the maximum duration, even if you are still speaking.
+
+## Choose the output polish
+
+Open:
+
+`WhisperType → Settings → Output polish`
+
+Choose None, Low, Medium, or High. The default is Medium.
+
+Higher polish levels ask the transcription engine to clean up filler words, disfluencies, and speech quirks; None keeps the raw transcript. The level is passed to the Gemini session as a system instruction (see `docs/GEMINI_LIVE_TRANSCRIPTION.md`).
+
+## Set up the custom dictionary
+
+Open:
+
+`WhisperType → Settings → Custom dictionary`
+
+- Tap `Add word` and enter a word or phrase.
+- Optionally enter `Always write as` to force a specific spelling.
+- Delete a single entry, or `Clear all` to remove every entry.
+
+Corrections are applied when the transcript is inserted, so the dictionary never rewrites the live transcript mid-session. Matching is word-boundary and case-insensitive.
+
+## Reset the bubble position
+
+If you dragged the mic bubble somewhere awkward, reset it:
+
+`WhisperType → Settings → Reset bubble position`
+
+The bubble returns to its default position.
 
 ## Run the compatibility test
 
@@ -228,18 +268,24 @@ This protects sensitive information and avoids accidental recording.
 
 ## Optional history
 
-History is disabled by default.
+History is disabled by default. Transcript text is recorded only while it is enabled.
 
 To enable it:
 
 1. Open `Settings`.
 2. Tap `Privacy and history`.
 3. Enable `Local history`.
-4. Choose a retention period.
+4. Choose a retention period (in days).
 
 When enabled, history is encrypted and stored locally. Audio is never stored.
 
-To remove it:
+To view or manage it:
+
+`Settings → Privacy and history → View history`
+
+The list is viewable in-app: copy an entry, delete a single entry, or `Clear all history` to empty it. Entries are automatically pruned once they are older than the retention period.
+
+To remove everything at once:
 
 `Settings → Privacy and history → Clear all history`
 

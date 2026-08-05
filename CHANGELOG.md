@@ -4,6 +4,19 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-06 (in development, feature branch)
+
+"Experience & Reach" — see `docs/IMPLEMENTATION_PLAN_3.md`.
+
+- **Android 13+ support** — `minSdk 33` so the Android 13 tablet can install the app.
+- **Draggable bubble** — the mic bubble is now freely draggable to any position and the position is remembered.
+- **Capsule UI + circular waveform** — compact recording capsule (Stop + Cancel) with an animated circular waveform, replacing the old full-width voice panel.
+- **Auto-stop timeout** — silence-based auto-stop and a hard recording cap (whichever fires first); user-selectable 15/30/60/120/300 s, default 60 s.
+- **Output-polish levels** — four transcription styles (`NONE`/`LOW`/`MEDIUM`/`HIGH`, default `MEDIUM`) passed through the Gemini `systemInstruction`.
+- **Custom dictionary** — client-side correction rules with optional "always write as" spellings, applied at insertion.
+- **Encrypted history screen** — viewable, encrypted transcript history: list, copy, delete one, delete all, retention-days respected.
+- **Docs overhaul** — removed obsolete/historical docs and rewrote `docs/ARCHITECTURE.md` for the current two-process layout; see also `docs/GEMINI_LIVE_WIRE_REFERENCE.md`.
+
 ## [0.3.1] - 2026-08-06
 
 Voice-to-text reliability and Hinglish. See `docs/GEMINI_LIVE_TRANSCRIPTION.md`.

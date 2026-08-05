@@ -6,6 +6,14 @@ WhisperType's core behavior — the dock overlay, keyboard geometry, and text in
 
 Each row must pass the manual device acceptance sequence in `docs/TESTING.md` before a release. Physical-device validation is required; emulators are not a substitute.
 
+## 0.4.0 platform baseline
+
+0.4.0 targets **Android 13+** (minSdk 33) and adds a runtime permission flow:
+
+- `RECORD_AUDIO` and `POST_NOTIFICATIONS` are requested at runtime during first-run setup, in order (microphone, then notifications).
+- Both must be granted before dictation can start.
+- Android 13+ tablets are in scope. The tablet acceptance tier is scheduled for Phase 10 of `docs/IMPLEMENTATION_PLAN_3.md`.
+
 ## Device baseline
 
 Before testing each device, capture the baseline (Implementation Plan §22.6). Replace `<serial>` with the connected device serial:
@@ -32,6 +40,8 @@ Record the results in the table below. Never commit device serials or other uniq
 | Samsung Galaxy | — | Samsung Keyboard | Portrait | Pending | Pending |  | — |
 | Samsung Galaxy | — | Gboard | Portrait | Pending | Pending |  | — |
 | Samsung Galaxy | — | SwiftKey | Portrait | Pending | Pending |  | — |
+| Android 13+ tablet (e.g. Pixel tablet) | 13+ | Gboard or Samsung Keyboard | Portrait | Pending | Pending | runtime RECORD_AUDIO + POST_NOTIFICATIONS flow (0.4.0) | — |
+| Android 13+ tablet (e.g. Pixel tablet) | 13+ | Gboard or Samsung Keyboard | Landscape | Pending | Pending | runtime RECORD_AUDIO + POST_NOTIFICATIONS flow (0.4.0) | — |
 
 Add additional rows (e.g. three-button navigation, other keyboards, additional OEMs) as they are validated.
 

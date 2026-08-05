@@ -165,6 +165,11 @@ adb -s <SERIAL> logcat --pid=<PID>
 
 ## 8. Current device reference (verified 2026-08-05)
 
+> **Second target device:** an **Android 13 tablet** is the second device in the
+> test matrix. **0.4.0 adds Android 13+ support** (`minSdk 33`), so the tablet can
+> install the build; push to it with the same workflow below using its own
+> Tailscale IP and Wireless-debugging port.
+
 - **Device:** Samsung Galaxy S25 (`SM-S921B`), Android 16 (SDK 36), 1080x2340 @ 480dpi
 - **Tailscale IP:** `100.127.110.79`
 - **ADB connect port:** `46487` — re-verified for the Release A-F (0.2.17) push; the previous `33395` was refused after the phone rebooted (may change again after another reboot — re-read from Wireless debugging)

@@ -68,6 +68,45 @@ Fields without a safe input connection cannot be written to directly: unusual We
 
 If insertion fails with a non-recoverable code (`PACKAGE_CHANGED`, `DISPLAY_CHANGED`, `FOCUS_CHANGED`, `SECURE_FIELD`, `ALREADY_CONSUMED`), the field state changed during dictation and the result was intentionally discarded — start again.
 
+## No transcript could be recognized
+
+Now rare in 0.4.0. When it does happen, check the session's `SESSION DONE` log line:
+
+- `reject=<rule>` — a transcript arrived but the selector rejected it; `lenient=true` means the failsafe still inserted it. Any remaining rejection is blank / punctuation-only / garbled / Devanagari-in-English.
+- No `reject=` and `inputTx=0` — the Live model returned nothing within the deadline; retry the dictation.
+
+## App won't install on Android 13
+
+Android 13 is supported since 0.4.0 (minSdk 33). If the install is blocked:
+
+1. Confirm you are installing the 0.4.0 (or newer) build, not an older APK.
+2. Allow the app used to open the APK to install unknown apps.
+3. On a tablet, confirm the build targets Android 13+ — the first-install flow prompts for microphone, then notifications.
+
+## Permissions
+
+Both `RECORD_AUDIO` and `POST_NOTIFICATIONS` must be granted for dictation to start.
+
+- `Settings -> Apps -> WhisperType -> Permissions`, or re-run the in-app setup.
+- If either was denied, WhisperType cannot start the microphone foreground service (see the `MIC_PERMISSION` / `FGS_START_DENIED` errors below).
+
+## History empty
+
+`Local history` is disabled by default, and transcript text is recorded only while it is enabled.
+
+1. `Settings -> Privacy and history`.
+2. Enable `Local history`.
+3. Dictate again, then open `View history`.
+4. Note that enabling history does not backfill older sessions.
+
+## Dictionary not applied
+
+Custom dictionary corrections match word-boundary and are case-insensitive.
+
+- Check the word is entered exactly as you will say it (partial/fused matches do not apply).
+- Check an `Always write as` spelling is set where needed.
+- Corrections are applied at insertion; the live transcript is not rewritten mid-session.
+
 ## OEM battery optimizations
 
 - Samsung: `Settings -> Apps -> WhisperType -> Battery`; choose the least restrictive setting available. If the Accessibility Service keeps stopping, re-enable it from `Settings -> Accessibility -> Installed apps -> WhisperType`.

@@ -30,16 +30,23 @@ The Gemini API key is the only secret the app stores.
 
 ## Optional history
 
-- Local history is disabled by default.
+- Local history is **opt-in** and disabled by default; transcript text is recorded only while it is enabled.
 - When enabled, completed valid dictations are stored in an encrypted file store using a Keystore AES-GCM key under the alias `whispertype_history`.
 - The history store lives in no-backup storage.
-- Retention options: 1 day, 7 days, or 30 days.
+- Retention is capped by a retention-days setting; entries older than the chosen period are pruned automatically.
+- History is viewable and deletable in-app (`Settings → Privacy and history → View history`): copy an entry, delete a single entry, or clear all.
 - `Clear all history` removes the stored records.
 - Audio is never stored.
 - API keys are never stored.
 - Full editor context is never stored.
 - The app package is stored only when the user explicitly enables history metadata.
 - When history is disabled, no database or transcript file is created.
+
+## Custom dictionary
+
+- The custom dictionary (correction rules) is stored locally in app-private storage; it is never uploaded, backed up, or sent to Gemini.
+- Correction rules are applied at insertion time — they are not prompt injection and are never included in the session `systemInstruction`.
+- Dictionary entries are never logged.
 
 ## Clipboard behavior
 
@@ -52,7 +59,7 @@ The Gemini API key is the only secret the app stores.
 
 - Logging uses stable, non-sensitive tags only: `WT-Accessibility`, `WT-Gemini`, `WT-Dictation`, `WT-Settings`.
 - `SecretRedactor` is applied to all log and exception output.
-- The app never logs: API keys, authenticated Gemini URLs, complete transcripts, audio, AccessibilityNode trees, or clipboard content.
+- The app never logs: API keys, authenticated Gemini URLs, complete transcripts, audio, AccessibilityNode trees, clipboard content, or custom dictionary entries.
 - Crash reports and diagnostics carry only typed error codes and aggregate timing metadata.
 
 ## Accessibility disclosure

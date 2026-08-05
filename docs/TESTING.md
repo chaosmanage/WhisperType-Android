@@ -13,15 +13,18 @@ Testing has two automated tiers plus a mandatory manual tier:
 | Package | Coverage |
 | --- | --- |
 | `com.whispertype.android.platform.gemini` | `GeminiLiveWireTest` (exact wire codec: setup fields, realtime activity builders, server parse), `OkHttpGeminiLiveSessionTest` (MockWebServer WebSocket: setup-first ordering, single activity start/end, audio rejection before start/after end, no `clientContent`, output transcription never a candidate, automatic-VAD variant, setup errors, close idempotence), `WarmLiveSessionManagerTest` (prewarm/claim/backoff/idle). |
-| `com.whispertype.android.platform.runtime` | `DictationCoordinatorTest` — virtual-time orchestration races (duplicate START, cancel during setup, STOP immediately, stale insertion responses, capture failure, rejected boundaries, exactly-once insertion), Release E settlement (deadline/debounce, provisional rejection, retained early turn-complete), Release F pre-ready buffering (order drain, overflow -> `connection_too_slow`), and failsafes (lenient fallback insert, retry, persistent errors). |
+| `com.whispertype.android.platform.runtime` | `DictationCoordinatorTest` — virtual-time orchestration races (duplicate START, cancel during setup, STOP immediately, stale insertion responses, capture failure, rejected boundaries, exactly-once insertion), Release E settlement (deadline/debounce, provisional rejection, retained early turn-complete), Release F pre-ready buffering (order drain, overflow -> `connection_too_slow`), failsafes (lenient fallback insert, retry, persistent errors), and 0.4.0 auto-stop (silence threshold + hard cap, per option). |
 | `com.whispertype.android.core.transcript` | `TranscriptSelectorTest` (user-speech trust policy, `diagnose()`, long-sentence regression), `TranscriptAccumulatorTest` (cumulative merge rules). |
-| `com.whispertype.android.core.model` | `MutableSessionMetricsTest` (monotonic timing/counters/summary), `LanguageModeTest` (Hinglish instruction). |
+| `com.whispertype.android.core.model` | `MutableSessionMetricsTest` (monotonic timing/counters/summary), `LanguageModeTest` (Hinglish instruction; 4 polish styles × languages). |
 | `com.whispertype.android.audio` | `AudioCaptureOrderlyShutdownTest` (producer-owned flush, zero-padded partial frame, unblocking a blocking read, timeout fallback), `PreReadyAudioBufferTest` (bounded FIFO, overflow, close). |
 | `com.whispertype.android.core.audio` | `BoundedAudioQueueTest`, `Pcm16FrameAssemblerTest`, `AmplitudeMeterTest`. |
 | `com.whispertype.android.core.state` | `DictationReducerTest` — state transitions, stale-session rejection, exactly-once consumption. |
 | `com.whispertype.android.core.privacy` | `LogRedactorTest`. |
 | `com.whispertype.android.data.secrets` | `SecretCipherTest`, `ClientInvalidRecoveryTest` — Keystore/AES-GCM storage, corrupt-blob recovery. |
 | `com.whispertype.android.data.settings` | `SettingsRepositoryTest` — defaults and persistence. |
+| `com.whispertype.android.core.dictionary` | `DictionaryCorrectionsTest` — word-boundary, case-insensitive correction rules applied at insertion. |
+| `com.whispertype.android.core.overlay` | `BubblePlacementTest` — free-drag bounds, persisted bubble position, reset. |
+| `com.whispertype.android.data.history` | `EncryptedHistoryRepositoryTest` — opt-in, Keystore AES-GCM, retention-days pruning, delete / delete-all, view/copy. |
 | `com.whispertype.android.platform.overlay` | `OverlayHostStateMachineTest`, `OverlayPlacementTest`, `OverlayVisibilityTest`. |
 | `com.whispertype.android.platform.accessibility` | `FocusedEditorTest`, `EligibilityMapperTest`, `EligibilityExplanationTest`, `SecurityClassifierTest`, `InsertionDecisionTest`, `InsertionVerifierTest`. |
 
@@ -58,6 +61,8 @@ Scenarios:
 ## Device matrix
 
 See `docs/DEVICE_COMPATIBILITY.md` for the phone/keyboard/navigation matrix, the ADB baseline commands, and how to record results.
+
+The 0.4.0 device tier (Android 13+ tablets, runtime permission flow) is deferred to Phase 10 of `docs/IMPLEMENTATION_PLAN_3.md`.
 
 ## Manual device acceptance sequence
 

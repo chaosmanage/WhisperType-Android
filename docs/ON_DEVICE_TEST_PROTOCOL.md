@@ -133,6 +133,79 @@ accessibility service, then re-run Stage 0.
 
 ---
 
+## Stage 8 — Freely draggable mic bubble
+
+- **Trigger**: with the bubble visible over a focused field, drag it to a new
+  position; end the session; refocus the field.
+- **Pass**: the bubble reappears at the dragged position after refocus, and that
+  position persists across sessions and device restarts. **Tap still starts** a
+  session from the new position (a `SESSION DONE` line appears).
+- **If FAIL**: the position resets on refocus → persistence is broken, or the
+  bubble is no longer tappable after dragging.
+
+## Stage 9 — Capsule recording UI + animated circular waveform
+
+- **Trigger**: tap the bubble and start speaking.
+- **Log signature**: `SESSION DONE ... outcome=Success ...` as before.
+- **Pass**: the keyboard area is replaced by the capsule recording panel showing
+  a live animated circular waveform; Stop and Cancel controls are present and
+  tappable; the waveform animates while audio is captured and stills after Stop.
+- **If FAIL**: the panel is missing, the waveform is static, or Stop/Cancel is absent.
+
+## Stage 10 — Auto-stop (silence + hard cap)
+
+- **Trigger**: set `Auto-stop timeout`, begin dictating, stop speaking, and do
+  not touch the panel.
+- **Log signature**: `SESSION DONE outcome=Success ...` with no manual Stop — the
+  panel ends the session on its own.
+- **Pass**: for each option (15/30/60/120/300 s, default 60 s) the session stops
+  automatically after the silence interval, and a hard cap stops any session that
+  reaches the cap even if audio is still flowing.
+- **If FAIL**: the session never auto-stops, or stops at the wrong interval.
+
+## Stage 11 — Output polish levels
+
+- **Trigger**: set `Output polish` to None, Low, Medium, and High in turn, and
+  dictate the same phrase with filler words / disfluencies at each level.
+- **Log signature**: `SESSION DONE ... outcome=Success ...` (the level is applied
+  via the Gemini `systemInstruction`; see `docs/GEMINI_LIVE_TRANSCRIPTION.md`).
+- **Pass**: None returns the raw transcript, High returns the most cleaned text,
+  and Low/Medium sit between — the four levels are distinguishable from each other.
+- **If FAIL**: the levels produce identical output.
+
+## Stage 12 — Custom dictionary corrections
+
+- **Trigger**: add a word plus an optional `Always write as` correction in
+  `Settings → Custom dictionary`; dictate the uncorrected form.
+- **Log signature**: `SESSION DONE ... outcome=Success ...`.
+- **Pass**: the inserted text uses the corrected spelling (applied at insertion,
+  word-boundary, case-insensitive); the live transcript is not rewritten mid-session.
+- **If FAIL**: the correction is not applied, or it is applied mid-stream.
+
+## Stage 13 — History list / copy / delete / delete-all
+
+- **Trigger**: enable `Local history`, complete a dictation, then open
+  `Settings → Privacy and history → View history`.
+- **Log signature**: none required (storage-only path).
+- **Pass**: the completed transcript appears in the list; Copy copies the text;
+  Delete removes one entry; `Clear all history` empties the list; entries respect
+  the retention period.
+- **If FAIL**: an entry is missing, copy/delete misbehaves, or retention is not honored.
+
+## Stage 14 — Android 13+ first-install permission flow (tablet)
+
+- **Trigger**: on an Android 13 or newer tablet, install the 0.4.0 build for the
+  first time and complete setup.
+- **Log signature**: permission grants reflected in
+  `dumpsys package com.whispertype.android` for `RECORD_AUDIO` and
+  `POST_NOTIFICATIONS`.
+- **Pass**: the runtime prompts appear in order (microphone, then notifications);
+  granting both makes the bubble eligible over a focused field.
+- **If FAIL**: a prompt is skipped, or the app is not installable on Android 13 —
+  ensure the 0.4.0 build (minSdk 33) is installed.
+
+---
+
 ## Decision table
 
 | Stage 3 | Stage 4 | Stage 5 | Stage 6 | Diagnosis |
@@ -157,3 +230,16 @@ accessibility service, then re-run Stage 0.
 | Cancel during connection | 5 | `outcome=Cancelled`, no insert |
 | Rapid consecutive sessions | 10 | no stale-candidate errors |
 | Retry button on an error | 5 | a fresh session starts |
+
+### 0.4.0 additions
+
+| Scenario | Runs | Expected |
+| --- | --- | ---: |
+| Bubble dragged position persists | 5 | bubble stays at the new position after refocus and restart |
+| Tap starts from a dragged position | 5 | session starts (`SESSION DONE`) |
+| Auto-stop silence (each 15/30/60/120/300 s option) | 5 | automatic `outcome=Success` at the interval |
+| Auto-stop hard cap | 5 | session stops at the cap even while speaking |
+| Polish None vs High distinguishable | 5 | visibly different transcript cleanliness |
+| Dictionary correction applied at insertion | 5 | corrected spelling in the inserted text |
+| History list / copy / delete / delete-all | 5 | all operations behave |
+| Android 13 tablet first install | 3 | installs; both runtime permissions granted |

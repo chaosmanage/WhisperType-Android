@@ -8,6 +8,16 @@ pipeline; companion docs are `docs/ON_DEVICE_TEST_PROTOCOL.md` (how to verify on
 a phone) and `docs/TRANSCRIPTION_REMEDIATION_PLAN.md` (the original plan this
 was built from).
 
+> **0.4.0 updates** — for the exhaustive wire minutia of the 0.4.0 wire (setup
+> fields, realtime activity boundaries, parse rules), see
+> `docs/GEMINI_LIVE_WIRE_REFERENCE.md`. In brief: **Output polish** maps
+> None/Low/Medium/High (default Medium) to a `systemInstruction` sent in setup —
+> higher levels ask for cleaner filler/disfluency handling; None sends no polish
+> instruction. **Auto-stop** adds a silence threshold plus a hard session cap,
+> both governed by the Auto-stop timeout setting (15/30/60/120/300 s, default 60).
+> The per-session `SESSION DONE` line keeps the shape documented in §11 with the
+> optional `reject=<rule>` / `lenient=true` fields.
+
 ---
 
 ## 1. TL;DR — what the engine is
