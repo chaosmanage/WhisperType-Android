@@ -41,4 +41,40 @@
     <string name="overlay_permission_button" tools:ignore="UnusedResources">Grant overlay permission</string>
     <string name="overlay_permission_granted" tools:ignore="UnusedResources">Overlay permission granted. Runtime starting…</string>
     <string name="runtime_started_toast" tools:ignore="UnusedResources">WhisperType runtime started</string>
+
+    <!-- App home / status (module UI) -->
+    <string name="home_title">WhisperType</string>
+    <string name="home_subtitle" tools:ignore="UnusedResources">Mic bubble dictation</string>
+    <string name="home_status_overlay">Overlay permission</string>
+    <string name="home_status_runtime">Runtime service</string>
+    <string name="home_status_accessibility">Accessibility service</string>
+    <string name="home_status_key">Gemini API key</string>
+    <string name="home_open_settings">Settings</string>
+    <string name="home_grant_overlay">Grant overlay permission</string>
+    <string name="status_on">On</string>
+    <string name="status_off">Off</string>
+    <string name="status_configured" tools:ignore="UnusedResources">Configured</string>
+    <string name="status_not_configured" tools:ignore="UnusedResources">Not configured</string>
+
+    <!-- Settings screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_back">Back</string>
+    <string name="settings_app_enabled">App enabled</string>
+    <string name="settings_app_enabled_desc">Allow dictation while the runtime is active.</string>
+    <string name="settings_speech_mode">Speech mode</string>
+    <string name="language_english">English</string>
+    <string name="language_hinglish">Hinglish</string>
+    <string name="settings_history">Save dictation history</string>
+    <string name="settings_history_desc">Keep a private local record of your dictation.</string>
+    <string name="settings_history_retention">Keep history for</string>
+    <string name="days_unit">days</string>
+    <string name="settings_gemini_key">Gemini API key</string>
+    <string name="settings_key_configured">API key configured</string>
+    <string name="settings_key_missing">No API key set</string>
+    <string name="settings_key_hint">Paste your Gemini API key</string>
+    <string name="settings_key_save">Save key</string>
+    <string name="settings_key_clear">Clear key</string>
+    <string name="settings_key_saved" tools:ignore="UnusedResources">Key saved</string>
+    <string name="settings_key_save_failed" tools:ignore="UnusedResources">Could not save key</string>
+    <string name="settings_key_cleared" tools:ignore="UnusedResources">Key removed</string>
 </resources>

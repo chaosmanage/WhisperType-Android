@@ -6,14 +6,18 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.core.net.toUri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -27,21 +31,42 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
+import com.whispertype.android.data.secrets.KeystoreKeyProvider
+import com.whispertype.android.data.secrets.KeyProvider
+import com.whispertype.android.data.settings.SettingsRepository
+import com.whispertype.android.platform.accessibility.WhisperTypeAccessibilityService
 import com.whispertype.android.platform.runtime.FlowRuntimeService
+import com.whispertype.android.ui.settings.SettingsScreen
 import com.whispertype.android.ui.theme.WhisperTypeTheme
 
 /**
- * Feature host / overlay-permission onboarding (Phase 1 gate). WhisperType shows
- * a persistent application overlay that requires `Settings.canDrawOverlays()`;
- * the runtime service is started only after that gate passes on the owning
- * device, per §4.1 (SYSTEM_ALERT_WINDOW) and the Phase 1 Samsung gate.
+ * Feature host. Shows the overlay-permission onboarding when it is missing,
+ * otherwise a home/status screen that links to [SettingsScreen] (runtime
+ * toggles + Gemini API key). The runtime foreground service is started only
+ * after the `Settings.canDrawOverlays()` gate passes, per §4.1 and the Phase 1
+ * Samsung gate.
  */
 class MainActivity : ComponentActivity() {
+
+    private val settingsRepository by lazy { SettingsRepository(applicationContext) }
+    private val keyProvider by lazy { KeystoreKeyProvider(applicationContext) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            WhisperTypeTheme { OverlayPermissionScreen() }
+            WhisperTypeTheme {
+                if (canDrawOverlays()) {
+                    HomeScreen(
+                        settings = settingsRepository,
+                        keyProvider = keyProvider,
+                        isAccessibilityEnabled = ::isAccessibilityEnabled,
+                    )
+                } else {
+                    OverlayPermissionScreen(onRequest = ::requestOverlayPermission)
+                }
+            }
         }
         if (canDrawOverlays()) {
             startRuntime()
@@ -58,22 +83,33 @@ class MainActivity : ComponentActivity() {
     private fun canDrawOverlays(): Boolean = Settings.canDrawOverlays(this)
 
     private fun requestOverlayPermission() {
-        val intent = Intent(
-            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-            "package:$packageName".toUri(),
+        startActivity(
+            Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                "package:$packageName".toUri(),
+            ),
         )
-        startActivity(intent)
     }
 
     private fun startRuntime() {
-        val intent = Intent(this, FlowRuntimeService::class.java)
-        // No foreground-session active: keep it simple for Phase 1-4 static stage.
-        startForegroundService(intent)
+        startForegroundService(Intent(this, FlowRuntimeService::class.java))
     }
 
+    private fun isAccessibilityEnabled(): Boolean {
+        val expected = "$packageName/${WhisperTypeAccessibilityService::class.java.name}"
+        val enabled = Settings.Secure.getString(
+            contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+        ) ?: return false
+        return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
+    }
+
+    // ------------------------------------------------------------------
+    // Screens
+    // ------------------------------------------------------------------
+
     @Composable
-    private fun OverlayPermissionScreen() {
-        var granted by remember { mutableStateOf(canDrawOverlays()) }
+    private fun OverlayPermissionScreen(onRequest: () -> Unit) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(
                 modifier = Modifier
@@ -93,19 +129,94 @@ class MainActivity : ComponentActivity() {
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(Modifier.height(24.dp))
-                if (granted) {
+                Button(onClick = onRequest) {
+                    Text(stringResource(R.string.overlay_permission_button))
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun HomeScreen(
+        settings: SettingsRepository,
+        keyProvider: KeyProvider,
+        isAccessibilityEnabled: () -> Boolean,
+    ) {
+        var showSettings by remember { mutableStateOf(false) }
+        if (showSettings) {
+            SettingsScreen(
+                settings = settings,
+                keyProvider = keyProvider,
+                onBack = { showSettings = false },
+            )
+        } else {
+            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp)
+                        .widthIn(max = 420.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Spacer(Modifier.height(24.dp))
                     Text(
-                        text = stringResource(R.string.overlay_permission_granted),
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = stringResource(R.string.home_title),
+                        style = MaterialTheme.typography.headlineMedium,
                     )
-                } else {
-                    OutlinedButton(onClick = {
-                        requestOverlayPermission()
-                    }) {
-                        Text(stringResource(R.string.overlay_permission_button))
+                    Spacer(Modifier.height(24.dp))
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            StatusRow(
+                                label = stringResource(R.string.home_status_overlay),
+                                on = true,
+                            )
+                            HorizontalDivider()
+                            StatusRow(
+                                label = stringResource(R.string.home_status_runtime),
+                                on = FlowRuntimeService.isRunning,
+                            )
+                            HorizontalDivider()
+                            StatusRow(
+                                label = stringResource(R.string.home_status_accessibility),
+                                on = isAccessibilityEnabled(),
+                            )
+                            HorizontalDivider()
+                            StatusRow(
+                                label = stringResource(R.string.home_status_key),
+                                on = keyProvider.hasKey(),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(24.dp))
+                    Button(
+                        onClick = { showSettings = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.home_open_settings))
                     }
                 }
             }
+        }
+    }
+
+    @Composable
+    private fun StatusRow(label: String, on: Boolean) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(text = label, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = stringResource(if (on) R.string.status_on else R.string.status_off),
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (on) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+            )
         }
     }
 }

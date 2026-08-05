@@ -103,6 +103,7 @@ class FlowRuntimeService : Service(), OverlayOwners {
 
     override fun onCreate() {
         super.onCreate()
+        isRunning = true
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
         startOverlay()
@@ -207,6 +208,7 @@ class FlowRuntimeService : Service(), OverlayOwners {
     }
 
     override fun onDestroy() {
+        isRunning = false
         overlayHost?.detach()
         overlayHost = null
         scope.cancel()
@@ -236,12 +238,16 @@ class FlowRuntimeService : Service(), OverlayOwners {
             .build()
     }
 
-    private companion object {
+    companion object {
         const val TAG = "FlowRuntimeService"
         const val NOTIFICATION_ID = 1001
         const val NOTIFICATION_CHANNEL_ID = "whispertype_runtime"
         const val STATIC_TEST_TEXT = "WhisperType static insertion test"
         const val RETURN_TO_IDLE_MS = 1200L
+
+        /** Process-local service-liveness flag for the app UI (set in onCreate/onDestroy). */
+        @Volatile
+        var isRunning: Boolean = false
 
         /** Placeholder target used while the accessibility process resolves the real one. */
         fun EMPTY_TARGET(sessionId: SessionId): com.whispertype.android.core.model.TargetSnapshot =
