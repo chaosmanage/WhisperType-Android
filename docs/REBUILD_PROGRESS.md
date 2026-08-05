@@ -113,9 +113,17 @@ directly) and re-run the gate.
 
 Builder protocol: **stopped**. Do not add Gemini/audio (Phase 6) until this passes.
 
-## Stage 1c — ViewTree owner installation fix (Phase 2 blocker) — DONE (code)
+## Stage 1c — ViewTree owner installation fix (Phase 2 blocker) — DONE (code + physical gate PASS)
 
-**Physical gate status: NOT RUN** (§8 — no device connected).
+**Physical gate status: PASS** (2026-08-05 on SM-S921B / Android 16 / SwiftKey; re-run after `0ce89d0`, APK SHA-256 `7fbed0df338d7d3c75d080fe853a2fa1554673afe2e16323c42207f13606f4d9`).
+
+On-device evidence (full detail in `docs/REBUILD_FAILURE_REPORT.md` §6):
+- No `ViewTreeLifecycleOwner` crash, no `Scheduling restart of crashed service` — the composition now starts. The `AndroidComposeView` measures and draws (`144x144` px bubble).
+- Overlay window `type=2038` (`Window{3430591}`) `mHasSurface=true`, `isReadyForDisplay()=true`.
+- Wispr placement verified: right edge, vertical center, recomputed across rotation (portrait `frame=[936,1075][1080,1219]`; landscape `frame=[2196,445][2340,589]`).
+- Bubble tappable, no focus steal: tap ran show→panel→hide and committed exactly one static insertion into the focused Chrome URL bar.
+- Hide-on-blur (`w=0 h=0`) / show-on-focus (`144x144`) both work; 8 rapid show/hide cycles + portrait↔landscape round-trip survived, both processes alive.
+- Outstanding within this gate: the plan's nominal 50-cycle soak was sampled as 8 cycles; the full 50-cycle run and Phase 3/4 focus + insertion gates remain ahead of Phase 6.
 
 Build id: `assembleDebug` on `rebuild/clean-runtime` after `ea61f60` (working tree).
 
@@ -149,7 +157,6 @@ cannot resolve. Decoded from the compile-classpath metadata: `fun setViewTreeLif
 
 ### Next gate
 
-Re-run the Phase 2 Samsung gate (composition must start without the
-`ViewTreeLifecycleOwner` crash), then visibility/show-hide, rotation, insertion.
+Phase 2 gate re-run passed on device (Stage 1c). Next: full 50-cycle soak, then Phase 3/4 focus + insertion gates. Do **not** proceed to Gemini/audio (Phase 6) until those pass (plan §7).
 
 
