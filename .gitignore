@@ -6,7 +6,6 @@ local.properties
 signing.properties
 *.jks
 *.keystore
-*.apk
 *.aab
 captures/
 .externalNativeBuild/
