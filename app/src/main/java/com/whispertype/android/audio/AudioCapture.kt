@@ -119,6 +119,7 @@ class AudioCapture(
 
     private suspend fun producerLoop(source: PcmSource) {
         val buffer = ByteArray(READ_BUFFER_BYTES)
+        var amplitudeTick = 0
         try {
             while (!stopRequested.get()) {
                 val read = source.read(buffer)
@@ -131,7 +132,11 @@ class AudioCapture(
                     for (chunk in chunker.push(valid)) {
                         queue.send(chunk)
                     }
-                    _amplitude.value = smoothedAmplitude(valid)
+                    // UI amplitude is sampled at ~16.7 Hz (every 3rd 20 ms frame);
+                    // capture and transmission stay at the full 50 Hz cadence.
+                    if (++amplitudeTick % AMPLITUDE_SAMPLE_EVERY == 0) {
+                        _amplitude.value = smoothedAmplitude(valid)
+                    }
                 }
                 // No artificial delay: AudioRecord's blocking read paces the stream
                 // at exactly real time. Any gap here would reach the Gemini Live
@@ -226,6 +231,8 @@ class AudioCapture(
         private const val READ_BUFFER_BYTES = 640
         private const val AMPLITUDE_SLICE_SAMPLES = 256
         private const val AMPLITUDE_ALPHA = 0.5f
+        /** Publish the waveform state every Nth 20 ms frame (~16.7 Hz at 50 Hz reads). */
+        private const val AMPLITUDE_SAMPLE_EVERY = 3
         private const val MAX_PCM16_AMPLITUDE = 32768.0
         private const val DEFAULT_BUFFER_BYTES = 4096
         private const val MIC_INIT = "MIC_INIT"

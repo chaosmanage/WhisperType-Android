@@ -27,6 +27,7 @@ import com.whispertype.android.audio.AudioStartResult
 import com.whispertype.android.core.model.DictationFailure
 import com.whispertype.android.core.model.DictationState
 import com.whispertype.android.core.model.InsertionResult
+import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.core.model.MutableSessionMetrics
 import com.whispertype.android.core.model.OverlayIntent
 import com.whispertype.android.core.model.SessionId
@@ -44,12 +45,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
 
 /**
  * The main-process foreground service that owns the overlay runtime: overlay
@@ -90,11 +91,20 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     private val keyProvider: KeyProvider by lazy { KeystoreKeyProvider(this) }
     private val settings: SettingsProvider by lazy { SettingsRepository(this) }
 
+    /** One long-lived OkHttpClient shared by every session (Release D3). Its
+     *  dispatcher/connection pool must never be shut down per session. */
+    private val sharedOkHttpClient: OkHttpClient by lazy { GeminiSessionFactory.defaultClient() }
+
     /** Live-session orchestration (Release C). */
     private val coordinator = DictationCoordinator(scope, this)
 
-    /** Session id of an in-flight static-insertion fallback (keyless installs). */
-    private var staticSessionId: SessionId? = null
+    // Eager in-memory runtime-settings snapshot (Release D2): collected once at
+    // service scope so the tap path never does sequential DataStore first() reads.
+    @Volatile
+    private var cachedSpeechMode: LanguageMode = LanguageMode.ENGLISH
+
+    @Volatile
+    private var cachedModelOverride: String? = null
 
     private val incomingHandler = object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(msg: Message) {
@@ -135,6 +145,10 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         // permission is confirmed (see startCapture).
         startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         startOverlay()
+        // Collect the runtime settings snapshot eagerly (Release D2) so the tap
+        // path reads in-memory values instead of blocking on DataStore.
+        scope.launch { settings.speechMode.collect { cachedSpeechMode = it } }
+        scope.launch { settings.modelOverride.collect { cachedModelOverride = it } }
         Log.i(TAG, "FlowRuntimeService started (main process)")
     }
 
@@ -162,30 +176,13 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     }
 
     /**
-     * Phase 6 routing: a configured API key selects the live Gemini loop; without
-     * one the service falls back to the static insertion path so the Phase 3/4
-     * field-matrix gates stay exercisable on a keyless install.
+     * Phase 6 routing: every accepted tap runs the live Gemini loop. A missing
+     * or unreadable API key surfaces the configured no-key failure from
+     * [resolveSession]; there is no separate hasKey-then-provideKey tap path
+     * (Release D1).
      */
     private fun startDictation() {
-        if (keyProvider.hasKey()) coordinator.start() else startStaticInsertion()
-    }
-
-    /**
-     * Static-insertion fallback (Phases 1-4): ask the accessibility process to
-     * capture the focused target and commit the static test text exactly once.
-     */
-    private fun startStaticInsertion() {
-        val reply = a11yReply ?: run {
-            failWithStatic(SessionId.new(), runtimeNoAccessibility())
-            return
-        }
-        val sessionId = SessionId.new()
-        staticSessionId = sessionId
-        _sessionState.value = DictationState.Starting(sessionId, DictationCoordinator.EMPTY_TARGET(sessionId))
-        if (!sendInsert(sessionId, STATIC_TEST_TEXT, reply)) {
-            staticSessionId = null
-            failWithStatic(sessionId, runtimeNoAccessibility())
-        }
+        coordinator.start()
     }
 
     // ------------------------------------------------------------------
@@ -198,7 +195,8 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
 
     override suspend fun resolveSession(metrics: MutableSessionMetrics): SessionResolve {
         metrics.mark(MutableSessionMetrics.Event.KeyLoadStarted)
-        val key = keyProvider.provideKey()
+        // File/Keystore/cipher work runs off the main thread (Release D1).
+        val key = withContext(Dispatchers.IO) { keyProvider.provideKey() }
         metrics.mark(MutableSessionMetrics.Event.KeyLoaded)
         if (key.isNullOrEmpty()) {
             return SessionResolve.Failed(
@@ -209,8 +207,8 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                 ),
             )
         }
-        val language = settings.speechMode.first()
-        val model = settings.modelOverride.first()
+        val language = cachedSpeechMode
+        val model = cachedModelOverride
             ?.takeIf { it.isNotBlank() }
             ?: GeminiSessionFactory.DEFAULT_MODEL
         metrics.mark(MutableSessionMetrics.Event.SettingsReady)
@@ -225,12 +223,13 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                 // text prime, no systemInstruction, no output transcription.
                 // The dictation source is inputTranscription only.
             ),
+            client = sharedOkHttpClient,
             metrics = metrics,
         )
         return SessionResolve.Ok(SessionResolution(session = session, language = language))
     }
 
-    override fun startCapture(metrics: MutableSessionMetrics): CaptureStart {
+    override suspend fun startCapture(metrics: MutableSessionMetrics): CaptureStart {
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
             != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) {
@@ -250,13 +249,17 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             buildNotification(),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
         )
+        // AudioRecord construction and startRecording run off the main thread
+        // (Release D4); failures surface as typed mic-init failures.
         metrics.mark(MutableSessionMetrics.Event.CaptureStartRequested)
-        val cap = AudioCapture()
-        return when (val start = cap.start()) {
-            is AudioStartResult.Failed -> CaptureStart.Failed(start.failure)
-            AudioStartResult.Started -> {
-                metrics.mark(MutableSessionMetrics.Event.CaptureStarted)
-                CaptureStart.Started(cap)
+        return withContext(Dispatchers.IO) {
+            val cap = AudioCapture()
+            when (val start = cap.start()) {
+                is AudioStartResult.Failed -> CaptureStart.Failed(start.failure)
+                AudioStartResult.Started -> {
+                    metrics.mark(MutableSessionMetrics.Event.CaptureStarted)
+                    CaptureStart.Started(cap)
+                }
             }
         }
     }
@@ -289,47 +292,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     }
 
     private fun onInsertionResult(sessionId: SessionId, result: InsertionResult) {
-        if (coordinator.isActive) {
-            coordinator.onInsertionResult(sessionId, result)
-            return
-        }
-        if (staticSessionId == sessionId) {
-            staticSessionId = null
-            Log.i(TAG, "Static insertion result=$result")
-            _sessionState.value = when (result) {
-                InsertionResult.Inserted -> DictationState.Success(sessionId)
-                InsertionResult.Ambiguous -> DictationState.Error(sessionId, DictationFailure(
-                    code = "insert_ambiguous",
-                    message = "Could not confirm the text was inserted. Use Copy to grab it.",
-                    recoverable = true,
-                    retryAllowed = false,
-                ))
-                is InsertionResult.Failed -> DictationState.Error(sessionId, result.failure)
-            }
-            scope.launch {
-                delay(RETURN_TO_IDLE_MS)
-                resetToIdle()
-            }
-        }
-    }
-
-    private fun failWithStatic(sessionId: SessionId, failure: DictationFailure) {
-        _sessionState.value = DictationState.Error(sessionId, failure)
-        scope.launch {
-            delay(RETURN_TO_IDLE_MS)
-            resetToIdle()
-        }
-    }
-
-    private fun runtimeNoAccessibility(): DictationFailure = DictationFailure(
-        code = "runtime_no_accessibility",
-        message = "Accessibility is not connected yet.",
-        recoverable = true,
-    )
-
-    private suspend fun resetToIdle() {
-        if (_sessionState.value is DictationState.Idle) return
-        _sessionState.value = DictationState.Idle
+        coordinator.onInsertionResult(sessionId, result)
     }
 
     // ------------------------------------------------------------------
@@ -381,8 +344,6 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         const val TAG = "FlowRuntimeService"
         const val NOTIFICATION_ID = 1001
         const val NOTIFICATION_CHANNEL_ID = "whispertype_runtime"
-        const val STATIC_TEST_TEXT = "WhisperType static insertion test"
-        const val RETURN_TO_IDLE_MS = 1200L
 
         /** Process-local service-liveness flag for the app UI (set in onCreate/onDestroy). */
         @Volatile

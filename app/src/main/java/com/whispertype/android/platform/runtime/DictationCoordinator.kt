@@ -37,7 +37,7 @@ interface DictationHost {
 
     /** Verifies mic permission, promotes foreground mode, creates and starts the
      *  capture pipeline. Returns the started pipeline or a typed failure. */
-    fun startCapture(metrics: MutableSessionMetrics): CaptureStart
+    suspend fun startCapture(metrics: MutableSessionMetrics): CaptureStart
 
     /** Sends the insert request over IPC; false when accessibility is absent. */
     fun sendInsertion(sessionId: SessionId, text: String): Boolean

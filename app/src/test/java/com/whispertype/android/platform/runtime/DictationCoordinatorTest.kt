@@ -116,7 +116,7 @@ class DictationCoordinatorTest {
 
         override suspend fun resolveSession(metrics: MutableSessionMetrics): SessionResolve = resolveResult
 
-        override fun startCapture(metrics: MutableSessionMetrics): CaptureStart = captureStart
+        override suspend fun startCapture(metrics: MutableSessionMetrics): CaptureStart = captureStart
 
         override fun sendInsertion(sessionId: SessionId, text: String): Boolean {
             insertions += sessionId to text

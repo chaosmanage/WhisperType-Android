@@ -12,9 +12,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -114,21 +116,21 @@ class OkHttpGeminiLiveSession(
         }
     }
 
-    override suspend fun sendAudio(chunk: AudioChunk): SendResult {
+    override suspend fun sendAudio(chunk: AudioChunk): SendResult = withContext(Dispatchers.IO) {
         when (state.get()) {
-            State.Connecting -> return SendResult.Rejected(REASON_NOT_READY)
-            State.Ready -> return SendResult.Rejected(REASON_AUDIO_BEFORE_START)
-            State.ActivityEnded -> return SendResult.Rejected(REASON_AUDIO_AFTER_END)
-            State.Closed -> return SendResult.Rejected(REASON_CLOSED)
+            State.Connecting -> return@withContext SendResult.Rejected(REASON_NOT_READY)
+            State.Ready -> return@withContext SendResult.Rejected(REASON_AUDIO_BEFORE_START)
+            State.ActivityEnded -> return@withContext SendResult.Rejected(REASON_AUDIO_AFTER_END)
+            State.Closed -> return@withContext SendResult.Rejected(REASON_CLOSED)
             State.ActivityStarted -> Unit
         }
-        val ws = socket ?: return SendResult.Rejected(REASON_CLOSED)
+        val ws = socket ?: return@withContext SendResult.Rejected(REASON_CLOSED)
         val dataBase64 = Base64.getEncoder().encodeToString(chunk.pcm16Bytes)
         val sent = ws.send(GeminiLiveWire.buildAudioChunk(dataBase64, chunk.sampleRateHz))
         if (sent) {
             metrics?.recordWebSocketQueue(ws.queueSize().toInt())
         }
-        return if (sent) SendResult.Accepted else SendResult.Rejected(REASON_CLOSED)
+        if (sent) SendResult.Accepted else SendResult.Rejected(REASON_CLOSED)
     }
 
     override suspend fun endActivity(): SendResult {
@@ -190,9 +192,8 @@ class OkHttpGeminiLiveSession(
         override fun onOpen(webSocket: WebSocket, response: Response) {
             GeminiLog.i(TAG, "onOpen code=${response.code} url=${redactUrl(wsUrl)}")
             metrics?.mark(MutableSessionMetrics.Event.SocketOpen)
-            val setup = GeminiLiveWire.buildSetup(config)
-            val sent = webSocket.send(setup)
-            GeminiLog.i(TAG, "setupSent=$sent setup=$setup")
+            val sent = webSocket.send(GeminiLiveWire.buildSetup(config))
+            GeminiLog.i(TAG, "setupSent=$sent")
         }
 
         // The Gemini Live server sends every server->client message as a BINARY
@@ -203,7 +204,6 @@ class OkHttpGeminiLiveSession(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            GeminiLog.i(TAG, "onMessage ${text.take(200)}")
             when (val message = GeminiLiveWire.parseServerMessage(text)) {
                 GeminiLiveWire.ServerMessage.SetupComplete -> {
                     metrics?.mark(MutableSessionMetrics.Event.SetupComplete)
@@ -259,9 +259,11 @@ class OkHttpGeminiLiveSession(
     }
 
     private fun onServerContent(message: GeminiLiveWire.ServerMessage.ServerContent) {
+        // Aggregate debug-only counters and flags; never log transcript content,
+        // audio, or full server frames (Release A1/A2, D8).
         GeminiLog.i(
             TAG,
-            "serverContent: inputTranscription=${message.inputTranscription?.take(80)} outputTranscription=${message.outputTranscription?.take(80)} textParts=${message.textParts.size} turnComplete=${message.turnComplete} interrupted=${message.interrupted}",
+            "serverContent: inputTx=${message.inputTranscription?.length ?: 0} outputTx=${message.outputTranscription?.length ?: 0} textParts=${message.textParts.size} turnComplete=${message.turnComplete}",
         )
         // The dictation source is inputTranscription (the user's speech as
         // recognized by the server's ASR). outputTranscription (the model's own
