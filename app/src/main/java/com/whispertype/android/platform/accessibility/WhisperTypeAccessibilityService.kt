@@ -155,8 +155,13 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
 
     private fun pushEligibility() {
         val remote = runtimeMessenger ?: return
+        val eligibility = tracker.eligibility.value
+        if (!eligibility.eligible) {
+            // Phase 3 per-condition diagnostic so a hidden bubble is explainable (§2.3).
+            Log.i(TAG, "Bubble hidden; reasons=${EligibilityExplanation.blockingReasons(eligibility)}")
+        }
         val m = Message.obtain(null, RuntimeIpc.MSG_ELIGIBILITY).apply {
-            data = RuntimeIpc.packEligibility(tracker.eligibility.value)
+            data = RuntimeIpc.packEligibility(eligibility)
         }
         try {
             remote.send(m)
