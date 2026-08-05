@@ -208,8 +208,13 @@ class DictationCoordinatorTest {
         assertEquals(1, host.session.endCalls)
         val error = states(host).first { it is DictationState.Error }
         assertEquals("gemini_no_transcript", (error as DictationState.Error).failure.code)
-        assertEquals(DictationState.Idle, states(host).last())
+        assertTrue(error.failure.retryAllowed)
         assertTrue(host.insertions.isEmpty())
+        // Retryable error persists until dismissed/retried.
+        assertIs<DictationState.Error>(states(host).last())
+        coordinator.dismiss()
+        advanceUntilIdle()
+        assertEquals(DictationState.Idle, states(host).last())
     }
 
     @Test
@@ -283,6 +288,11 @@ class DictationCoordinatorTest {
 
         val error = states(host).first { it is DictationState.Error }
         assertEquals("gemini_transport", (error as DictationState.Error).failure.code)
+        assertTrue(error.failure.retryAllowed)
+        // Retryable errors persist until the user dismisses or retries.
+        assertIs<DictationState.Error>(states(host).last())
+        coordinator.dismiss()
+        advanceUntilIdle()
         assertEquals(DictationState.Idle, states(host).last())
     }
 
@@ -312,6 +322,11 @@ class DictationCoordinatorTest {
 
         assertTrue(host.session.closed)
         assertEquals(1, states(host).count { it is DictationState.Error })
+        val error = states(host).first { it is DictationState.Error } as DictationState.Error
+        assertTrue(error.failure.retryAllowed)
+        assertIs<DictationState.Error>(states(host).last())
+        coordinator.dismiss()
+        advanceUntilIdle()
         assertEquals(DictationState.Idle, states(host).last())
     }
 
@@ -516,6 +531,64 @@ class DictationCoordinatorTest {
         val error = states(host).first { it is DictationState.Error }
         assertEquals("gemini_connection_too_slow", (error as DictationState.Error).failure.code)
         assertTrue(session.audioCalls == 0)
+        advanceUntilIdle()
+    }
+
+    // ------------------------------------------------------------------
+    // Failsafes: lenient fallback, rejection diagnostics, retry
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `lenient fallback inserts rejected user speech instead of erroring`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        coordinator.stop()
+        runCurrent()
+
+        // English mode with a Devanagari transcript: strict validation rejects it
+        // (DEVANAGARI), but the lenient failsafe inserts the user's own speech.
+        sendTranscript(host, "नमस्ते दोस्तों")
+        advanceUntilIdle()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("नमस्ते दोस्तों", host.insertions[0].second)
+        assertEquals("DEVANAGARI", coordinator.activeMetrics()!!.lastRejection)
+        assertTrue(coordinator.activeMetrics()!!.usedLenientFallback)
+        coordinator.onInsertionResult(host.insertions[0].first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `retry clears a retryable error and starts a fresh session`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        coordinator.stop()
+        advanceUntilIdle()
+
+        val error = states(host).first { it is DictationState.Error } as DictationState.Error
+        assertTrue(error.failure.retryAllowed)
+
+        assertTrue(coordinator.retry())
+        advanceUntilIdle()
+        assertIs<DictationState.Listening>(states(host).last())
+        // The errored session logged its outcome exactly once.
+        assertEquals(1, host.finished.count { it.first is DictationState.Error })
+        coordinator.cancel()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `retry is refused while a session is still running`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        assertFalse(coordinator.retry(), "retry must be refused during an active session")
+        coordinator.cancel()
         advanceUntilIdle()
     }
 }

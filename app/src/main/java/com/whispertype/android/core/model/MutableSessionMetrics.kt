@@ -65,6 +65,12 @@ class MutableSessionMetrics(
     var usedHardDeadline: Boolean = false
     var audioBufferOverflow: Boolean = false
 
+    /** First selector rejection rule that blocked a candidate, when selection failed. */
+    var lastRejection: String? = null
+
+    /** True when a rejected candidate was still inserted via the lenient fallback. */
+    var usedLenientFallback: Boolean = false
+
     /** Records the first timestamp observed for [event]; later marks are ignored. */
     fun mark(event: Event) {
         val now = nowNanos()
@@ -166,6 +172,8 @@ class MutableSessionMetrics(
         add("turnComplete=$turnCompleteArrived")
         add("hardDeadline=$usedHardDeadline")
         add("overflow=$audioBufferOverflow")
+        if (lastRejection != null) add("reject=$lastRejection")
+        if (usedLenientFallback) add("lenient=true")
     }.joinToString(" ")
 
     private fun durationToken(name: String, ms: Long?): String? = ms?.let { "$name=${it}ms" }

@@ -55,6 +55,9 @@ object GeminiLiveWire {
             // Voice-to-text: enable transcription of the user's speech so the
             // server returns serverContent.inputTranscription.text (the dictation
             // source). The model's own output stays audio and is never read.
+            // NOTE: the Live API rejects a languageCode field on this config
+            // ("unknown name language code"), so no language is sent here; the
+            // Hinglish Latin-script bias comes from the systemInstruction instead.
             if (config.inputAudioTranscription) {
                 put("inputAudioTranscription", buildJsonObject {})
             }

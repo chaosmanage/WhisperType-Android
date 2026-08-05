@@ -21,17 +21,27 @@ import com.whispertype.android.core.model.ResultCandidate
  * It only reads their `raw`/`cleaned`/`language` and returns a fresh sealed
  * value. It performs no I/O and has no state.
  *
- * Validation heuristics (all thresholds are named private constants below):
- *  - blank / whitespace-only / punctuation-only (nothing letter-or-digit)
- *  - model preamble / boilerplate (case-insensitive documented prefixes)
- *  - implausible expansion (cleaned word count >> raw word count)
- *  - pathological within-text repetition (e.g. "la la la la la")
- *  - Devanagari script inside a Latin-script language mode (Hinglish/English)
+ * Trust model: the dictation source is the server's ASR transcription of the
+ * user's OWN speech (`inputTranscription`) — never model output — so this
+ * selector trusts user speech and only rejects content that can never be usable
+ * dictation:
+ *  - blank / whitespace-only
+ *  - punctuation-only (nothing letter-or-digit)
  *  - garbled / corrupted text (high ratio of replacement or control chars)
+ *  - Devanagari script in English mode (Hinglish mode ACCEPTS Devanagari: the
+ *    runtime instructs the Live model to emit Latin script, and when the model
+ *    still returns Devanagari for Hinglish we prefer inserting it over erroring)
+ * plus, for cleaned candidates only, an implausible-expansion guard (cleaned
+ * word count far exceeding raw). The former model-preamble, greeting,
+ * acknowledgment and pathological-repetition rejections were REMOVED because
+ * the source is the user's own speech, where such phrasing is legitimate.
  *
  * False-positive protection: URLs, emails, identifiers, numbers, normal
  * sentence punctuation, short phrases and natural Latin-script code-switching
  * are preserved because validation only rejects the specific patterns above.
+ *
+ * [diagnose] mirrors [select] to report WHY a session produced no candidate; it
+ * is for logging only and never includes transcript text.
  */
 class TranscriptSelector {
 
@@ -40,13 +50,13 @@ class TranscriptSelector {
         // Pass 1: first candidate whose cleaned text is usable.
         for (c in candidates) {
             val cleaned = c.cleaned
-            if (cleaned != null && isTextValid(cleaned, c.language) && !isImplausiblyExpanded(c)) {
+            if (cleaned != null && reject(cleaned, c.language) == null && !isImplausiblyExpanded(c)) {
                 return TranscriptSelection.Cleaned(c, cleaned)
             }
         }
         // Pass 2: first candidate whose raw text is usable (cleaned was absent or invalid).
         for (c in candidates) {
-            if (isTextValid(c.raw, c.language)) {
+            if (reject(c.raw, c.language) == null) {
                 return TranscriptSelection.Raw(c, c.raw)
             }
         }
@@ -54,25 +64,64 @@ class TranscriptSelector {
     }
 
     /**
-     * True when [text] is legitimate, non-corrupt, meaningful content for the
-     * given [language]. Every rejection below maps to an FR-7 invalidity class.
+     * Returns the first rejection rule that would make [select] return
+     * [TranscriptSelection.None], or null when [select] would succeed. Mirrors
+     * [select]'s two-pass order (cleaned then raw): the first rejection
+     * encountered in that order wins. For logging only; never includes
+     * transcript text.
      */
-    private fun isTextValid(text: String, language: LanguageMode): Boolean {
-        if (text.isBlank()) return false                                  // blank / whitespace
-        if (!text.any { it.isLetterOrDigit() }) return false              // punctuation-only
-        if (isModelPreamble(text)) return false                           // model boilerplate
-        if (isLatinScriptMode(language) && containsDevanagari(text)) return false
-        if (isGarbled(text)) return false                                 // corrupted / replacement chars
-        if (isPathologicallyRepetitive(words(text))) return false         // duplicated / repetitive
-        return true
+    fun diagnose(candidates: List<ResultCandidate>): RejectionDiagnosis? {
+        var firstFailure: RejectionDiagnosis? = null
+        // Pass 1 (cleaned tier) — same order as [select].
+        for (c in candidates) {
+            val cleaned = c.cleaned
+            if (cleaned != null) {
+                val failure = reject(cleaned, c.language)
+                if (failure == null && !isImplausiblyExpanded(c)) return null
+                if (firstFailure == null) firstFailure = failure
+            }
+        }
+        // Pass 2 (raw tier) — same order as [select].
+        for (c in candidates) {
+            val failure = reject(c.raw, c.language)
+            if (failure == null) return null
+            if (firstFailure == null) firstFailure = failure
+        }
+        return firstFailure
     }
 
+    /**
+     * The first rejection rule that fires on [text] for [language], or null when
+     * [text] is usable dictation. Priority order: [RejectionRule.BLANK],
+     * [RejectionRule.PUNCTUATION_ONLY], [RejectionRule.GARBLED],
+     * [RejectionRule.DEVANAGARI].
+     */
+    private fun reject(text: String, language: LanguageMode): RejectionDiagnosis? {
+        val wordCount = words(text).size
+        val charCount = text.length
+        val hasDevanagari = containsDevanagari(text)
+        if (text.isBlank()) {
+            return RejectionDiagnosis(RejectionRule.BLANK, wordCount, charCount, hasDevanagari)
+        }
+        if (!text.any { it.isLetterOrDigit() }) {
+            return RejectionDiagnosis(RejectionRule.PUNCTUATION_ONLY, wordCount, charCount, hasDevanagari)
+        }
+        if (isGarbled(text)) {
+            return RejectionDiagnosis(RejectionRule.GARBLED, wordCount, charCount, hasDevanagari)
+        }
+        if (language == LanguageMode.ENGLISH && hasDevanagari) {
+            return RejectionDiagnosis(RejectionRule.DEVANAGARI, wordCount, charCount, hasDevanagari)
+        }
+        return null
+    }
 
     /**
      * True when the candidate's cleaned text is implausibly longer than its raw
-     * text (word-count ratio beyond [MAX_EXPANSION_RATIO]), a strong signal of
-     * model hallucination. Only meaningful when the raw text has real words;
-     * otherwise there is nothing to expand from, so the check is skipped.
+     * text (word-count ratio beyond [MAX_EXPANSION_RATIO]), a strong signal of a
+     * fabricated expansion. Only meaningful when the raw text has real words;
+     * otherwise there is nothing to expand from, so the check is skipped. This is
+     * the one remaining model-output heuristic: real user speech is never ~10x
+     * shorter than its usable text.
      */
     private fun isImplausiblyExpanded(c: ResultCandidate): Boolean {
         val cleaned = c.cleaned ?: return false
@@ -84,78 +133,14 @@ class TranscriptSelector {
     }
 
     /**
-     * Case-insensitive model-preamble detection.
-     *
-     * [STRONG_PREAMBLE_PREFIXES] are unambiguous boilerplate starters and are
-     * rejected whenever they appear at the start of the text.
-     * [GENERIC_LEAD_PREFIXES] (e.g. "sure", "okay") are ordinary spoken words, so
-     * they are only treated as preamble when followed by a substantial sentence
-     * ([GENERIC_LEAD_MAX_WORDS]) — preserving short legitimate utterances like
-     * "Sure!" or "Okay" while catching "Sure, here is your transcript...".
-     */
-    private fun isModelPreamble(text: String): Boolean {
-        val t = text.trim().lowercase()
-        if (t.isEmpty()) return false
-        for (prefix in STRONG_PREAMBLE_PREFIXES) {
-            if (startsWithWordBoundary(t, prefix)) return true
-        }
-        val wordCount = words(t).size
-        for (lead in GENERIC_LEAD_PREFIXES) {
-            if (startsWithWordBoundary(t, lead) && wordCount > GENERIC_LEAD_MAX_WORDS) return true
-        }
-        // Short standalone acknowledgments ("I understand.", "Got it.") are never
-        // dictation; the same words starting a longer sentence are legitimate
-        // speech, so only reject when the whole utterance stays short.
-        if (wordCount <= ACK_MAX_WORDS) {
-            for (ack in SHORT_ACK_PREFIXES) {
-                if (startsWithWordBoundary(t, ack)) return true
-            }
-        }
-        return false
-    }
-
-    /** True when [text] starts with [prefix] and the prefix ends on a word boundary. */
-    private fun startsWithWordBoundary(text: String, prefix: String): Boolean =
-        text.length >= prefix.length &&
-            text.startsWith(prefix) &&
-            (text.length == prefix.length || !text[prefix.length].isLetterOrDigit())
-
-    /**
      * True when [text] is dominated by replacement ("\uFFFD") or control
-     * characters, i.e. the model returned a corrupted/garbled string.
+     * characters, i.e. the transcription is corrupted/garbled.
      */
     private fun isGarbled(text: String): Boolean {
         if (text.isEmpty()) return false
         val problematic = text.count { it == REPLACEMENT_CHAR || it.isISOControl() }
         return problematic > 0 && problematic.toDouble() / text.length > GARBLED_CHAR_RATIO
     }
-
-    /**
-     * True when the whole text decomposes into a single short unit repeated at
-     * least [MIN_PATTERN_REPEATS] times (e.g. "la la la la la", "abc abc abc",
-     * "hi there hi there hi there"). This is pathological duplication, not a
-     * normal sentence.
-     */
-    private fun isPathologicallyRepetitive(tokens: List<String>): Boolean {
-        val n = tokens.size
-        for (unit in 1..n / 2) {
-            if (n % unit != 0) continue
-            val repeats = n / unit
-            if (repeats < MIN_PATTERN_REPEATS) continue
-            var same = true
-            for (i in 0 until n) {
-                if (tokens[i] != tokens[i % unit]) {
-                    same = false
-                    break
-                }
-            }
-            if (same) return true
-        }
-        return false
-    }
-
-    private fun isLatinScriptMode(language: LanguageMode): Boolean =
-        language == LanguageMode.ENGLISH || language == LanguageMode.HINGLISH
 
     private fun containsDevanagari(text: String): Boolean = text.any { isDevanagari(it) }
 
@@ -166,7 +151,7 @@ class TranscriptSelector {
 
     /**
      * Lower-cased sequence of letter/digit runs in [text]. Used for word counts
-     * and repetition detection.
+     * (diagnostics and the implausible-expansion guard).
      */
     private fun words(text: String): List<String> {
         val result = ArrayList<String>()
@@ -190,109 +175,21 @@ class TranscriptSelector {
     }
 
     // ------------------------------------------------------------------
-    // Documented thresholds & preamble lists (FR-7 heuristics).
+    // Documented thresholds (FR-7 heuristics).
     // ------------------------------------------------------------------
 
     private companion object {
-        /** Cleaned/raw word-count ratio above which expansion is deemed hallucination. */
+        /** Cleaned/raw word-count ratio above which expansion is deemed implausible. */
         const val MAX_EXPANSION_RATIO: Double = 10.0
 
         /** Fraction of replacement/control characters that flags a garbled result. */
         const val GARBLED_CHAR_RATIO: Double = 0.2
-
-        /** A text pattern must repeat at least this many times to count as duplication. */
-        const val MIN_PATTERN_REPEATS: Int = 3
-
-        /**
-         * A single generic spoken lead word (e.g. "sure", "okay") is not preamble
-         * unless followed by more than this many words of "sentence".
-         */
-        const val GENERIC_LEAD_MAX_WORDS: Int = 2
-
-        /** A short acknowledgment ("I understand.", "Got it.") is rejected only
-         *  while the whole utterance is at most this many words, so longer
-         *  legitimate sentences starting the same way are preserved. */
-        const val ACK_MAX_WORDS: Int = 3
 
         val REPLACEMENT_CHAR: Char = '\uFFFD'
 
         val DEVANAGARI_BLOCK: CharRange = '\u0900'..'\u097F'
         val DEVANAGARI_EXTENDED_A_BLOCK: CharRange = '\uA8E0'..'\uA8FF'
         val VEDIC_EXTENSIONS_BLOCK: CharRange = '\u1CD0'..'\u1CFF'
-
-        val STRONG_PREAMBLE_PREFIXES: List<String> = listOf(
-            "here is",
-            "here's",
-            "here are",
-            "here you go",
-            "the transcript",
-            "the transcription",
-            "this transcript",
-            "below is",
-            "as an ai",
-            "you asked",
-            "i have transcribed",
-            "certainly",
-            "of course",
-            "i'd be happy",
-            "i would be happy",
-            "i will be happy",
-            "sure thing",
-            "okay here",
-            "ok here",
-            "the following",
-            "note",
-            "disclaimer",
-            "my apologies",
-            // Assistant greetings: the Live model's conversational reply (captured
-            // via outputTranscription) must never be inserted as dictation.
-            "hello! i'm",
-            "hello i'm",
-            "hi there",
-            "hi! i'm",
-            "hi, i'm",
-            "hey there",
-            "hello there",
-            "how can i help",
-            "how may i help",
-            "what can i help",
-            "good morning",
-            "good afternoon",
-            "good evening",
-            "nice to meet",
-            // Assistant acknowledgments of the dictation prime; never dictation.
-            "understood",
-            "understood,",
-            "ready to begin",
-            "let's begin",
-            "lets begin",
-            "i'm ready",
-            "i am ready",
-            "let me know",
-            "go ahead",
-            "i'm listening",
-            "i am listening",
-        )
-
-        val GENERIC_LEAD_PREFIXES: List<String> = listOf(
-            "sure",
-            "okay",
-            "ok",
-            "yes",
-            "yep",
-            "alright",
-            "absolutely",
-            "yup",
-        )
-
-        /** Short standalone assistant acknowledgments (rejected only when the whole
-         *  utterance is short, see [ACK_MAX_WORDS]). */
-        val SHORT_ACK_PREFIXES: List<String> = listOf(
-            "i understand",
-            "i see",
-            "got it",
-            "no problem",
-        )
     }
 }
 
@@ -334,3 +231,20 @@ sealed interface TranscriptSelection {
             get() = throw UnsupportedOperationException("TranscriptSelection.None carries no text")
     }
 }
+
+/**
+ * Which rejection rule invalidated a transcript candidate. Used by
+ * [TranscriptSelector.diagnose] to log WHY a session produced no selection.
+ */
+enum class RejectionRule { BLANK, PUNCTUATION_ONLY, GARBLED, DEVANAGARI }
+
+/**
+ * Diagnostics for a rejected candidate: the first [RejectionRule] that fired
+ * plus basic metrics about the offending text. Contains no transcript text.
+ */
+data class RejectionDiagnosis(
+    val rule: RejectionRule,
+    val wordCount: Int,
+    val charCount: Int,
+    val hasDevanagari: Boolean,
+)

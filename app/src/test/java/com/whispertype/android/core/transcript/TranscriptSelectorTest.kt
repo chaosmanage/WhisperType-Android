@@ -4,6 +4,7 @@ import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.core.model.ResultCandidate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -82,57 +83,48 @@ class TranscriptSelectorTest {
     }
 
     @Test
-    fun `rejects many model preamble examples`() {
-        val preambles = listOf(
-            "Sure, here is your transcript.",
-            "Sure I can help you with that.",
-            "Here is the cleaned transcript:",
-            "Here's what was said.",
-            "The transcript is as follows.",
-            "The transcription is below.",
-            "As an AI, I need to clarify something.",
-            "You asked me to transcribe this.",
-            "Okay here is the text.",
-            "Certainly, I can do that for you.",
-            "Of course. Let me help.",
+    fun `accepts phrases that were previously rejected as model preambles`() {
+        // The source is the user's own ASR speech, so spoken leads such as
+        // "Sure, ...", "Okay so ...", "Of course ..." are legitimate dictation.
+        val phrases = listOf(
+            "Sure, here is the report I promised",
+            "Okay so we need to move the meeting",
+            "Of course it works",
+            "Certainly we can do that",
+            "Yes I think so",
+            "Alright let's go",
         )
-        for (p in preambles) {
-            assertEquals("should reject preamble '$p'", TranscriptSelection.None, selector.select(listOf(candidate(raw = p))))
+        for (p in phrases) {
+            val result = selector.select(listOf(candidate(raw = p)))
+            assertTrue("should accept user speech '$p'", result is TranscriptSelection.Raw)
+            assertEquals(p, result.text)
         }
     }
 
     @Test
-    fun `rejects assistant greetings from the live model echo`() {
+    fun `accepts greetings that were previously rejected as model output`() {
         val greetings = listOf(
-            "Hello! I'm ready to help.",
-            "Hi there! How can I help you today?",
-            "Hello I'm WhisperType.",
-            "Hey there, what would you like to talk about?",
-            "Good morning! What can I help you with?",
+            "Hello, I'm going to the store",
+            "Hi there, how is your day going?",
+            "Hey there, let's grab lunch later",
         )
         for (g in greetings) {
-            assertEquals("should reject greeting '$g'", TranscriptSelection.None, selector.select(listOf(candidate(raw = g))))
+            val result = selector.select(listOf(candidate(raw = g)))
+            assertTrue("should accept greeting '$g'", result is TranscriptSelection.Raw)
         }
     }
 
     @Test
-    fun `rejects assistant acknowledgments of the dictation prime`() {
+    fun `accepts acknowledgments that were previously rejected as model output`() {
         val acks = listOf(
-            "Understood. Ready",
-            "Understood. Ready to begin.",
-            "Ready to begin.",
-            "I'm ready.",
-            "Let me know when you're ready.",
-            "Go ahead.",
-            "Understood, I will echo your words.",
-            "I understand.",
-            "I understand",
-            "Got it.",
-            "I see.",
-            "No problem.",
+            "Got it thanks",
+            "Understood, I will meet you at three",
+            "I see what you mean",
+            "No problem at all",
         )
         for (a in acks) {
-            assertEquals("should reject acknowledgment '$a'", TranscriptSelection.None, selector.select(listOf(candidate(raw = a))))
+            val result = selector.select(listOf(candidate(raw = a)))
+            assertTrue("should accept acknowledgment '$a'", result is TranscriptSelection.Raw)
         }
     }
 
@@ -158,7 +150,7 @@ class TranscriptSelectorTest {
 
     @Test
     fun `rejects implausibly expanded cleaned text`() {
-        // The cleaned transcript is a hallucinated ~17-word blow up of a 1-word
+        // The cleaned transcript is a fabricated ~17-word blow up of a 1-word
         // raw fragment, so it must be rejected and not selected as Cleaned; the
         // valid short raw "go" is then the fallback.
         val expanded = candidate(
@@ -184,23 +176,24 @@ class TranscriptSelectorTest {
     }
 
     @Test
-    fun `rejects pathological repetitive text`() {
-        for (rep in listOf("la la la la la", "abc abc abc", "hi there hi there hi there")) {
-            assertEquals("should reject '$rep'", TranscriptSelection.None, selector.select(listOf(candidate(raw = rep))))
+    fun `accepts repetitive but legitimate user speech`() {
+        // Repetition is no longer rejected: it is the user's own speech.
+        for (rep in listOf("la la la la la", "okay okay okay", "abc abc abc", "hi there hi there hi there")) {
+            val result = selector.select(listOf(candidate(raw = rep)))
+            assertTrue("should accept repetitive speech '$rep'", result is TranscriptSelection.Raw)
         }
     }
 
     @Test
-    fun `rejects Devanagari text in Hinglish and English modes`() {
+    fun `rejects Devanagari text in English mode but accepts it in Hinglish mode`() {
         val devanagari = "\u0939\u093F\u0928\u094D\u0926\u0940 \u0938\u0902\u0938\u094D\u0915\u0930\u0923"
-        assertEquals(
-            TranscriptSelection.None,
-            selector.select(listOf(candidate(raw = devanagari, language = LanguageMode.HINGLISH))),
-        )
         assertEquals(
             TranscriptSelection.None,
             selector.select(listOf(candidate(raw = devanagari, language = LanguageMode.ENGLISH))),
         )
+        val hinglish = selector.select(listOf(candidate(raw = devanagari, language = LanguageMode.HINGLISH)))
+        assertTrue(hinglish is TranscriptSelection.Raw)
+        assertEquals(devanagari, hinglish.text)
     }
 
     @Test
@@ -290,6 +283,101 @@ class TranscriptSelectorTest {
     }
 
     // ------------------------------------------------------------------
+    // Regression: natural user speech openers must not be rejected
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `accepts a long natural English sentence starting with an opener`() {
+        val sentence = "Okay so the quarterly review is scheduled for Thursday morning and I need everyone to bring their reports"
+        val result = selector.select(listOf(candidate(raw = sentence)))
+        assertTrue(result is TranscriptSelection.Raw)
+        assertEquals(sentence, result.text)
+    }
+
+    @Test
+    fun `accepts a small sentence starting with an opener`() {
+        val result = selector.select(listOf(candidate(raw = "Yes I think so")))
+        assertTrue(result is TranscriptSelection.Raw)
+        assertEquals("Yes I think so", result.text)
+    }
+
+    // ------------------------------------------------------------------
+    // Diagnose
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `diagnose returns null when a candidate is valid`() {
+        assertNull(selector.diagnose(listOf(candidate(raw = "the quick brown fox"))))
+    }
+
+    @Test
+    fun `diagnose returns BLANK for whitespace`() {
+        val result = selector.diagnose(listOf(candidate(raw = "   ")))
+        assertEquals(RejectionDiagnosis(RejectionRule.BLANK, 0, 3, false), result)
+    }
+
+    @Test
+    fun `diagnose returns PUNCTUATION_ONLY for punctuation`() {
+        val result = selector.diagnose(listOf(candidate(raw = "!!!")))
+        assertEquals(RejectionDiagnosis(RejectionRule.PUNCTUATION_ONLY, 0, 3, false), result)
+    }
+
+    @Test
+    fun `diagnose returns GARBLED for a replacement-character dominated string`() {
+        val garbled = "hello\uFFFD\uFFFD\uFFFDworld\uFFFD\uFFFD"
+        val result = selector.diagnose(listOf(candidate(raw = garbled)))
+        assertEquals(RejectionDiagnosis(RejectionRule.GARBLED, 2, garbled.length, false), result)
+    }
+
+    @Test
+    fun `diagnose returns DEVANAGARI for Devanagari text in English mode`() {
+        val devanagari = "\u0939\u093F\u0928\u094D\u0926\u0940 \u0938\u0902\u0938\u094D\u0915\u0930\u0923"
+        val result = selector.diagnose(listOf(candidate(raw = devanagari, language = LanguageMode.ENGLISH)))
+        // wordCount is the number of letter/digit runs; Devanagari combining marks
+        // (matras/virama) split runs, so the 14-char string yields 6 runs.
+        assertEquals(RejectionDiagnosis(RejectionRule.DEVANAGARI, 6, devanagari.length, true), result)
+    }
+
+    @Test
+    fun `diagnose returns null for Devanagari text in Hinglish mode`() {
+        val devanagari = "\u0939\u093F\u0928\u094D\u0926\u0940 \u0938\u0902\u0938\u094D\u0915\u0930\u0923"
+        assertNull(selector.diagnose(listOf(candidate(raw = devanagari, language = LanguageMode.HINGLISH))))
+    }
+
+    @Test
+    fun `diagnose populates wordCount charCount and hasDevanagari`() {
+        // Garbled text that also contains Devanagari: GARBLED outranks DEVANAGARI
+        // in reporting priority, and the Devanagari flag still reflects the text.
+        val text = "\u0939\u093F\uFFFD\uFFFD\uFFFD\u0938\u094D\uFFFD"
+        val result = selector.diagnose(listOf(candidate(raw = text, language = LanguageMode.ENGLISH)))
+        assertEquals(RejectionRule.GARBLED, result?.rule)
+        assertEquals(2, result?.wordCount)
+        assertEquals(text.length, result?.charCount)
+        assertEquals(true, result?.hasDevanagari)
+    }
+
+    @Test
+    fun `diagnose follows the same cleaned then raw order as select`() {
+        // Cleaned fails but raw is usable: select returns Raw, diagnose null.
+        val cleanedInvalid = candidate(raw = "hello world", cleaned = "!!!")
+        assertTrue(selector.select(listOf(cleanedInvalid)) is TranscriptSelection.Raw)
+        assertNull(selector.diagnose(listOf(cleanedInvalid)))
+
+        // First cleaned fails but a later cleaned is usable: select returns
+        // Cleaned, diagnose null.
+        val first = candidate(raw = "!!!")
+        val second = candidate(raw = "go", cleaned = "Go to the store and buy some milk please")
+        assertTrue(selector.select(listOf(first, second)) is TranscriptSelection.Cleaned)
+        assertNull(selector.diagnose(listOf(first, second)))
+
+        // Nothing usable anywhere: diagnose reports the first pass-1 rejection.
+        val a = candidate(raw = "!!", cleaned = "!!!")
+        val b = candidate(raw = "")
+        assertEquals(TranscriptSelection.None, selector.select(listOf(a, b)))
+        assertEquals(RejectionRule.PUNCTUATION_ONLY, selector.diagnose(listOf(a, b))?.rule)
+    }
+
+    // ------------------------------------------------------------------
     // No-valid-candidate / immutability
     // ------------------------------------------------------------------
 
@@ -303,8 +391,8 @@ class TranscriptSelectorTest {
         val allInvalid = listOf(
             candidate(raw = "."),
             candidate(raw = ""),
-            candidate(raw = "Sure, here is the transcript."),
-            candidate(raw = "la la la la la"),
+            candidate(raw = "!!!"),
+            candidate(raw = "hello\uFFFD\uFFFD\uFFFDworld\uFFFD\uFFFD"),
         )
         assertEquals(TranscriptSelection.None, selector.select(allInvalid))
     }

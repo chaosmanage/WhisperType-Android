@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -214,6 +215,14 @@ private fun ErrorPanel(state: DictationState.Error, onIntent: (OverlayIntent) ->
             color = WhisperTypeColors.ErrorAccent,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (state.failure.retryAllowed) {
+                ActionButton(
+                    tag = stringResource(R.string.test_tag_retry),
+                    label = stringResource(R.string.dictation_retry),
+                    icon = Icons.Filled.Refresh,
+                    onClick = { onIntent(OverlayIntent.RETRY) },
+                )
+            }
             ActionButton(
                 tag = stringResource(R.string.test_tag_dismiss),
                 label = stringResource(R.string.dictation_dismiss),

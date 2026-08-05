@@ -55,6 +55,14 @@ class GeminiLiveWireTest {
     }
 
     @Test
+    fun `buildSetup sends no languageCode on inputAudioTranscription`() {
+        // The Live API rejects a languageCode field here; the wire must stay clean.
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(GeminiSessionConfig(model = "m"))).jsonObject
+        val transcription = root["setup"]!!.jsonObject["inputAudioTranscription"]!!.jsonObject
+        assertFalse(transcription.containsKey("languageCode"))
+    }
+
+    @Test
     fun `buildSetup omits inputAudioTranscription when disabled`() {
         val bare = GeminiSessionConfig(model = "m", inputAudioTranscription = false)
         val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(bare)).jsonObject

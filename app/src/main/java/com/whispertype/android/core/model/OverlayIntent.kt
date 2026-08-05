@@ -10,4 +10,5 @@ enum class OverlayIntent {
     CANCEL,
     COPY,
     DISMISS,
+    RETRY,
 }

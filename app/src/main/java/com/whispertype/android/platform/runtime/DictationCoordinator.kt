@@ -16,6 +16,8 @@ import com.whispertype.android.core.model.ResultCandidate
 import com.whispertype.android.core.model.SendResult
 import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.TargetSnapshot
+import com.whispertype.android.core.transcript.RejectionDiagnosis
+import com.whispertype.android.core.transcript.RejectionRule
 import com.whispertype.android.core.transcript.TranscriptAccumulator
 import com.whispertype.android.core.transcript.TranscriptSelection
 import com.whispertype.android.core.transcript.TranscriptSelector
@@ -497,11 +499,25 @@ class DictationCoordinator(
         holder.deadlineJob?.cancel()
         holder.metrics.mark(MutableSessionMetrics.Event.TranscriptSettled)
         val raw = holder.accumulator.settledText()
-        val selection = raw?.let {
-            selector.select(listOf(ResultCandidate(raw = it, cleaned = null, language = holder.language)))
-        } ?: TranscriptSelection.None
+        val candidate = raw?.let {
+            ResultCandidate(raw = it, cleaned = null, language = holder.language)
+        }
+        val selection = candidate?.let { selector.select(listOf(it)) } ?: TranscriptSelection.None
         when (selection) {
-            is TranscriptSelection.None -> failNoTranscript(holder)
+            is TranscriptSelection.None -> {
+                // Failsafe: the source is the user's own ASR speech, so a strict
+                // rejection is not final. Log WHY it was rejected, then accept it
+                // unless it is truly unusable (blank, garbled, or a clearly
+                // provisional fragment at the hard deadline).
+                val diagnosis = candidate?.let { selector.diagnose(listOf(it)) }
+                holder.metrics.lastRejection = diagnosis?.rule?.name
+                if (candidate != null && lenientAccept(holder, candidate, diagnosis)) {
+                    holder.metrics.usedLenientFallback = true
+                    insertSettled(holder, candidate.raw)
+                } else {
+                    failNoTranscript(holder)
+                }
+            }
             is TranscriptSelection.Cleaned, is TranscriptSelection.Raw -> {
                 // E6: a clearly provisional fragment at the hard deadline is
                 // rejected rather than silently inserted. Calibrate this
@@ -510,16 +526,33 @@ class DictationCoordinator(
                     failNoTranscript(holder)
                     return
                 }
-                if (!host.sendInsertion(holder.sessionId, selection.text)) {
-                    fail(holder, accessibilityUnavailable())
-                    return
-                }
-                holder.inserted = true
-                holder.metrics.mark(MutableSessionMetrics.Event.InsertionRequested)
-                publish(DictationState.Inserting(holder.sessionId))
-                teardown(holder)
+                insertSettled(holder, selection.text)
             }
         }
+    }
+
+    /** Lenient failsafe acceptance for user speech rejected by strict validation. */
+    private fun lenientAccept(
+        holder: ActiveLiveSession,
+        candidate: ResultCandidate,
+        diagnosis: RejectionDiagnosis?,
+    ): Boolean {
+        val text = candidate.raw
+        if (text.isBlank() || !text.any { it.isLetterOrDigit() }) return false
+        if (diagnosis?.rule == RejectionRule.GARBLED) return false
+        if (holder.metrics.usedHardDeadline && text.trim().length < 2) return false
+        return true
+    }
+
+    private fun insertSettled(holder: ActiveLiveSession, text: String) {
+        if (!host.sendInsertion(holder.sessionId, text)) {
+            fail(holder, accessibilityUnavailable())
+            return
+        }
+        holder.inserted = true
+        holder.metrics.mark(MutableSessionMetrics.Event.InsertionRequested)
+        publish(DictationState.Inserting(holder.sessionId))
+        teardown(holder)
     }
 
     private fun failNoTranscript(holder: ActiveLiveSession) {
@@ -529,6 +562,7 @@ class DictationCoordinator(
                 code = "gemini_no_transcript",
                 message = "No transcript could be recognized. Try again.",
                 recoverable = true,
+                retryAllowed = true,
             ),
         )
     }
@@ -545,8 +579,32 @@ class DictationCoordinator(
         if (active !== holder) return
         publish(DictationState.Error(holder.sessionId, failure))
         teardown(holder)
+        if (failure.retryAllowed) return // error persists until Retry/Dismiss
         scope.launch {
             delay(config.returnToIdleMs)
+            resetToIdle(holder)
+        }
+    }
+
+    /**
+     * Re-starts dictation after a retryable Error state. Clears the errored
+     * session and opens a fresh one; returns false while a session is still
+     * running (i.e. not in an Error state).
+     */
+    fun retry(): Boolean {
+        val holder = active
+        if (holder != null) {
+            val state = lastPublished
+            if (state !is DictationState.Error) return false
+            resetToIdle(holder)
+        }
+        return start()
+    }
+
+    /** Dismisses a terminal Error panel and returns to Idle. */
+    fun dismiss() {
+        val holder = active ?: return
+        if (lastPublished is DictationState.Error) {
             resetToIdle(holder)
         }
     }
@@ -615,12 +673,14 @@ class DictationCoordinator(
         code = "gemini_transport",
         message = "Gemini rejected the activity boundary ($reason).",
         recoverable = true,
+        retryAllowed = true,
     )
 
     private fun accessibilityUnavailable(): DictationFailure = DictationFailure(
         code = "runtime_no_accessibility",
         message = "Could not reach the accessibility service.",
         recoverable = true,
+        retryAllowed = true,
     )
 
     /** F5: the pre-ready buffer overflowed, so the connection was too slow. */
@@ -628,6 +688,7 @@ class DictationCoordinator(
         code = "gemini_connection_too_slow",
         message = "The Gemini connection is too slow. Try again.",
         recoverable = true,
+        retryAllowed = true,
     )
 
     companion object {

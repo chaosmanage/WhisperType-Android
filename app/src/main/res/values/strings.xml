@@ -27,6 +27,8 @@
     <string name="dictation_reconnect_mic" tools:ignore="UnusedResources">Reconnect microphone permission</string>
     <string name="dictation_reconnect_accessibility" tools:ignore="UnusedResources">Reconnect Accessibility</string>
     <string name="dictation_dismiss">Dismiss</string>
+    <string name="dictation_retry">Retry</string>
+    <string name="test_tag_retry">wt_retry</string>
 
     <string name="test_tag_bubble">wt_bubble</string>
     <string name="test_tag_stop">wt_stop</string>

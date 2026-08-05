@@ -177,7 +177,9 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             OverlayIntent.START_DICTATION -> startDictation()
             OverlayIntent.STOP -> coordinator.stop()
             OverlayIntent.CANCEL -> coordinator.cancel()
-            OverlayIntent.COPY, OverlayIntent.DISMISS -> Unit
+            OverlayIntent.RETRY -> coordinator.retry()
+            OverlayIntent.DISMISS -> coordinator.dismiss()
+            OverlayIntent.COPY -> Unit
         }
     }
 
@@ -233,10 +235,11 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             config = GeminiSessionConfig(
                 model = model,
                 language = language,
+                systemInstruction = language.liveInstruction(),
                 // Release B production protocol: manual activity signaling
-                // (automaticActivityDetection disabled by default) and no
-                // text prime, no systemInstruction, no output transcription.
-                // The dictation source is inputTranscription only.
+                // (automaticActivityDetection disabled by default) and no text
+                // prime. Hinglish mode re-adds a targeted systemInstruction that
+                // biases the Live transcription to Latin script.
             ),
             client = sharedOkHttpClient,
             metrics = metrics,
@@ -260,7 +263,11 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             ?: GeminiSessionFactory.DEFAULT_MODEL
         return GeminiSessionFactory.create(
             apiKey = key,
-            config = GeminiSessionConfig(model = model, language = language),
+            config = GeminiSessionConfig(
+                model = model,
+                language = language,
+                systemInstruction = language.liveInstruction(),
+            ),
             client = sharedOkHttpClient,
         )
     }
