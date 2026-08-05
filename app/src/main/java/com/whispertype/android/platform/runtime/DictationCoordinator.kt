@@ -81,6 +81,9 @@ private class ActiveLiveSession(
     var settleJob: Job? = null
     var deadlineJob: Job? = null
     var inserted: Boolean = false
+
+    /** Retained even when the server sends it before STOP (Release E7). */
+    var turnCompleteSeen: Boolean = false
 }
 
 /**
@@ -106,8 +109,10 @@ class DictationCoordinator(
 
     /** Tunable timing knobs (all monotonic delays, host-tested via virtual time). */
     data class Config(
-        val trailingTranscriptGraceMs: Long = 2_000,
-        val finalizeTimeoutMs: Long = 8_000,
+        /** One absolute deadline from STOP: selection or explicit failure (Release E4). */
+        val hardDeadlineMs: Long = 3_000,
+        /** Short settle debounce after the last transcript revision / turn complete. */
+        val settleDebounceMs: Long = 250,
         val returnToIdleMs: Long = 1_200,
         val captureShutdownTimeoutMs: Long = 1_500,
     )
@@ -117,6 +122,9 @@ class DictationCoordinator(
 
     /** True when a live session is running or finalizing (guards duplicate START). */
     val isActive: Boolean get() = active != null
+
+    /** Test visibility: metrics of the currently active session, or null. */
+    internal fun activeMetrics(): MutableSessionMetrics? = active?.metrics
 
     /** Starts a new dictation session. Returns false (and does nothing) when one
      *  is already active — duplicate START is rejected synchronously. */
@@ -304,10 +312,9 @@ class DictationCoordinator(
                 event.candidates.forEach { candidate ->
                     holder.accumulator.accept(candidate.raw)
                 }
+                onTranscriptUpdate(holder)
             }
-            GeminiEvent.TurnComplete -> if (isFinalizing(holder)) {
-                handleFinalization(holder)
-            }
+            GeminiEvent.TurnComplete -> onTurnComplete(holder)
             is GeminiEvent.Failed -> fail(holder, event.failure)
             GeminiEvent.SessionEnd -> if (!isInserting(holder)) {
                 fail(
@@ -334,6 +341,16 @@ class DictationCoordinator(
     private fun startFinalization(holder: ActiveLiveSession) {
         val session = holder.session ?: return
         val capture = holder.capture
+        // One absolute monotonic deadline from STOP (Release E4): selection or an
+        // explicit failure, never a waiting state. Independent of the settle
+        // debounce so a debounce reset can never extend the deadline.
+        holder.deadlineJob = scope.launch {
+            delay(config.hardDeadlineMs)
+            if (active === holder && isFinalizing(holder)) {
+                holder.metrics.usedHardDeadline = true
+                settle(holder)
+            }
+        }
         // Orderly producer drain before the completion boundary: request stop,
         // let the producer flush its final partial frame and close the channel,
         // join the ordered sender, then send the boundary.
@@ -348,36 +365,52 @@ class DictationCoordinator(
                     fail(holder, transportFailure(result.reason))
                     return@launch
                 }
-                SendResult.Accepted -> holder.metrics.mark(MutableSessionMetrics.Event.ActivityEndQueued)
+                SendResult.Accepted -> {
+                    holder.metrics.mark(MutableSessionMetrics.Event.ActivityEndQueued)
+                    afterActivityEnd(holder)
+                }
             }
         }
-        // Absolute safety-net deadline (Release E replaces this with the hard 3s
-        // deadline plus a settle debounce; here the existing behavior is kept).
-        holder.deadlineJob = scope.launch {
-            delay(config.finalizeTimeoutMs)
+    }
+
+    /** A new input transcript revision arrived; reset the settle debounce (E5). */
+    private fun onTranscriptUpdate(holder: ActiveLiveSession) {
+        if (active !== holder) return
+        if (!isFinalizing(holder)) return
+        restartSettleDebounce(holder)
+    }
+
+    /** The server completed the turn; retained even when it precedes STOP (E7). */
+    private fun onTurnComplete(holder: ActiveLiveSession) {
+        if (active !== holder) return
+        holder.turnCompleteSeen = true
+        if (isFinalizing(holder) && hasValidTranscript(holder)) {
+            restartSettleDebounce(holder)
+        }
+    }
+
+    /** After the completion boundary: settle promptly when turn completion and a
+     *  transcript are both present (E5). */
+    private fun afterActivityEnd(holder: ActiveLiveSession) {
+        if (active !== holder) return
+        if (holder.turnCompleteSeen && hasValidTranscript(holder)) {
+            restartSettleDebounce(holder)
+        }
+    }
+
+    /** Resets the short settle debounce; never extends the absolute deadline. */
+    private fun restartSettleDebounce(holder: ActiveLiveSession) {
+        holder.settleJob?.cancel()
+        holder.settleJob = scope.launch {
+            delay(config.settleDebounceMs)
             if (active === holder && isFinalizing(holder)) {
-                holder.metrics.usedHardDeadline = true
                 settle(holder)
             }
         }
     }
 
-    private fun handleFinalization(holder: ActiveLiveSession) {
-        if (holder.accumulator.settledText()?.isNotBlank() == true) {
-            settle(holder)
-        } else {
-            // inputTranscription is a separate serverContent message with no
-            // guaranteed ordering; it can trail turnComplete. Wait a short grace
-            // window before declaring no-transcript.
-            holder.settleJob?.cancel()
-            holder.settleJob = scope.launch {
-                delay(config.trailingTranscriptGraceMs)
-                if (active === holder && isFinalizing(holder)) {
-                    settle(holder)
-                }
-            }
-        }
-    }
+    private fun hasValidTranscript(holder: ActiveLiveSession): Boolean =
+        holder.accumulator.settledText()?.isNotBlank() == true
 
     private fun settle(holder: ActiveLiveSession) {
         if (active !== holder) return
@@ -389,26 +422,41 @@ class DictationCoordinator(
             selector.select(listOf(ResultCandidate(raw = it, cleaned = null, language = holder.language)))
         } ?: TranscriptSelection.None
         when (selection) {
-            is TranscriptSelection.None -> fail(
-                holder,
-                DictationFailure(
-                    code = "gemini_no_transcript",
-                    message = "No transcript could be recognized. Try again.",
-                    recoverable = true,
-                ),
-            )
+            is TranscriptSelection.None -> failNoTranscript(holder)
             is TranscriptSelection.Cleaned, is TranscriptSelection.Raw -> {
+                // E6: a clearly provisional fragment at the hard deadline is
+                // rejected rather than silently inserted. Calibrate this
+                // threshold from measured trailing-message timing.
+                if (holder.metrics.usedHardDeadline && isClearlyProvisional(selection.text)) {
+                    failNoTranscript(holder)
+                    return
+                }
                 if (!host.sendInsertion(holder.sessionId, selection.text)) {
                     fail(holder, accessibilityUnavailable())
                     return
                 }
                 holder.inserted = true
                 holder.metrics.mark(MutableSessionMetrics.Event.InsertionRequested)
-                host.publish(DictationState.Inserting(holder.sessionId))
+                publish(DictationState.Inserting(holder.sessionId))
                 teardown(holder)
             }
         }
     }
+
+    private fun failNoTranscript(holder: ActiveLiveSession) {
+        fail(
+            holder,
+            DictationFailure(
+                code = "gemini_no_transcript",
+                message = "No transcript could be recognized. Try again.",
+                recoverable = true,
+            ),
+        )
+    }
+
+    /** A bare 1-character fragment (e.g. "t" from "the") is a cut-off provisional
+     *  transcript, never a completed utterance. */
+    private fun isClearlyProvisional(text: String): Boolean = text.trim().length < 2
 
     // ------------------------------------------------------------------
     // Failure / teardown / reset

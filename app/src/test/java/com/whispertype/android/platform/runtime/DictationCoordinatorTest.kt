@@ -19,7 +19,9 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -125,6 +127,8 @@ class DictationCoordinatorTest {
     }
 
     private fun states(host: FakeHost): List<DictationState> = host.published
+
+    private fun FakeHost.last(): DictationState = published.last()
 
     private fun listeningId(host: FakeHost): SessionId =
         (states(host).first { it is DictationState.Listening } as DictationState.Listening).sessionId
@@ -286,5 +290,150 @@ class DictationCoordinatorTest {
         assertTrue(host.session.closed)
         assertEquals(1, states(host).count { it is DictationState.Error })
         assertEquals(DictationState.Idle, states(host).last())
+    }
+
+    // ------------------------------------------------------------------
+    // Release E: transcript settlement and fast finalization
+    // ------------------------------------------------------------------
+
+    private suspend fun sendTranscript(host: FakeHost, text: String) {
+        host.session.events.send(
+            GeminiEvent.TranscriptCandidates(
+                listOf(com.whispertype.android.core.model.ResultCandidate(raw = text, cleaned = null, language = LanguageMode.ENGLISH)),
+            ),
+        )
+    }
+
+    @Test
+    fun `transcript before turn completion settles via debounce and inserts the final revision`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "schedule")
+        host.session.events.send(GeminiEvent.TurnComplete)
+        sendTranscript(host, "schedule the meeting")
+        advanceUntilIdle()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("schedule the meeting", host.insertions[0].second)
+        assertFalse(
+            coordinator.activeMetrics()!!.usedHardDeadline,
+            "settlement must come from the settle debounce, not the hard deadline",
+        )
+        coordinator.onInsertionResult(host.insertions[0].first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `multiple revisions during debounce settle exactly once with the longest value`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "schedule")
+        advanceTimeBy(100)
+        sendTranscript(host, "schedule the")
+        advanceTimeBy(100)
+        sendTranscript(host, "schedule the meeting")
+        advanceUntilIdle()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("schedule the meeting", host.insertions[0].second)
+        assertFalse(coordinator.activeMetrics()!!.usedHardDeadline)
+        coordinator.onInsertionResult(host.insertions[0].first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `transcript arriving just before the deadline is settled and inserted`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        coordinator.stop()
+        runCurrent()
+
+        advanceTimeBy(2_800)
+        sendTranscript(host, "the birch canoe")
+        advanceUntilIdle()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("the birch canoe", host.insertions[0].second)
+        assertTrue(coordinator.activeMetrics()!!.usedHardDeadline)
+        coordinator.onInsertionResult(host.insertions[0].first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `deadline cannot be extended by repeated transcript revisions`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        coordinator.stop()
+        runCurrent()
+
+        // Continuous revisions keep resetting the debounce; the absolute 3s
+        // deadline must still settle regardless.
+        for (i in 1..29) {
+            advanceTimeBy(100)
+            sendTranscript(host, "schedule the meeting please")
+        }
+        advanceUntilIdle()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("schedule the meeting please", host.insertions[0].second)
+        assertTrue(coordinator.activeMetrics()!!.usedHardDeadline)
+        coordinator.onInsertionResult(host.insertions[0].first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `turn complete before STOP is retained and used during finalization`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        // Server completes the turn while still listening (E7).
+        host.session.events.send(GeminiEvent.TurnComplete)
+        advanceTimeBy(1)
+
+        coordinator.stop()
+        runCurrent()
+        sendTranscript(host, "hello world")
+        advanceUntilIdle()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("hello world", host.insertions[0].second)
+        assertFalse(coordinator.activeMetrics()!!.usedHardDeadline)
+        coordinator.onInsertionResult(host.insertions[0].first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `clearly provisional single-character transcript at the hard deadline fails`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        coordinator.stop()
+        runCurrent()
+
+        advanceTimeBy(2_900)
+        sendTranscript(host, "t")
+        advanceTimeBy(200) // crosses the 3s deadline with only "t"
+
+        assertTrue(host.insertions.isEmpty())
+        val error = states(host).first { it is DictationState.Error }
+        assertEquals("gemini_no_transcript", (error as DictationState.Error).failure.code)
+        assertTrue(coordinator.activeMetrics()!!.usedHardDeadline)
+        advanceUntilIdle()
     }
 }
