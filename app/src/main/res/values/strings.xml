@@ -50,7 +50,7 @@
     <string name="home_status_accessibility">Accessibility service</string>
     <string name="home_status_key">Gemini API key</string>
     <string name="home_open_settings">Settings</string>
-    <string name="home_grant_overlay">Grant overlay permission</string>
+    <string name="home_grant_overlay" tools:ignore="UnusedResources">Grant overlay permission</string>
     <string name="status_on">On</string>
     <string name="status_off">Off</string>
     <string name="status_configured" tools:ignore="UnusedResources">Configured</string>

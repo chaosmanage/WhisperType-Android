@@ -109,3 +109,15 @@ Re-validated on the same device (SM-S921B, Android 16, 1080x2340 @ 480dpi, Swift
 - **Rotation:** portrait→landscape→portrait round-trip completed; window re-positioned each time; no crash.
 
 Note: the plan's nominal 50-cycle run (§2) was exercised as a bounded 8-cycle sample here; the full 50-cycle soak and the remaining gates (Phase 3/4 focus + insertion, keyboard preservation) are the next items, still ahead of any Gemini/audio work (Phase 6).
+
+## 7. Phase 6 scope-guard exception (2026-08-05)
+
+Plan §7 says "Do not add Gemini/audio work while the physical overlay or static
+insertion gate is failing." The Phase 2 overlay + insertion gate PASSED on-device
+(§6); only the nominal 50-cycle soak and the Phase 3/4 field matrix remain
+incomplete, not a failing gate. Per explicit user direction, the Phase 6 Gemini
+Live module (session, wire protocol, settings, secrets, home/settings UI) and the
+live dictation loop wiring in `FlowRuntimeService` were built ahead of those
+remaining gates. This is a documented deviation, recorded here and in
+`REBUILD_PROGRESS.md` Stage 2. The Phase 6 Samsung gate (English + Hinglish
+utterances into SwiftKey fields) remains a required physical gate and is NOT RUN.

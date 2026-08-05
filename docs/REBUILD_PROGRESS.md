@@ -160,3 +160,60 @@ cannot resolve. Decoded from the compile-classpath metadata: `fun setViewTreeLif
 Phase 2 gate re-run passed on device (Stage 1c). Next: full 50-cycle soak, then Phase 3/4 focus + insertion gates. Do **not** proceed to Gemini/audio (Phase 6) until those pass (plan §7).
 
 
+## Stage 2 — Gemini Live dictation module + settings/secrets/UI (Phase 6 code) — DONE (code, host gates)
+
+**Physical gate status: NOT RUN.** Per user direction, the Phase 6 Gemini/audio
+module is being built ahead of the nominal gate order (plan §7 forbids Gemini work
+while the overlay/insertion gate FAILS; insertion PASSED once on-device and only the
+field-matrix soak remains incomplete). Exception documented here and in
+`docs/REBUILD_FAILURE_REPORT.md` §6. Physical Phase 6 verification (English +
+Hinglish utterance on SwiftKey) is a required Samsung gate and is outstanding.
+
+Build id: `assembleDebug` on `rebuild/clean-runtime` after `a99dfa1` (module work,
+committed as `a99dfa1`), plus live-loop wiring on top.
+
+### Changed files (module, committed `a99dfa1`)
+
+- `gradle/libs.versions.toml`, `app/build.gradle.kts` — kotlinx-serialization-json
+  `1.9.0`, serialization plugin, `kotlin-test`, `buildConfig` enabled.
+- `platform/gemini/GeminiSessionConfig.kt` — model, response modalities, system
+  instruction, 16 kHz input rate, API version, language stamp.
+- `platform/gemini/GeminiLiveWire.kt` — pure JSON wire protocol: setup /
+  realtimeInput.audio base64 PCM16 / clientContent.turnComplete; `parseServerMessage`
+  → `ServerMessage` (setupComplete / setupError / serverContent / goAway / unknown).
+- `platform/gemini/OkHttpGeminiLiveSession.kt` — WebSocket session implementing the
+  existing `GeminiLiveSession` contract; `awaitReady` on `setupComplete`; audio via
+  base64 PCM16; one `endActivity` boundary; typed failures.
+- `platform/gemini/GeminiSessionFactory.kt` — key→WSS URL (`BidiGenerateContent`),
+  long-lived client.
+- `data/settings/SettingsRepository.kt` (+ test) — DataStore-backed `SettingsProvider`.
+- `data/secrets/` — `KeystoreKeyProvider`, `SecretStore`, `AesGcmCipher`,
+  `BlobStore`, `KeystoreKeyStore` (Keystore-encrypted API key storage; + tests).
+- `core/audio/GemAudioFormat.kt` — canonical 16 kHz / 20 ms PCM16 format.
+- `ui/settings/SettingsScreen.kt`, `MainActivity.kt`, `strings.xml`,
+  `FlowRuntimeService.isRunning` — home/status + settings UI.
+
+### Changed files (live-loop wiring, this entry)
+
+- `audio/AudioCapture.kt`, `audio/Chunker.kt`, `audio/BoundedAudioQueue.kt` —
+  parked mic producer moved in-tree: `PcmSource` → `Chunker` (20 ms frames) →
+  bounded queue, ~20 Hz amplitude StateFlow, typed failures.
+- `platform/runtime/FlowRuntimeService.kt` — Phase 6 live loop: START routes to
+  live dictation when a key is configured (static fallback otherwise for the
+  Phase 3/4 matrix); await `setupComplete` before audio; promote foreground to
+  microphone type before `AudioRecord`; stream exact frames; STOP drains accepted
+  audio then sends one activity-end boundary; `TranscriptSelector` validates raw/
+  cleaned candidates; selection goes through the proven `MSG_INSERT` transaction.
+
+### Tests run (host, not physical)
+
+- `./gradlew :app:assembleDebug` — PASS
+- `./gradlew :app:testDebugUnitTest` — PASS (224 tests, 0 failures/errors)
+- `./gradlew :app:lintDebug` — PASS (0 errors; warnings-as-errors)
+
+### Next gate
+
+Install APK SHA-256 `1e47026ff3228b9302da7675cdbf3df2803802986f5554227cda6607c1067fb4`,
+verify settings key entry, then the Phase 6 Samsung gate (one English and one
+Latin-script Hinglish utterance insert correctly into SwiftKey fields). The
+Phase 3/4 field matrix and the full 50-cycle soak remain outstanding.
