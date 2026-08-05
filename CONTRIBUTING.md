@@ -36,6 +36,17 @@ docs(setup): document accessibility onboarding
 
 Use `feat(...)`, `fix(...)`, `test(...)`, `docs(...)`, `refactor(...)` prefixes. One logical change per commit.
 
+## Versioning
+
+Every commit that changes app behavior bumps the app version **in the same commit** (`app/build.gradle.kts`):
+
+- `versionCode` — increment by exactly 1 (Android requires a strictly increasing integer to update an existing install).
+- `versionName` — bump in lockstep, at minimum a patch increment (e.g. `0.2.0 -> 0.2.1`); reserve minor bumps for features and major for breaking changes.
+
+Keep the bump in the same commit as the behavior change so the tracked debug APK (`app/build/outputs/apk/debug/app-debug.apk`) always carries a `versionName`/`versionCode` that matches the committed source. Refresh the "Current device reference" in `docs/PUSH_TO_DEVICE.md` §8 whenever the version changes.
+
+Current baseline: `0.2.0` (versionCode `2`).
+
 ## Build and test commands
 
 Run everything from the repository root. On Windows:

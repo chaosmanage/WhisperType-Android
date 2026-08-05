@@ -158,6 +158,10 @@ class OkHttpGeminiLiveSession(
     }
 
     private fun onServerContent(message: GeminiLiveWire.ServerMessage.ServerContent) {
+        GeminiLog.i(
+            TAG,
+            "serverContent: inputTranscription=${message.inputTranscription?.take(80)} textParts=${message.textParts.size} turnComplete=${message.turnComplete} interrupted=${message.interrupted}",
+        )
         val candidates = ArrayList<ResultCandidate>()
         // Voice-to-text: the dictation source is inputTranscription (the user's
         // speech as recognized by the model), not modelTurn text (the model's own

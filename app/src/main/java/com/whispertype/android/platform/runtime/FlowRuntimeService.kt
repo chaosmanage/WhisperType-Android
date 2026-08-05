@@ -31,6 +31,7 @@ import com.whispertype.android.core.model.GeminiEvent
 import com.whispertype.android.core.model.InsertionResult
 import com.whispertype.android.core.model.OverlayIntent
 import com.whispertype.android.core.model.ResultCandidate
+import com.whispertype.android.core.model.SendResult
 import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.TargetEligibility
 import com.whispertype.android.core.transcript.TranscriptSelection
@@ -106,6 +107,22 @@ class FlowRuntimeService : Service(), OverlayOwners {
     private var liveAudioJob: Job? = null
     private var liveSessionJob: Job? = null
     private val liveCandidates = mutableListOf<ResultCandidate>()
+
+    /** Peak input amplitude (0..1) of the current capture, for mic diagnostics. */
+    @Volatile
+    private var peakAmplitude = 0f
+
+    /** Number of 20 ms audio chunks accepted by the session this turn. */
+    @Volatile
+    private var chunksSent = 0L
+
+    /**
+     * Pending delayed selection after TurnComplete. inputTranscription is a
+     * separate serverContent message with no guaranteed ordering and may trail
+     * turnComplete, so an empty-candidate turnComplete waits a short grace
+     * window before selecting/failing.
+     */
+    private var pendingSelection: Job? = null
 
     private val incomingHandler = object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(msg: Message) {
@@ -203,6 +220,10 @@ class FlowRuntimeService : Service(), OverlayOwners {
     private fun startLiveDictation() {
         val sessionId = SessionId.new()
         liveCandidates.clear()
+        peakAmplitude = 0f
+        chunksSent = 0L
+        pendingSelection?.cancel()
+        pendingSelection = null
         _sessionState.value = DictationState.Starting(sessionId, EMPTY_TARGET(sessionId))
         liveSessionJob = scope.launch {
             val key = keyProvider.provideKey()
@@ -285,7 +306,7 @@ class FlowRuntimeService : Service(), OverlayOwners {
             _sessionState.value = DictationState.Listening(sessionId)
             audioJob = scope.launch {
                 for (chunk in cap.chunks) {
-                    session.sendAudio(chunk)
+                    if (session.sendAudio(chunk) is SendResult.Accepted) chunksSent++
                 }
             }
             liveAudioJob = audioJob
@@ -316,14 +337,34 @@ class FlowRuntimeService : Service(), OverlayOwners {
         when (event) {
             GeminiEvent.Ready -> Unit
             is GeminiEvent.Amplitude -> {
+                if (event.level > peakAmplitude) peakAmplitude = event.level
                 val current = _sessionState.value
                 if (current is DictationState.Listening && current.sessionId == sessionId) {
                     _sessionState.value = current.copy(amplitude = event.level)
                 }
             }
-            is GeminiEvent.TranscriptCandidates -> liveCandidates.addAll(event.candidates)
+            is GeminiEvent.TranscriptCandidates -> {
+                liveCandidates.addAll(event.candidates)
+                Log.i(TAG, "Candidates received: ${event.candidates.size}; first=${event.candidates.first().raw.take(80)}")
+            }
             GeminiEvent.TurnComplete -> if (_sessionState.value is DictationState.Finalizing) {
-                selectAndInsert(sessionId)
+                if (liveCandidates.isEmpty()) {
+                    // inputTranscription is a separate serverContent message with no
+                    // guaranteed ordering; it can trail turnComplete. Wait a short
+                    // grace window before declaring no-transcript.
+                    Log.i(TAG, "TurnComplete with empty candidates; waiting ${TRAILING_TRANSCRIPT_GRACE_MS}ms for trailing inputTranscription")
+                    pendingSelection?.cancel()
+                    pendingSelection = scope.launch {
+                        delay(TRAILING_TRANSCRIPT_GRACE_MS)
+                        if (_sessionState.value is DictationState.Finalizing) {
+                            Log.i(TAG, "Grace elapsed; candidates now ${liveCandidates.size}")
+                            selectAndInsert(sessionId)
+                        }
+                    }
+                } else {
+                    Log.i(TAG, "TurnComplete with ${liveCandidates.size} candidates")
+                    selectAndInsert(sessionId)
+                }
             }
             is GeminiEvent.Failed -> {
                 failWith(sessionId, event.failure)
@@ -343,17 +384,24 @@ class FlowRuntimeService : Service(), OverlayOwners {
     }
 
     private fun selectAndInsert(sessionId: SessionId) {
+        pendingSelection?.cancel()
+        pendingSelection = null
         val selection = transcriptSelector.select(liveCandidates.toList())
         when (selection) {
-            is TranscriptSelection.None -> failWith(
-                sessionId,
-                DictationFailure(
-                    code = "gemini_no_transcript",
-                    message = "No transcript could be recognized. Try again.",
-                    recoverable = true,
-                ),
-            )
+            is TranscriptSelection.None -> {
+                Log.w(TAG, "Selection: NONE (candidates=${liveCandidates.size}, peakAmp=$peakAmplitude)")
+                failWith(
+                    sessionId,
+                    DictationFailure(
+                        code = "gemini_no_transcript",
+                        message = "No transcript could be recognized. Try again.",
+                        recoverable = true,
+                    ),
+                )
+                closeLiveSession()
+            }
             is TranscriptSelection.Cleaned, is TranscriptSelection.Raw -> {
+                Log.i(TAG, "Selection: ${selection::class.simpleName} text=${selection.text.take(80)}")
                 val reply = a11yReply
                 if (reply == null) {
                     failWith(sessionId, runtimeNoAccessibility())
@@ -369,6 +417,8 @@ class FlowRuntimeService : Service(), OverlayOwners {
 
     /** Closes the live session socket; the collect loop then ends and cleans up. */
     private fun closeLiveSession() {
+        pendingSelection?.cancel()
+        pendingSelection = null
         liveSession?.let { session -> scope.launch { session.close() } }
     }
 
@@ -385,11 +435,24 @@ class FlowRuntimeService : Service(), OverlayOwners {
         val capture = liveCapture
         val session = liveSession
         val audioJob = liveAudioJob
+        Log.i(TAG, "stopDictation: peakAmp=$peakAmplitude candidates=${liveCandidates.size} chunksSent=$chunksSent")
         scope.launch {
             capture?.forceRemainingChunk()
             capture?.stop()
             audioJob?.join()
             session?.endActivity()
+            Log.i(TAG, "endActivity sent")
+        }
+        // Safety net: if the server never sends turnComplete (empty turn, dropped
+        // socket, server quirk), force selection so the panel never sticks on
+        // Finalizing. selectAndInsert cancels this job when it runs.
+        pendingSelection?.cancel()
+        pendingSelection = scope.launch {
+            delay(FINALIZE_TIMEOUT_MS)
+            if (_sessionState.value is DictationState.Finalizing) {
+                Log.w(TAG, "Finalize timeout after ${FINALIZE_TIMEOUT_MS}ms; forcing selection (candidates=${liveCandidates.size})")
+                selectAndInsert(sessionId)
+            }
         }
     }
 
@@ -404,6 +467,8 @@ class FlowRuntimeService : Service(), OverlayOwners {
             else -> null
         } ?: return
         _sessionState.value = DictationState.Cancelled(sessionId, CancelReason.USER)
+        pendingSelection?.cancel()
+        pendingSelection = null
         liveSessionJob?.cancel()
         liveCapture?.stop()
         liveAudioJob?.cancel()
@@ -530,6 +595,8 @@ class FlowRuntimeService : Service(), OverlayOwners {
         const val NOTIFICATION_CHANNEL_ID = "whispertype_runtime"
         const val STATIC_TEST_TEXT = "WhisperType static insertion test"
         const val RETURN_TO_IDLE_MS = 1200L
+        const val TRAILING_TRANSCRIPT_GRACE_MS = 2000L
+        const val FINALIZE_TIMEOUT_MS = 8000L
 
         /** Process-local service-liveness flag for the app UI (set in onCreate/onDestroy). */
         @Volatile
