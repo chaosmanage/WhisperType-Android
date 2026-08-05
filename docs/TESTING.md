@@ -12,17 +12,32 @@ Testing has two automated tiers plus a mandatory manual tier:
 
 | Package | Coverage |
 | --- | --- |
-| `com.whispertype.android.audio` | Audio queue overflow, queue drain before activity end, waveform helpers. |
-| `com.whispertype.android.dictation` | State reducer transitions, stale-session rejection, exactly-once result consumption, target-token comparison, secure-field classification, timeout and cancellation. |
-| `com.whispertype.android.gemini` | Live protocol (setup ordering, audio message format, single activity-end boundary, raw and cleaned transcript events, turn completion, cleaned-candidate fallback, protocol error, timeout, cancellation, network loss, no retry after audio, no key or authenticated URL in logs), transcript assembler, fake-WebSocket contract tests. |
-| `com.whispertype.android.validation` | Transcript corruption rules, Hinglish Latin-only validation, cleaned/raw fallback, candidate selection. |
-| `com.whispertype.android.security` | Encrypted secret storage, sensitive clipboard behavior, secret redaction. |
-| `com.whispertype.android.history` | History retention policy. |
-| `com.whispertype.android.settings` | Settings defaults and persistence. |
-| `com.whispertype.android.overlay` | Dock placement calculation, keyboard geometry validation, overlay safe-inset calculation. |
-| `com.whispertype.android.audit` | `SourcePrivacyAuditTest` — on-disk scan for API key literals, authenticated URL literals, sensitive log lines, and committed keystore/secret files. |
+| `com.whispertype.android.platform.gemini` | `GeminiLiveWireTest` (exact wire codec: setup fields, realtime activity builders, server parse), `OkHttpGeminiLiveSessionTest` (MockWebServer WebSocket: setup-first ordering, single activity start/end, audio rejection before start/after end, no `clientContent`, output transcription never a candidate, automatic-VAD variant, setup errors, close idempotence), `WarmLiveSessionManagerTest` (prewarm/claim/backoff/idle). |
+| `com.whispertype.android.platform.runtime` | `DictationCoordinatorTest` — virtual-time orchestration races (duplicate START, cancel during setup, STOP immediately, stale insertion responses, capture failure, rejected boundaries, exactly-once insertion), Release E settlement (deadline/debounce, provisional rejection, retained early turn-complete), Release F pre-ready buffering (order drain, overflow -> `connection_too_slow`), and failsafes (lenient fallback insert, retry, persistent errors). |
+| `com.whispertype.android.core.transcript` | `TranscriptSelectorTest` (user-speech trust policy, `diagnose()`, long-sentence regression), `TranscriptAccumulatorTest` (cumulative merge rules). |
+| `com.whispertype.android.core.model` | `MutableSessionMetricsTest` (monotonic timing/counters/summary), `LanguageModeTest` (Hinglish instruction). |
+| `com.whispertype.android.audio` | `AudioCaptureOrderlyShutdownTest` (producer-owned flush, zero-padded partial frame, unblocking a blocking read, timeout fallback), `PreReadyAudioBufferTest` (bounded FIFO, overflow, close). |
+| `com.whispertype.android.core.audio` | `BoundedAudioQueueTest`, `Pcm16FrameAssemblerTest`, `AmplitudeMeterTest`. |
+| `com.whispertype.android.core.state` | `DictationReducerTest` — state transitions, stale-session rejection, exactly-once consumption. |
+| `com.whispertype.android.core.privacy` | `LogRedactorTest`. |
+| `com.whispertype.android.data.secrets` | `SecretCipherTest`, `ClientInvalidRecoveryTest` — Keystore/AES-GCM storage, corrupt-blob recovery. |
+| `com.whispertype.android.data.settings` | `SettingsRepositoryTest` — defaults and persistence. |
+| `com.whispertype.android.platform.overlay` | `OverlayHostStateMachineTest`, `OverlayPlacementTest`, `OverlayVisibilityTest`. |
+| `com.whispertype.android.platform.accessibility` | `FocusedEditorTest`, `EligibilityMapperTest`, `EligibilityExplanationTest`, `SecurityClassifierTest`, `InsertionDecisionTest`, `InsertionVerifierTest`. |
 
-Today the `gemini` and `validation` packages are present; the remaining packages land with their feature workstreams (Implementation Plan §18.1). No CI test may require a live Gemini API key (§18.2).
+All unit tests run on the JVM with no device and no live API key.
+
+## Fake WebSocket contract tests
+
+`OkHttpGeminiLiveSessionTest` drives `OkHttpGeminiLiveSession` against a local
+MockWebServer WebSocket that mirrors the Live endpoint's **binary-frame**
+delivery. It asserts: setup is the first client message with the exact fields
+(manual activity config, no output transcription, no `clientContent`), exactly
+one `activityStart` / `activityEnd`, ordered audio with `audio/pcm;rate=16000`,
+audio rejection before start and after end, prompt failure propagation, and that
+`outputTranscription` / `modelTurn` text never emit a user candidate. No live
+network or API key is used. See `docs/GEMINI_LIVE_TRANSCRIPTION.md` §4 for the
+wire protocol.
 
 ## Instrumented host app and scenarios
 
@@ -39,10 +54,6 @@ Scenarios:
 - `SecureFieldTest` (physical device): password and PIN fields never reach `DockedReady`; a numeric field may (unsupported OEM keyboard layouts are skipped via `Assume`, not failed).
 - `StaleSessionTest` (physical device): after `begin` returns true, switching focus must cancel the session before any `Success`; if `begin` returns false (no mic/key), the test is skipped.
 - `RotationTest` (physical device): after rotation the state settles on `DockedReady` or `NoEditableFocus` — rotation may briefly drop focus, so both states are accepted.
-
-## Fake WebSocket contract tests
-
-`GeminiLiveClientContractTest` drives `DefaultGeminiLiveClient` against a local `MockWebServer` fake WebSocket. It asserts setup ordering, audio message framing, the single activity-end boundary, raw and cleaned transcript events, turn completion, candidate fallback, protocol error/timeout/cancellation/network-loss handling, and that no API key or authenticated URL appears in emitted logs. No live network or API key is used. See `docs/GEMINI_LIVE_PROTOCOL.md` for the wire protocol.
 
 ## Device matrix
 

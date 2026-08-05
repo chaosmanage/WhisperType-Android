@@ -1,5 +1,11 @@
 # WhisperType Android — Architecture
 
+> **Note:** This document describes the original 0.1.0 architecture (old
+> `dictation/`, `gemini/` module layout). The current runtime has been rebuilt:
+> orchestration now lives in `platform/runtime/DictationCoordinator.kt` and the
+> Gemini Live voice transcription engine (wire protocol, prompt, state machines,
+> settlement, failsafes) is documented in **`docs/GEMINI_LIVE_TRANSCRIPTION.md`**.
+
 This document describes the runtime architecture of WhisperType Android: component ownership, service boundaries, the overlay lifecycle, input-target tracking, the dictation state machine, the communication model, the Gemini flow, insertion safety, and cancellation/session isolation. It is accurate to the code in `app/src/main/java/com/whispertype/android` at version 0.1.0.
 
 ## Component ownership

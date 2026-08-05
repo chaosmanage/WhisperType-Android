@@ -4,12 +4,22 @@ Each stage has an explicit **trigger**, a **log signature** to check, and a
 **pass/fail rule**. Run the stages in order. A stage that fails is diagnosed
 **at that stage** — do not proceed past a failed stage until it is resolved.
 
+The runtime logs a single aggregate line per finished session:
+```
+SESSION DONE outcome=<Success|Error|Cancelled> tapToCapture=…ms setup=…ms
+tapToFirstAudio=…ms firstAudioToFirstTranscript=…ms stopToQuiesce=…ms
+stopToActivityEnd=…ms stopToSettled=…ms stopToInsert=…ms insertToResult=…ms
+captured=… accepted=… rejected=… maxQueue=… inputTx=… outputTx=…
+turnComplete=… hardDeadline=… overflow=… [reject=<rule>] [lenient=true]
+```
+(see `docs/GEMINI_LIVE_TRANSCRIPTION.md` §11 for the meaning of each field).
+
 Run every log command from the build container:
 
 ```bash
 # watch all relevant logs live during the whole test
 adb -s <SERIAL> logcat -c
-adb -s <SERIAL> logcat | grep -E "STAGE|OkHttpGeminiLiveSession|FlowRuntimeService|WhisperTypeAccessibility"
+adb -s <SERIAL> logcat | grep -E "SESSION DONE|serverContent|STAGE|OkHttpGeminiLiveSession|FlowRuntimeService|WhisperTypeAccessibility"
 ```
 
 ---
@@ -47,80 +57,103 @@ accessibility service, then re-run Stage 0.
 ## Stage 2 — Session connects and Gemini acknowledges setup
 
 - **Trigger**: tap the bubble.
-- **Log signature** (in order):
+- **Log signatures** (in order):
   ```
-  OkHttpGeminiLiveSession: onOpen code=101
+  OkHttpGeminiLiveSession: onOpen code=101 url=wss://...?key=<redacted>
   OkHttpGeminiLiveSession: setupSent=true
-  OkHttpGeminiLiveSession: onMessage { "setupComplete": {} }
   ```
-- **Pass**: `setupComplete` arrives within a few seconds.
-- **If FAIL**: check `onMessage { "setupError" ... }` (bad key/model) or
-  `onFailure` (network/TLS). This stage already passes in normal conditions.
+  followed by `SESSION DONE ... setup=NNNms ...` (setup = tap-to-setupComplete)
+  and, while listening, `serverContent: inputTx=… outputTx=… textParts=… turnComplete=…`.
+- **Pass**: a `SESSION DONE` line appears with a plausible `setup=` duration; if
+  setup failed you see `outcome=Error` with `reject=` absent and the error UI.
+- **If FAIL**: check `setupError` in the logs (bad key/model) or `onFailure`
+  (network/TLS). A `setup=` duration above ~15 s implies the 15 s ready timeout.
 
 ---
 
 ## Stage 3 — Microphone produces data
 
 - **Trigger**: while the panel shows Listening, start speaking.
-- **Log signature**: `STAGE: first audio chunk sent (mic producing data)` then
-  periodic `audio progress: chunksSent=N peakChunkRms=...`.
-- **Pass**: `STAGE: first audio chunk sent` appears.
-- **If FAIL**: the audio loop never sent a chunk → mic init/read problem or the
-  capture coroutine is not running. Capture was reached, so this is a
-  `AudioCapture`/`AudioRecord` issue.
+- **Log signature**: `SESSION DONE ... captured=N accepted=N rejected=0 ...`
+  with `captured`/`accepted` well above 0, plus live `serverContent:` frames.
+- **Pass**: `accepted` > 0 (audio frames reached the session).
+- **If FAIL** (`accepted=0`): the audio loop never sent a frame → mic
+  init/read problem or the capture coroutine is not running (an
+  `AudioCapture`/`AudioRecord` issue). Check for an `outcome=Error` with
+  `runtime_mic_permission` or a capture-read failure.
 
 ---
 
 ## Stage 4 — The captured audio is real sound (not silence)
 
 - **Trigger**: speak loudly and clearly for 4–5 seconds, then tap **Stop**.
-- **Log signature**: `stopDictation: peakAmp=... chunksSent=N peakChunkRms=...`
-- **Pass**: `peakChunkRms` is well above 0 (loud speech ≈ 3,000–15,000;
-  reference: the host `real.pcm` file is ≈ 9,356). `peakAmp` > ~0.05.
-- **If FAIL** (`peakChunkRms` ≈ 0 while the user clearly spoke): the mic is
-  capturing silence. Diagnose `AudioCapture.createDefaultSource()` /
-  `AudioRecord` on the device (source, sample rate, buffer, FGS promotion).
-  This is the moment that distinguishes "app mic broken" from "server issue".
+- **Log signature**: `SESSION DONE ... inputTx=N ...` and (on success)
+  `outcome=Success ... stopToInsert=…ms`.
+- **Pass**: the text appears in the field. If it does, the mic path is proven.
+- **If FAIL** (`outcome=Error`, `inputTx=0`, `reject=` absent): the server
+  returned no `inputTranscription` within the hard deadline → either the mic
+  captured silence or the Live ASR did not fire. Cross-check with the REST
+  `generateContent` path on the same audio (known to transcribe correctly) to
+  distinguish "mic broken" from "Live ASR silent".
 
 ---
 
 ## Stage 5 — Server returns a transcript
 
 - **Trigger**: same run, after Stop.
-- **Log signature**: `serverContent: inputTranscription=<text> ...`
-- **Pass**: an `inputTranscription` with non-empty text appears (before or
-  after `turnComplete`; the grace window covers trailing messages).
-- **If FAIL**: the server did not transcribe. This is the known server-side
-  issue (reproduced on the host with the identical setup and audio). The fix is
-  a different transcript source (echo via `outputTranscription`) or waiting for
-  the API feature to return — **not** another app/wire change.
+- **Log signature**: `SESSION DONE ... inputTx=1 ... outcome=Success` (or an
+  `Error` with `reject=<rule>`).
+- **Pass**: `inputTx>=1`. With 0.3.x this is expected in nearly every session.
+- **If FAIL** (`inputTx=0`): the server did not transcribe this session — the
+  known Live-model intermittency. With a `reject=<rule>` present, the transcript
+  arrived but the selector rejected it (see `docs/GEMINI_LIVE_TRANSCRIPTION.md`
+  §8): `reject=DEVANAGARI` in English mode, or `reject=GARBLED`.
 
 ---
 
 ## Stage 6 — Candidate selection
 
-- **Log signature**: `Selection: Cleaned|Raw text=...` **or** `Selection: NONE`.
-- **Pass**: a `Cleaned`/`Raw` selection with the spoken text.
-- **If FAIL** (`NONE`): follows from Stage 5 (no candidates) or the
-  `TranscriptSelector` rejected the candidate (garbled/preamble heuristics).
+- **Log signature**: `SESSION DONE outcome=Success` (inserted) vs
+  `outcome=Error` + `reject=<rule>`.
+- **Pass**: `outcome=Success` with the spoken text inserted.
+- **If FAIL** (`reject=` present): the transcript arrived but was rejected.
+  `lenient=true` means the failsafe still inserted it. Any remaining rejection
+  should be one of blank / punctuation-only / garbled / Devanagari-in-English.
 
 ---
 
 ## Stage 7 — Insertion into the focused field
 
-- **Log signature**: `STAGE: insertion result=Inserted` and the spoken text
-  appears in the field.
-- **Pass**: text is in the field.
-- **If FAIL**: `insert_ambiguous` (could not verify) or a
-  `runtime_ipc_failed`/accessibility error → accessibility insertion path.
+- **Trigger**: after a successful session, check the field.
+- **Log signature**: `SESSION DONE outcome=Success ... stopToInsert=…ms insertToResult=…ms`.
+- **Pass**: the spoken text is in the field.
+- **If FAIL**: `outcome=Error` with `insert_ambiguous` (could not verify), or a
+  `runtime_no_accessibility` / `runtime_ipc_failed`-style failure → accessibility
+  insertion path.
 
 ---
 
 ## Decision table
 
-| Stage 3 | Stage 4 | Stage 5 | Diagnosis |
-| --- | --- | --- | --- |
-| FAIL | — | — | `AudioCapture` never runs (capture path) |
-| PASS | FAIL (silent) | FAIL | Mic captures silence (device `AudioRecord`) |
-| PASS | PASS (voice) | FAIL | Server `inputTranscription` down → **server-side fix** |
-| PASS | PASS (voice) | PASS | Full pipeline; continue to Stage 6–7 |
+| Stage 3 | Stage 4 | Stage 5 | Stage 6 | Diagnosis |
+| --- | --- | --- | --- | --- |
+| FAIL (`accepted=0`) | — | — | — | `AudioCapture` never ran (capture path) |
+| PASS | FAIL (no text) | FAIL (`inputTx=0`) | — | Mic captures silence, or Live ASR silent this session (retry; cross-check REST) |
+| PASS | PASS | PASS | `reject=<rule>` | Transcript arrived but selector rejected it (0.3.1 trust policy should make this rare) |
+| PASS | PASS | PASS | `outcome=Success` | Full pipeline works; continue the acceptance matrix |
+
+## Acceptance matrix (after 0.3.1)
+
+| Scenario | Runs | Expected |
+| --- | --- | ---: |
+| Short English, 1–3 words | 10 | ≥9 insert |
+| Short opener ("Okay so…", "Yes…", "Of course…") | 10 | ≥9 insert |
+| Normal English sentence | 10 | ≥9 insert |
+| Long English sentence | 10 | ≥9 insert |
+| Short Latin-script Hinglish | 10 | ≥9 insert, Latin script |
+| Normal Latin-script Hinglish | 10 | ≥9 insert, Latin script |
+| Speak immediately after tap | 10 | captured>0, insert |
+| STOP immediately after speech | 10 | insert or clean retryable error |
+| Cancel during connection | 5 | `outcome=Cancelled`, no insert |
+| Rapid consecutive sessions | 10 | no stale-candidate errors |
+| Retry button on an error | 5 | a fresh session starts |

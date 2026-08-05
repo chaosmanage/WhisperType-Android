@@ -4,6 +4,65 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-08-06
+
+Voice-to-text reliability and Hinglish. See `docs/GEMINI_LIVE_TRANSCRIPTION.md`.
+
+### Transcription (inputTranscription is user speech)
+
+- `TranscriptSelector` now uses a **user-speech trust policy**: only blank,
+  punctuation-only, garbled, and Devanagari-in-English are rejected. Removed the
+  model-preamble / greeting / acknowledgment / repetition rejections that were
+  discarding real speech ("Okay so…", "Yes…", "Of course…", long sentences).
+- Added `TranscriptSelector.diagnose()` → rejection-rule logging (never text).
+- **Hinglish** now reaches the model via a Hinglish `systemInstruction` that
+  biases transcription to **Latin script** (romanized Hindi), never Devanagari.
+  A `languageCode` on `inputAudioTranscription` was tried and rejected by the
+  Live API ("unknown name language code"), so none is sent.
+
+### Failsafes / retries
+
+- Lenient fallback: a rejected transcript is still inserted unless blank,
+  garbled, or a clearly provisional fragment at the hard deadline.
+- Retryable errors persist until the user taps **Retry** or **Dismiss**
+  (`OverlayIntent.RETRY`, coordinator `retry()` / `dismiss()`); Retry button on
+  the error panel.
+- `SESSION DONE` now logs `reject=<rule>` and `lenient=true`.
+
+### Tests
+
+- TranscriptSelector reworked + new `diagnose()` coverage; coordinator tests for
+  lenient fallback, retry, persistent errors; wire test for the no-languageCode
+  setup; new `LanguageModeTest`.
+
+## [0.3.0] - 2026-08-05
+
+- Consolidated the A–F remediation into one release (`docs/GEMINI_LIVE_TRANSCRIPTION.md`).
+- Home screen shows `Version <name> (<code>) · commit <git hash>` (BuildConfig
+  GIT_COMMIT embedded at build time).
+
+## [0.2.12] – [0.2.18] - 2026-08-05 (remediation releases A–F)
+
+- **A (0.2.12)** — monotonic session metrics/counters + experimental realtime
+  wire builders (activityStart / activityEnd / audioStreamEnd).
+- **B (0.2.13)** — removed the dictation text prime; `inputTranscription` is the
+  only dictation source; manual activity signaling; transport state machine
+  `Connecting→Ready→ActivityStarted→ActivityEnded→Closed`; fail promptly on
+  rejected boundaries.
+- **C (0.2.14)** — host-testable `DictationCoordinator` + per-session holder;
+  duplicate-START rejection; session-identity validation; insertion-result
+  correlation; producer-owned `Chunker` orderly shutdown; capture-failure
+  teardown; race tests.
+- **D (0.2.15)** — key/`AudioRecord`/base64/JSON work off main; cached settings
+  snapshot; shared `OkHttpClient`; amplitude throttled; removed raw-frame logs.
+- **E (0.2.16)** — `TranscriptAccumulator` merge rules; one absolute 3 s
+  deadline + 250 ms settle debounce; provisional-fragment rejection; retained
+  early `turnComplete`; virtual-time tests.
+- **F (0.2.17)** — `WarmLiveSessionManager` prewarm pool (30 s idle, 1/2/5/10 s
+  backoff); immediate capture with a bounded 150-frame pre-ready buffer;
+  `connecting` UI state.
+- **(0.2.18)** — per-session `SESSION DONE outcome=… <metrics>` diagnostics.
+
 ## [0.1.0] - Initial private prototype (unreleased)
 
 The foundation build of WhisperType Android. Requires Android 14+ (minSdk 34) and targets Android 16 (API 36).

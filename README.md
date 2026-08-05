@@ -40,10 +40,16 @@ Floating and split keyboard layouts are not supported and will not show the dock
 - Requires the Accessibility Service to be enabled; WhisperType works only while it is active.
 - Secure fields (password, PIN, payment, flag-secure windows) never show the dock; they are excluded by design.
 - One dictation session at a time; each session is a single utterance (a 60-second recording is the intended ceiling; the hard limit is 5 minutes).
-- English and Latin-script Hinglish only. Non-Latin scripts (including Devanagari) are rejected.
+- English and Latin-script Hinglish. Hinglish instructs the Live model to write Hindi words in Latin script; the app never errors on Devanagari (English mode still rejects it).
 - Insertion depends on a safe input connection; fields without one fall back to an explicit Copy action.
 - Optional local history can be enabled in Settings (encrypted, off by default), but there is no transcript browsing UI in v0.1.
 - Accessibility Node content, transcripts, and audio are never logged or stored by default.
+
+## Gemini Live transcription engine
+
+The voice-to-text pipeline (wire protocol, prompt, state machines, settlement,
+and failsafes) is documented in `docs/GEMINI_LIVE_TRANSCRIPTION.md`. The
+on-device test procedure is in `docs/ON_DEVICE_TEST_PROTOCOL.md`.
 
 ## Build prerequisites
 
