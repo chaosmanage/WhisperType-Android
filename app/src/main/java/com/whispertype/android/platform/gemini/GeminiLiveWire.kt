@@ -65,6 +65,20 @@ object GeminiLiveWire {
             if (config.outputAudioTranscription) {
                 put("outputAudioTranscription", buildJsonObject {})
             }
+            // Push-to-talk manual activity signaling (Release A experiment): with
+            // automatic detection disabled, the client delimits each utterance
+            // with explicit activityStart / activityEnd realtime-input boundaries.
+            if (config.automaticActivityDetectionDisabled) {
+                put(
+                    "realtimeInputConfig",
+                    buildJsonObject {
+                        put(
+                            "automaticActivityDetection",
+                            buildJsonObject { put("disabled", true) },
+                        )
+                    },
+                )
+            }
             config.systemInstruction?.let { instruction ->
                 put(
                     "systemInstruction",
@@ -103,6 +117,45 @@ object GeminiLiveWire {
     fun buildTurnComplete(): String =
         buildJsonObject {
             put("clientContent", buildJsonObject { put("turnComplete", true) })
+        }.toString()
+
+    /**
+     * Explicit realtime activity boundary: start of a push-to-talk utterance
+     * (manual activity detection). Sent as a realtime-input message before the
+     * first audio frame.
+     */
+    fun buildActivityStart(): String =
+        buildJsonObject {
+            put(
+                "realtimeInput",
+                buildJsonObject { put("activityStart", buildJsonObject {}) },
+            )
+        }.toString()
+
+    /**
+     * Explicit realtime activity boundary: end of a push-to-talk utterance
+     * (manual activity detection). Sent as a realtime-input message after the
+     * final audio frame.
+     */
+    fun buildActivityEnd(): String =
+        buildJsonObject {
+            put(
+                "realtimeInput",
+                buildJsonObject { put("activityEnd", buildJsonObject {}) },
+            )
+        }.toString()
+
+    /**
+     * Realtime completion signal used with automatic activity detection: marks
+     * the end of the microphone stream. A realtime-input message with Boolean
+     * `true`.
+     */
+    fun buildAudioStreamEnd(): String =
+        buildJsonObject {
+            put(
+                "realtimeInput",
+                buildJsonObject { put("audioStreamEnd", true) },
+            )
         }.toString()
 
     /** One client text turn appended to the open turn (no turnComplete). Used to

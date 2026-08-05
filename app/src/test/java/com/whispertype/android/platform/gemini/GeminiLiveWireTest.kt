@@ -109,6 +109,46 @@ class GeminiLiveWireTest {
         assertEquals("echo my words", text)
     }
 
+    @Test
+    fun `buildActivityStart is a realtimeInput activityStart message`() {
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildActivityStart()).jsonObject
+        val realtimeInput = root["realtimeInput"]!!.jsonObject
+        assertTrue(realtimeInput["activityStart"]!!.jsonObject.isEmpty())
+        assertFalse(realtimeInput.containsKey("audio"))
+    }
+
+    @Test
+    fun `buildActivityEnd is a realtimeInput activityEnd message`() {
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildActivityEnd()).jsonObject
+        val realtimeInput = root["realtimeInput"]!!.jsonObject
+        assertTrue(realtimeInput["activityEnd"]!!.jsonObject.isEmpty())
+        assertFalse(realtimeInput.containsKey("audio"))
+    }
+
+    @Test
+    fun `buildAudioStreamEnd is a realtimeInput message with Boolean true`() {
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildAudioStreamEnd()).jsonObject
+        val realtimeInput = root["realtimeInput"]!!.jsonObject
+        assertTrue(realtimeInput["audioStreamEnd"]!!.jsonPrimitive.boolean)
+        assertFalse(realtimeInput.containsKey("audio"))
+    }
+
+    @Test
+    fun `manual activity setup disables automatic activity detection with exact camelCase`() {
+        val manual = GeminiSessionConfig(model = "m", automaticActivityDetectionDisabled = true)
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(manual)).jsonObject
+        val realtimeInputConfig = root["setup"]!!.jsonObject["realtimeInputConfig"]!!.jsonObject
+        val automaticActivityDetection = realtimeInputConfig["automaticActivityDetection"]!!.jsonObject
+        assertTrue(automaticActivityDetection["disabled"]!!.jsonPrimitive.boolean)
+    }
+
+    @Test
+    fun `manual activity setup is omitted when automatic detection stays enabled`() {
+        val automatic = GeminiSessionConfig(model = "m", automaticActivityDetectionDisabled = false)
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(automatic)).jsonObject
+        assertFalse(root["setup"]!!.jsonObject.containsKey("realtimeInputConfig"))
+    }
+
     // ------------------------------------------------------------------
     // Server -> client parsing
     // ------------------------------------------------------------------

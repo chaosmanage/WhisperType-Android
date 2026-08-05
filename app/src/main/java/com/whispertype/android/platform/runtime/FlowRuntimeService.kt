@@ -29,6 +29,7 @@ import com.whispertype.android.core.model.DictationFailure
 import com.whispertype.android.core.model.DictationState
 import com.whispertype.android.core.model.GeminiEvent
 import com.whispertype.android.core.model.InsertionResult
+import com.whispertype.android.core.model.MutableSessionMetrics
 import com.whispertype.android.core.model.OverlayIntent
 import com.whispertype.android.core.model.ResultCandidate
 import com.whispertype.android.core.model.SendResult
@@ -108,6 +109,9 @@ class FlowRuntimeService : Service(), OverlayOwners {
     private var liveSessionJob: Job? = null
     private var amplitudeJob: Job? = null
     private val liveCandidates = mutableListOf<ResultCandidate>()
+
+    /** Session-local monotonic diagnostics for the active dictation (Release A). */
+    private var liveMetrics: MutableSessionMetrics? = null
 
     /** Peak input amplitude (0..1) of the current capture, for mic diagnostics. */
     @Volatile
@@ -235,9 +239,14 @@ class FlowRuntimeService : Service(), OverlayOwners {
         peakChunkRms = 0.0
         pendingSelection?.cancel()
         pendingSelection = null
+        val metrics = MutableSessionMetrics(sessionId)
+        liveMetrics = metrics
+        metrics.mark(MutableSessionMetrics.Event.Tap)
         _sessionState.value = DictationState.Starting(sessionId, EMPTY_TARGET(sessionId))
         liveSessionJob = scope.launch {
+            metrics.mark(MutableSessionMetrics.Event.KeyLoadStarted)
             val key = keyProvider.provideKey()
+            metrics.mark(MutableSessionMetrics.Event.KeyLoaded)
             if (key.isNullOrEmpty()) {
                 failWith(
                     sessionId,
@@ -253,6 +262,8 @@ class FlowRuntimeService : Service(), OverlayOwners {
             val model = settings.modelOverride.first()
                 ?.takeIf { it.isNotBlank() }
                 ?: GeminiSessionFactory.DEFAULT_MODEL
+            metrics.mark(MutableSessionMetrics.Event.SettingsReady)
+            metrics.mark(MutableSessionMetrics.Event.SocketCreated)
             val session = GeminiSessionFactory.create(
                 apiKey = key,
                 config = GeminiSessionConfig(
@@ -263,6 +274,7 @@ class FlowRuntimeService : Service(), OverlayOwners {
                     // the live endpoint). outputAudioTranscription transcribes the
                     // model's spoken reply, which is the dictation echo source.
                 ),
+                metrics = metrics,
             )
             liveSession = session
             runLiveSession(sessionId, session)
@@ -319,6 +331,7 @@ class FlowRuntimeService : Service(), OverlayOwners {
             session.sendTextTurn(DICTATION_PRIME_TEXT)
             Log.i(TAG, "STAGE: dictation prime sent")
 
+            liveMetrics?.mark(MutableSessionMetrics.Event.CaptureStartRequested)
             val cap = AudioCapture()
             capture = cap
             liveCapture = cap
@@ -327,14 +340,21 @@ class FlowRuntimeService : Service(), OverlayOwners {
                     failWith(sessionId, start.failure)
                     return
                 }
-                AudioStartResult.Started -> Unit
+                AudioStartResult.Started -> {
+                    liveMetrics?.mark(MutableSessionMetrics.Event.CaptureStarted)
+                }
             }
 
             _sessionState.value = DictationState.Listening(sessionId)
             audioJob = scope.launch {
                 for (chunk in cap.chunks) {
+                    liveMetrics?.capturedFrames = (liveMetrics?.capturedFrames ?: 0L) + 1
                     if (session.sendAudio(chunk) is SendResult.Accepted) {
                         chunksSent++
+                        liveMetrics?.acceptedFrames = (liveMetrics?.acceptedFrames ?: 0L) + 1
+                        if (liveMetrics?.firstAudioQueuedAt == null) {
+                            liveMetrics?.mark(MutableSessionMetrics.Event.FirstAudioQueued)
+                        }
                         val rms = pcm16Rms(chunk.pcm16Bytes)
                         if (rms > peakChunkRms) peakChunkRms = rms
                         if (chunksSent == 1L) {
@@ -342,6 +362,8 @@ class FlowRuntimeService : Service(), OverlayOwners {
                         } else if (chunksSent % 50 == 0L) {
                             Log.i(TAG, "audio progress: chunksSent=$chunksSent peakChunkRms=$peakChunkRms peakAmp=$peakAmplitude")
                         }
+                    } else {
+                        liveMetrics?.rejectedFrames = (liveMetrics?.rejectedFrames ?: 0L) + 1
                     }
                 }
             }
@@ -457,7 +479,9 @@ class FlowRuntimeService : Service(), OverlayOwners {
                     closeLiveSession()
                     return
                 }
+                liveMetrics?.mark(MutableSessionMetrics.Event.TranscriptSettled)
                 _sessionState.value = DictationState.Inserting(sessionId)
+                liveMetrics?.mark(MutableSessionMetrics.Event.InsertionRequested)
                 sendInsert(sessionId, selection.text, reply)
                 closeLiveSession()
             }
@@ -484,12 +508,15 @@ class FlowRuntimeService : Service(), OverlayOwners {
         val capture = liveCapture
         val session = liveSession
         val audioJob = liveAudioJob
+        liveMetrics?.mark(MutableSessionMetrics.Event.Stop)
         Log.i(TAG, "stopDictation: peakAmp=$peakAmplitude candidates=${liveCandidates.size} chunksSent=$chunksSent peakChunkRms=$peakChunkRms")
         scope.launch {
             capture?.forceRemainingChunk()
             capture?.stop()
             audioJob?.join()
+            liveMetrics?.mark(MutableSessionMetrics.Event.CaptureQuiesced)
             session?.endActivity()
+            liveMetrics?.mark(MutableSessionMetrics.Event.ActivityEndQueued)
             Log.i(TAG, "endActivity sent")
         }
         // Safety net: if the server never sends turnComplete (empty turn, dropped
@@ -567,6 +594,9 @@ class FlowRuntimeService : Service(), OverlayOwners {
 
     private fun onInsertionResult(result: InsertionResult) {
         Log.i(TAG, "STAGE: insertion result=$result")
+        val metrics = liveMetrics
+        metrics?.mark(MutableSessionMetrics.Event.InsertionResult)
+        metrics?.let { Log.i(TAG, "SESSION METRICS ${it.summary()}") }
         val current = _sessionState.value
         val sessionId = when (current) {
             is DictationState.Starting -> current.sessionId

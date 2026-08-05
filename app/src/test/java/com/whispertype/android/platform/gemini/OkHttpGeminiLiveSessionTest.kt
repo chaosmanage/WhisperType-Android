@@ -161,6 +161,28 @@ class OkHttpGeminiLiveSessionTest {
     }
 
     @Test
+    fun `probe records complete client-message order setup-then-audio`() = runBlocking {
+        val session = newSession()
+        session.awaitReady()
+        awaitMessages { serverSocket.clientMessages.isNotEmpty() }
+
+        session.sendAudio(AudioChunk(1, byteArrayOf(1, 2), sampleRateHz = 16_000))
+        session.sendAudio(AudioChunk(2, byteArrayOf(3, 4), sampleRateHz = 16_000))
+        awaitMessages { serverSocket.clientMessages.size >= 3 }
+
+        val setup = Json.parseToJsonElement(serverSocket.clientMessages[0]).jsonObject
+        assertTrue(setup.containsKey("setup"), "the setup message must be the first client message")
+
+        val realtime = serverSocket.clientMessages.drop(1).map {
+            Json.parseToJsonElement(it).jsonObject["realtimeInput"]!!.jsonObject
+        }
+        assertEquals(2, realtime.size)
+        assertEquals("AQI=", realtime[0]["audio"]!!.jsonObject["data"]!!.jsonPrimitive.content)
+        assertEquals("AwQ=", realtime[1]["audio"]!!.jsonObject["data"]!!.jsonPrimitive.content)
+        session.close()
+    }
+
+    @Test
     fun `sendTextTurn sends a user text turn without turnComplete`() = runBlocking {
         val session = newSession()
         session.awaitReady()

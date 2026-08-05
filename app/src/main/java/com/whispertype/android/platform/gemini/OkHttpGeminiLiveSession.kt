@@ -4,6 +4,7 @@ import com.whispertype.android.core.contracts.GeminiLiveSession
 import com.whispertype.android.core.model.AudioChunk
 import com.whispertype.android.core.model.DictationFailure
 import com.whispertype.android.core.model.GeminiEvent
+import com.whispertype.android.core.model.MutableSessionMetrics
 import com.whispertype.android.core.model.ResultCandidate
 import com.whispertype.android.core.model.SendResult
 import java.util.Base64
@@ -39,6 +40,7 @@ class OkHttpGeminiLiveSession(
     private val client: OkHttpClient,
     private val wsUrl: String,
     private val config: GeminiSessionConfig,
+    private val metrics: MutableSessionMetrics? = null,
 ) : GeminiLiveSession {
 
     private val _events = Channel<GeminiEvent>(Channel.UNLIMITED)
@@ -75,6 +77,9 @@ class OkHttpGeminiLiveSession(
         val ws = socket ?: return SendResult.Rejected(REASON_CLOSED)
         val dataBase64 = Base64.getEncoder().encodeToString(chunk.pcm16Bytes)
         val sent = ws.send(GeminiLiveWire.buildAudioChunk(dataBase64, chunk.sampleRateHz))
+        if (sent) {
+            metrics?.recordWebSocketQueue(ws.queueSize().toInt())
+        }
         return if (sent) SendResult.Accepted else SendResult.Rejected(REASON_CLOSED)
     }
 
@@ -101,6 +106,7 @@ class OkHttpGeminiLiveSession(
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
             GeminiLog.i(TAG, "onOpen code=${response.code} url=${redactUrl(wsUrl)}")
+            metrics?.mark(MutableSessionMetrics.Event.SocketOpen)
             val setup = GeminiLiveWire.buildSetup(config)
             val sent = webSocket.send(setup)
             GeminiLog.i(TAG, "setupSent=$sent setup=$setup")
@@ -117,6 +123,7 @@ class OkHttpGeminiLiveSession(
             GeminiLog.i(TAG, "onMessage ${text.take(200)}")
             when (val message = GeminiLiveWire.parseServerMessage(text)) {
                 GeminiLiveWire.ServerMessage.SetupComplete -> {
+                    metrics?.mark(MutableSessionMetrics.Event.SetupComplete)
                     ready.complete(Unit)
                     _events.trySend(GeminiEvent.Ready)
                 }
@@ -183,8 +190,15 @@ class OkHttpGeminiLiveSession(
         val inputTranscription = message.inputTranscription
         if (inputTranscription != null && inputTranscription.isNotEmpty()) {
             sawInputTranscription = true
+            val m = metrics
+            if (m != null) {
+                m.inputTranscriptionCount += 1
+                m.mark(MutableSessionMetrics.Event.FirstInputTranscript)
+            }
             candidates.add(ResultCandidate(raw = inputTranscription, cleaned = null, language = config.language))
         } else if (sawInputTranscription && message.outputTranscription != null && message.outputTranscription.isNotEmpty()) {
+            val m = metrics
+            if (m != null) m.outputTranscriptionCount += 1
             candidates.add(ResultCandidate(raw = message.outputTranscription, cleaned = null, language = config.language))
         } else if (sawInputTranscription && message.textParts.isNotEmpty()) {
             message.textParts.forEach { part ->
@@ -195,6 +209,11 @@ class OkHttpGeminiLiveSession(
             _events.trySend(GeminiEvent.TranscriptCandidates(candidates))
         }
         if (message.turnComplete) {
+            val m = metrics
+            if (m != null) {
+                m.turnCompleteArrived = true
+                m.mark(MutableSessionMetrics.Event.TurnComplete)
+            }
             _events.trySend(GeminiEvent.TurnComplete)
         }
     }

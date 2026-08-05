@@ -1,5 +1,6 @@
 package com.whispertype.android.platform.gemini
 
+import com.whispertype.android.core.model.MutableSessionMetrics
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
@@ -18,9 +19,10 @@ object GeminiSessionFactory {
         apiKey: String,
         config: GeminiSessionConfig = GeminiSessionConfig(model = DEFAULT_MODEL),
         client: OkHttpClient = defaultClient(),
+        metrics: MutableSessionMetrics? = null,
     ): OkHttpGeminiLiveSession {
         require(apiKey.isNotEmpty()) { "apiKey must not be empty" }
-        return OkHttpGeminiLiveSession(client, buildWsUrl(apiKey, config), config)
+        return OkHttpGeminiLiveSession(client, buildWsUrl(apiKey, config), config, metrics)
     }
 
     /** WebSocket endpoint for the [GeminiSessionConfig.apiVersion] path segment. */
