@@ -168,9 +168,17 @@ adb -s <SERIAL> logcat --pid=<PID>
 - **Device:** Samsung Galaxy S25 (`SM-S921B`), Android 16 (SDK 36), 1080x2340 @ 480dpi
 - **Tailscale IP:** `100.127.110.79`
 - **ADB connect port:** `33395` — verified working for the Phase 6 wire-fix push; a TCP check and `adb connect` + `install -r` succeeded from the build container (may change after reboot — re-read from Wireless debugging)
-- **Package:** `com.whispertype.android` (currently `versionName 0.2.16`, `versionCode 18`)
+- **Package:** `com.whispertype.android` (currently `versionName 0.2.17`, `versionCode 19`)
 - **Branch:** `rebuild/clean-runtime`
 - **APK:** `app/build/outputs/apk/debug/app-debug.apk`
+
+> **Release F prewarm gate (billing):** `WarmLiveSessionManager` keeps one
+> preconnected Gemini Live session while the dictation conditions hold. Before
+> enabling prewarming in production, verify with the current Gemini account:
+> whether a setup-complete-but-idle session incurs billable usage, the maximum
+> session lifetime, idle-timeout behavior, and concurrent-session limits. Idle
+> sessions are NOT assumed to be free; the 30 s warm idle timeout is
+> conservative until those numbers are measured.
 
 > Versioning: the app version is bumped on every commit (patch increment of
 > `versionName`, +1 `versionCode` — see `CONTRIBUTING.md` §Versioning). Refresh

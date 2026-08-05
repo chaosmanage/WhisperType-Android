@@ -36,8 +36,10 @@ import com.whispertype.android.data.secrets.KeystoreKeyProvider
 import com.whispertype.android.data.secrets.KeyProvider
 import com.whispertype.android.data.settings.SettingsProvider
 import com.whispertype.android.data.settings.SettingsRepository
+import com.whispertype.android.platform.gemini.GeminiLiveException
 import com.whispertype.android.platform.gemini.GeminiSessionConfig
 import com.whispertype.android.platform.gemini.GeminiSessionFactory
+import com.whispertype.android.platform.gemini.WarmLiveSessionManager
 import com.whispertype.android.platform.ipc.RuntimeIpc
 import com.whispertype.android.platform.overlay.OverlayOwners
 import com.whispertype.android.platform.overlay.PersistentOverlayHost
@@ -98,6 +100,9 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     /** Live-session orchestration (Release C). */
     private val coordinator = DictationCoordinator(scope, this)
 
+    /** Eligibility-driven warm Live session pool (Release F). */
+    private val warmManager = WarmLiveSessionManager(scope, createSession = { createColdSession() })
+
     // Eager in-memory runtime-settings snapshot (Release D2): collected once at
     // service scope so the tap path never does sequential DataStore first() reads.
     @Volatile
@@ -117,6 +122,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                     val b = msg.data
                     if (b != null) {
                         _eligibility.value = RuntimeIpc.unpackEligibility(b)
+                        refreshWarmEligibility()
                     }
                 }
                 RuntimeIpc.MSG_INSERT_RESULT -> {
@@ -191,11 +197,20 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
 
     override fun publish(state: DictationState) {
         _sessionState.value = state
+        // Dictation activity changes warm-prewarm eligibility; re-evaluate.
+        refreshWarmEligibility()
     }
 
     override suspend fun resolveSession(metrics: MutableSessionMetrics): SessionResolve {
         metrics.mark(MutableSessionMetrics.Event.KeyLoadStarted)
-        // File/Keystore/cipher work runs off the main thread (Release D1).
+        // Prefer a warm (preconnected) session so the tap skips cold setup.
+        val warm = warmManager.claim()
+        if (warm != null) {
+            metrics.mark(MutableSessionMetrics.Event.KeyLoaded)
+            metrics.mark(MutableSessionMetrics.Event.SettingsReady)
+            metrics.mark(MutableSessionMetrics.Event.SocketCreated)
+            return SessionResolve.Ok(SessionResolution(session = warm, language = cachedSpeechMode, ready = true))
+        }
         val key = withContext(Dispatchers.IO) { keyProvider.provideKey() }
         metrics.mark(MutableSessionMetrics.Event.KeyLoaded)
         if (key.isNullOrEmpty()) {
@@ -226,7 +241,40 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             client = sharedOkHttpClient,
             metrics = metrics,
         )
-        return SessionResolve.Ok(SessionResolution(session = session, language = language))
+        return SessionResolve.Ok(SessionResolution(session = session, language = language, ready = false))
+    }
+
+    /** Cold session construction shared by the live path and the warm pool. */
+    private suspend fun createColdSession(): com.whispertype.android.core.contracts.GeminiLiveSession {
+        val key = withContext(Dispatchers.IO) { keyProvider.provideKey() }
+            ?: throw GeminiLiveException(
+                DictationFailure(
+                    code = "runtime_no_api_key",
+                    message = "Add your Gemini API key in Settings first.",
+                    recoverable = true,
+                ),
+            )
+        val language = cachedSpeechMode
+        val model = cachedModelOverride
+            ?.takeIf { it.isNotBlank() }
+            ?: GeminiSessionFactory.DEFAULT_MODEL
+        return GeminiSessionFactory.create(
+            apiKey = key,
+            config = GeminiSessionConfig(model = model, language = language),
+            client = sharedOkHttpClient,
+        )
+    }
+
+    /** Release F2: prewarm only while every eligibility condition holds. */
+    private fun computeWarmEligibility(): Boolean {
+        val e = _eligibility.value
+        return e.serviceConnected && e.editorFocused && !e.editorSecure && !e.editorUncertain &&
+            e.keyboardVisible && e.microphoneGranted && e.appEnabled &&
+            keyProvider.hasKey() && !coordinator.isActive
+    }
+
+    private fun refreshWarmEligibility() {
+        warmManager.onEligibilityChanged(computeWarmEligibility())
     }
 
     override suspend fun startCapture(metrics: MutableSessionMetrics): CaptureStart {

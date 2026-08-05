@@ -22,6 +22,9 @@ sealed interface DictationState {
         val sessionId: SessionId,
         val amplitude: Float? = null,
         val elapsedMillis: Long = 0L,
+        /** True while recording starts immediately but the Live session is still
+         *  connecting (cold path with a bounded pre-ready buffer). */
+        val connecting: Boolean = false,
     ) : DictationState
 
     data class Finalizing(val sessionId: SessionId) : DictationState

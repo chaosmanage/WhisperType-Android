@@ -39,6 +39,7 @@ class DictationCoordinatorTest {
     private class FakeSession : GeminiLiveSession {
         val events = Channel<GeminiEvent>(Channel.UNLIMITED)
         var readyError: Throwable? = null
+        var readyGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
         var startResult: SendResult = SendResult.Accepted
         var endResult: SendResult = SendResult.Accepted
         var audioResult: SendResult = SendResult.Accepted
@@ -46,9 +47,11 @@ class DictationCoordinatorTest {
         var endCalls = 0
         var audioCalls = 0
         var closed = false
+        val receivedChunks = mutableListOf<AudioChunk>()
 
         override suspend fun awaitReady() {
             readyError?.let { throw it }
+            readyGate?.await()
         }
 
         override suspend fun startActivity(): SendResult {
@@ -58,6 +61,7 @@ class DictationCoordinatorTest {
 
         override suspend fun sendAudio(chunk: AudioChunk): SendResult {
             audioCalls++
+            receivedChunks += chunk
             return audioResult
         }
 
@@ -139,6 +143,20 @@ class DictationCoordinatorTest {
             host = host,
             metricsFactory = { sessionId -> MutableSessionMetrics(sessionId) { 0L } },
         )
+
+    private fun coordinator(
+        scope: kotlinx.coroutines.test.TestScope,
+        host: FakeHost,
+        config: DictationCoordinator.Config,
+    ): DictationCoordinator =
+        DictationCoordinator(
+            scope = scope,
+            host = host,
+            config = config,
+            metricsFactory = { sessionId -> MutableSessionMetrics(sessionId) { 0L } },
+        )
+
+    private fun chunk(seq: Long): AudioChunk = AudioChunk(seq, ByteArray(640) { it.toByte() }, sampleRateHz = 16_000)
 
     @Test
     fun `duplicate START is rejected synchronously`() = runTest {
@@ -434,6 +452,65 @@ class DictationCoordinatorTest {
         val error = states(host).first { it is DictationState.Error }
         assertEquals("gemini_no_transcript", (error as DictationState.Error).failure.code)
         assertTrue(coordinator.activeMetrics()!!.usedHardDeadline)
+        advanceUntilIdle()
+    }
+
+    // ------------------------------------------------------------------
+    // Release F: immediate capture and pre-ready buffering
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `cold session buffers pre-ready audio and drains in strict order once ready`() = runTest {
+        val host = FakeHost()
+        val session = host.session
+        session.readyGate = kotlinx.coroutines.CompletableDeferred()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceTimeBy(1)
+
+        val connecting = states(host).filterIsInstance<DictationState.Listening>().last()
+        assertTrue(connecting.connecting, "cold path must publish recording-while-connecting")
+
+        host.capture.chunksChannel.send(chunk(0))
+        host.capture.chunksChannel.send(chunk(1))
+        advanceTimeBy(1)
+        assertEquals(0, session.audioCalls, "audio must be buffered while the session connects")
+
+        session.readyGate!!.complete(Unit)
+        host.capture.chunksChannel.send(chunk(2))
+        advanceTimeBy(1)
+
+        assertEquals(listOf(0L, 1L, 2L), session.receivedChunks.map { it.sequence })
+        assertFalse(
+            states(host).filterIsInstance<DictationState.Listening>().last().connecting,
+            "the connecting indicator must clear once the session is ready",
+        )
+        coordinator.cancel()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `pre-ready buffer overflow fails with connection-too-slow`() = runTest {
+        val host = FakeHost()
+        val session = host.session
+        session.readyGate = kotlinx.coroutines.CompletableDeferred() // never becomes ready
+        val coordinator = coordinator(
+            this,
+            host,
+            DictationCoordinator.Config(preReadyMaxFrames = 2),
+        )
+        coordinator.start()
+        advanceTimeBy(1)
+
+        host.capture.chunksChannel.send(chunk(0))
+        host.capture.chunksChannel.send(chunk(1))
+        advanceTimeBy(1)
+        host.capture.chunksChannel.send(chunk(2)) // overflow
+        advanceTimeBy(1)
+
+        val error = states(host).first { it is DictationState.Error }
+        assertEquals("gemini_connection_too_slow", (error as DictationState.Error).failure.code)
+        assertTrue(session.audioCalls == 0)
         advanceUntilIdle()
     }
 }

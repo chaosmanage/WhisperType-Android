@@ -1,7 +1,10 @@
 package com.whispertype.android.platform.runtime
 
 import com.whispertype.android.audio.AudioPipeline
+import com.whispertype.android.audio.PreReadyAudioBuffer
+import com.whispertype.android.audio.PreReadyOffer
 import com.whispertype.android.core.contracts.GeminiLiveSession
+import com.whispertype.android.core.model.AudioChunk
 import com.whispertype.android.core.model.CancelReason
 import com.whispertype.android.core.model.DictationFailure
 import com.whispertype.android.core.model.DictationState
@@ -18,10 +21,12 @@ import com.whispertype.android.core.transcript.TranscriptSelection
 import com.whispertype.android.core.transcript.TranscriptSelector
 import com.whispertype.android.platform.gemini.GeminiLiveException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 
 /**
  * Host services the [DictationCoordinator] needs. Implemented by
@@ -49,8 +54,13 @@ sealed interface SessionResolve {
     data class Failed(val failure: DictationFailure) : SessionResolve
 }
 
-/** A created Live session plus the language it should stamp on candidates. */
-data class SessionResolution(val session: GeminiLiveSession, val language: LanguageMode)
+/** A created Live session plus the language it should stamp on candidates.
+ *  [ready] is true when the session was already connected (warm claim). */
+data class SessionResolution(
+    val session: GeminiLiveSession,
+    val language: LanguageMode,
+    val ready: Boolean = false,
+)
 
 /** Outcome of [DictationHost.startCapture]. */
 sealed interface CaptureStart {
@@ -74,6 +84,7 @@ private class ActiveLiveSession(
     var capture: AudioPipeline? = null
     var sessionJob: Job? = null
     var eventJob: Job? = null
+    var readyJob: Job? = null
     var audioJob: Job? = null
     var amplitudeJob: Job? = null
     var captureFailureJob: Job? = null
@@ -109,12 +120,14 @@ class DictationCoordinator(
 
     /** Tunable timing knobs (all monotonic delays, host-tested via virtual time). */
     data class Config(
-        /** One absolute deadline from STOP: selection or explicit failure (Release E4). */
+        /** One absolute deadline from STOP: selection or an explicit failure (Release E4). */
         val hardDeadlineMs: Long = 3_000,
         /** Short settle debounce after the last transcript revision / turn complete. */
         val settleDebounceMs: Long = 250,
         val returnToIdleMs: Long = 1_200,
         val captureShutdownTimeoutMs: Long = 1_500,
+        /** Bounded pre-ready PCM frames buffered while a cold session connects (F5). */
+        val preReadyMaxFrames: Int = 150,
     )
 
     @Volatile
@@ -218,29 +231,9 @@ class DictationCoordinator(
                     throw e
                 }
             }
-            try {
-                resolution.session.awaitReady()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                val failure = (e as? GeminiLiveException)?.failure
-                    ?: DictationFailure(
-                        code = "gemini_setup",
-                        message = "Could not reach Gemini. Check your network and API key.",
-                        recoverable = true,
-                    )
-                fail(holder, failure)
-                return
-            }
-            if (active !== holder) return
-            when (val start = resolution.session.startActivity()) {
-                is SendResult.Rejected -> {
-                    fail(holder, transportFailure(start.reason))
-                    return
-                }
-                SendResult.Accepted -> Unit
-            }
-            if (active !== holder) return
+            // Release F4: capture starts immediately on the accepted tap, before
+            // network readiness; cold-session PCM goes into a bounded pre-ready
+            // buffer until the session is ready.
             when (val outcome = host.startCapture(holder.metrics)) {
                 is CaptureStart.Failed -> {
                     fail(holder, outcome.failure)
@@ -254,8 +247,10 @@ class DictationCoordinator(
                 }
             }
             if (active !== holder) return
-            publish(DictationState.Listening(sessionId))
-            holder.audioJob = scope.launch { streamAudio(holder) }
+            publish(DictationState.Listening(sessionId, connecting = !resolution.ready))
+            val ready = CompletableDeferred<Unit>()
+            holder.readyJob = scope.launch { awaitReadyAndStart(holder, ready) }
+            holder.audioJob = scope.launch { streamAudio(holder, ready) }
             holder.amplitudeJob = scope.launch { publishAmplitude(holder) }
         } catch (e: CancellationException) {
             throw e
@@ -271,21 +266,99 @@ class DictationCoordinator(
         }
     }
 
-    private suspend fun streamAudio(holder: ActiveLiveSession) {
+    /** Awaits the session, opens the activity, then signals the audio sender. */
+    private suspend fun awaitReadyAndStart(holder: ActiveLiveSession, ready: CompletableDeferred<Unit>) {
+        val session = holder.session ?: return
+        try {
+            session.awaitReady()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val failure = (e as? GeminiLiveException)?.failure
+                ?: DictationFailure(
+                    code = "gemini_setup",
+                    message = "Could not reach Gemini. Check your network and API key.",
+                    recoverable = true,
+                )
+            fail(holder, failure)
+            return
+        }
+        if (active !== holder) return
+        when (val start = session.startActivity()) {
+            is SendResult.Rejected -> {
+                fail(holder, transportFailure(start.reason))
+                return
+            }
+            SendResult.Accepted -> holder.metrics.mark(MutableSessionMetrics.Event.ActivityStartQueued)
+        }
+        val current = lastPublished
+        if (current is DictationState.Listening && current.sessionId == holder.sessionId) {
+            publish(current.copy(connecting = false))
+        }
+        ready.complete(Unit)
+    }
+
+    /**
+     * One ordered sender coroutine (Release F4): while the session is still
+     * connecting, capture chunks go into the bounded pre-ready buffer; when the
+     * session becomes ready the buffered frames are drained in strict order and
+     * then live frames stream directly. Overflow of the bounded buffer fails with
+     * an explicit connection-too-slow failure (F5).
+     */
+    private suspend fun streamAudio(holder: ActiveLiveSession, ready: CompletableDeferred<Unit>) {
         val session = holder.session ?: return
         val capture = holder.capture ?: return
-        for (chunk in capture.chunks) {
-            holder.metrics.capturedFrames++
-            if (session.sendAudio(chunk) is SendResult.Accepted) {
-                holder.metrics.acceptedFrames++
-                if (holder.metrics.firstAudioQueuedAt == null) {
-                    holder.metrics.mark(MutableSessionMetrics.Event.FirstAudioQueued)
+        val preReady = PreReadyAudioBuffer(config.preReadyMaxFrames)
+        var connected = false
+        while (true) {
+            // Select on both the capture channel and the readiness signal so the
+            // drain is not deferred to a later microphone frame.
+            val chunk = select<AudioChunk?> {
+                capture.chunks.onReceiveCatching { result -> result.getOrNull() }
+                if (!connected) ready.onAwait { null }
+            }
+            if (chunk == null) {
+                if (!connected) {
+                    // The session became ready while we were blocked: drain the
+                    // bounded pre-ready buffer in strict order, then stream live.
+                    for (buffered in preReady.drain()) {
+                        sendChunk(holder, session, buffered)
+                    }
+                    connected = true
+                    continue
                 }
+                break // capture channel closed
+            }
+            holder.metrics.capturedFrames++
+            if (connected) {
+                sendChunk(holder, session, chunk)
             } else {
-                holder.metrics.rejectedFrames++
+                when (preReady.offer(chunk)) {
+                    PreReadyOffer.Accepted -> Unit
+                    PreReadyOffer.Overflow -> {
+                        fail(holder, connectionTooSlow())
+                        return
+                    }
+                    PreReadyOffer.Closed -> return
+                }
             }
         }
         holder.metrics.mark(MutableSessionMetrics.Event.LastAudioQueued)
+    }
+
+    private suspend fun sendChunk(
+        holder: ActiveLiveSession,
+        session: GeminiLiveSession,
+        chunk: AudioChunk,
+    ) {
+        if (session.sendAudio(chunk) is SendResult.Accepted) {
+            holder.metrics.acceptedFrames++
+            if (holder.metrics.firstAudioQueuedAt == null) {
+                holder.metrics.mark(MutableSessionMetrics.Event.FirstAudioQueued)
+            }
+        } else {
+            holder.metrics.rejectedFrames++
+        }
     }
 
     private suspend fun publishAmplitude(holder: ActiveLiveSession) {
@@ -475,6 +548,7 @@ class DictationCoordinator(
     /** Cancels session resources; does NOT clear [active] (that happens on reset). */
     private fun teardown(holder: ActiveLiveSession) {
         holder.sessionJob?.cancel()
+        holder.readyJob?.cancel()
         holder.settleJob?.cancel()
         holder.deadlineJob?.cancel()
         holder.finalizationJob?.cancel()
@@ -539,6 +613,13 @@ class DictationCoordinator(
     private fun accessibilityUnavailable(): DictationFailure = DictationFailure(
         code = "runtime_no_accessibility",
         message = "Could not reach the accessibility service.",
+        recoverable = true,
+    )
+
+    /** F5: the pre-ready buffer overflowed, so the connection was too slow. */
+    private fun connectionTooSlow(): DictationFailure = DictationFailure(
+        code = "gemini_connection_too_slow",
+        message = "The Gemini connection is too slow. Try again.",
         recoverable = true,
     )
 
