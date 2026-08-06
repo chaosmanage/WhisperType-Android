@@ -120,6 +120,17 @@
     <string name="settings_history_view">View history</string>
     <string name="settings_bubble_reset">Reset bubble position</string>
     <string name="settings_bubble_reset_desc">Return the mic bubble to its default position.</string>
+    <string name="settings_section_recording">Recording</string>
+    <string name="settings_section_bubble">Bubble</string>
+    <string name="settings_section_dictionary">Dictionary</string>
+    <string name="settings_section_history">History</string>
+    <string name="settings_section_gemini">Gemini account</string>
+    <string name="settings_bubble_size">Bubble size</string>
+    <string name="settings_bubble_size_value">%1$d dp</string>
+    <string name="settings_bubble_opacity">Bubble opacity</string>
+    <string name="settings_bubble_opacity_value">%1$d%%</string>
+    <string name="settings_mini_dot">Mini dot</string>
+    <string name="settings_mini_dot_desc">Shrink the bubble to a small dot when idle. The dot still starts dictation.</string>
 
     <!-- History screen (0.4.0) -->
     <string name="history_title">History</string>

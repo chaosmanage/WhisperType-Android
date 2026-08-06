@@ -17,7 +17,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -75,6 +74,11 @@ fun SettingsScreen(
     val polishLevel by settings.polishLevel
         .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_POLISH_LEVEL)
     val dictionary by settings.dictionary.collectAsStateWithLifecycle(initialValue = emptyList())
+    val bubbleSizeDp by settings.bubbleSizeDp
+        .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_BUBBLE_SIZE_DP)
+    val bubbleOpacity by settings.bubbleOpacityPercent
+        .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_BUBBLE_OPACITY_PERCENT)
+    val miniDotEnabled by settings.miniDotEnabled.collectAsStateWithLifecycle(initialValue = true)
 
     var hasKey by remember { mutableStateOf(keyProvider.hasKey()) }
     var keyInput by remember { mutableStateOf("") }
@@ -120,7 +124,10 @@ fun SettingsScreen(
                 )
             }
 
-            HorizontalDivider()
+            // ------------------------------------------------------------------
+            // Recording
+            // ------------------------------------------------------------------
+            SectionHeader(stringResource(R.string.settings_section_recording))
 
             Text(
                 text = stringResource(R.string.settings_speech_mode),
@@ -138,8 +145,6 @@ fun SettingsScreen(
                     label = { Text(stringResource(R.string.language_hinglish)) },
                 )
             }
-
-            HorizontalDivider()
 
             SettingRow(
                 title = stringResource(R.string.settings_auto_stop),
@@ -167,8 +172,6 @@ fun SettingsScreen(
                 }
             }
 
-            HorizontalDivider()
-
             SettingRow(
                 title = stringResource(R.string.settings_polish),
                 description = stringResource(R.string.settings_polish_desc),
@@ -195,8 +198,6 @@ fun SettingsScreen(
                 }
             }
 
-            HorizontalDivider()
-
             SettingRow(
                 title = stringResource(R.string.settings_model),
                 description = stringResource(R.string.settings_model_desc),
@@ -215,48 +216,64 @@ fun SettingsScreen(
                 Text(stringResource(R.string.settings_model_save))
             }
 
-            HorizontalDivider()
+            // ------------------------------------------------------------------
+            // Bubble
+            // ------------------------------------------------------------------
+            SectionHeader(stringResource(R.string.settings_section_bubble))
 
             SettingRow(
-                title = stringResource(R.string.settings_history),
-                description = stringResource(R.string.settings_history_desc),
+                title = stringResource(R.string.settings_bubble_size),
+                description = stringResource(R.string.settings_bubble_size_value, bubbleSizeDp),
             ) {
-                Switch(
-                    checked = historyEnabled,
-                    onCheckedChange = { scope.launch { settings.setHistoryEnabled(it) } },
+                Slider(
+                    value = bubbleSizeDp.toFloat(),
+                    onValueChangeFinished = { /* commit on release only */ },
+                    onValueChange = {
+                        scope.launch { settings.setBubbleSizeDp(it.roundToInt()) }
+                    },
+                    valueRange = BUBBLE_SIZE_RANGE_DP_F,
                 )
             }
-            if (historyEnabled) {
-                Column {
-                    Text(
-                        text = stringResource(R.string.settings_history_retention),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        text = "$retentionDays ${stringResource(R.string.days_unit)}",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Slider(
-                        value = retentionDays.toFloat(),
-                        onValueChangeFinished = { /* commit on release only */ },
-                        onValueChange = { scope.launch { settings.setHistoryRetentionDays(it.roundToInt()) } },
-                        valueRange = RETENTION_RANGE_DAYS_F,
-                    )
-                }
-            }
-
-            HorizontalDivider()
 
             SettingRow(
-                title = stringResource(R.string.settings_history_view),
-                description = "",
+                title = stringResource(R.string.settings_bubble_opacity),
+                description = stringResource(R.string.settings_bubble_opacity_value, bubbleOpacity),
             ) {
-                OutlinedButton(onClick = onOpenHistory) {
-                    Text(">")
+                Slider(
+                    value = bubbleOpacity.toFloat(),
+                    onValueChangeFinished = { /* commit on release only */ },
+                    onValueChange = {
+                        scope.launch { settings.setBubbleOpacityPercent(it.roundToInt()) }
+                    },
+                    valueRange = BUBBLE_OPACITY_RANGE_PERCENT_F,
+                )
+            }
+
+            SettingRow(
+                title = stringResource(R.string.settings_mini_dot),
+                description = stringResource(R.string.settings_mini_dot_desc),
+            ) {
+                Switch(
+                    checked = miniDotEnabled,
+                    onCheckedChange = { scope.launch { settings.setMiniDotEnabled(it) } },
+                )
+            }
+
+            SettingRow(
+                title = stringResource(R.string.settings_bubble_reset),
+                description = stringResource(R.string.settings_bubble_reset_desc),
+            ) {
+                TextButton(
+                    onClick = { scope.launch { settings.resetBubblePosition() } },
+                ) {
+                    Text(stringResource(R.string.settings_bubble_reset))
                 }
             }
 
-            HorizontalDivider()
+            // ------------------------------------------------------------------
+            // Dictionary
+            // ------------------------------------------------------------------
+            SectionHeader(stringResource(R.string.settings_section_dictionary))
 
             SettingRow(
                 title = stringResource(R.string.settings_dictionary),
@@ -330,20 +347,51 @@ fun SettingsScreen(
                 }
             }
 
-            HorizontalDivider()
+            // ------------------------------------------------------------------
+            // History
+            // ------------------------------------------------------------------
+            SectionHeader(stringResource(R.string.settings_section_history))
 
             SettingRow(
-                title = stringResource(R.string.settings_bubble_reset),
-                description = stringResource(R.string.settings_bubble_reset_desc),
+                title = stringResource(R.string.settings_history),
+                description = stringResource(R.string.settings_history_desc),
             ) {
-                TextButton(
-                    onClick = { scope.launch { settings.resetBubblePosition() } },
-                ) {
-                    Text(stringResource(R.string.settings_bubble_reset))
+                Switch(
+                    checked = historyEnabled,
+                    onCheckedChange = { scope.launch { settings.setHistoryEnabled(it) } },
+                )
+            }
+            if (historyEnabled) {
+                Column {
+                    Text(
+                        text = stringResource(R.string.settings_history_retention),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = "$retentionDays ${stringResource(R.string.days_unit)}",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Slider(
+                        value = retentionDays.toFloat(),
+                        onValueChangeFinished = { /* commit on release only */ },
+                        onValueChange = { scope.launch { settings.setHistoryRetentionDays(it.roundToInt()) } },
+                        valueRange = RETENTION_RANGE_DAYS_F,
+                    )
+                }
+            }
+            SettingRow(
+                title = stringResource(R.string.settings_history_view),
+                description = "",
+            ) {
+                OutlinedButton(onClick = onOpenHistory) {
+                    Text(">")
                 }
             }
 
-            HorizontalDivider()
+            // ------------------------------------------------------------------
+            // Gemini account
+            // ------------------------------------------------------------------
+            SectionHeader(stringResource(R.string.settings_section_gemini))
 
             Text(
                 text = stringResource(R.string.settings_gemini_key),
@@ -407,6 +455,17 @@ fun SettingsScreen(
     }
 }
 
+/** 0.4.2 labeled settings section divider. */
+@Composable
+private fun SectionHeader(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+    )
+}
+
 @Composable
 private fun SettingRow(
     title: String,
@@ -427,6 +486,12 @@ private fun SettingRow(
 }
 
 private val RETENTION_RANGE_DAYS_F: ClosedFloatingPointRange<Float> = 7f..90f
+
+private val BUBBLE_SIZE_RANGE_DP_F: ClosedFloatingPointRange<Float> =
+    SettingsRepository.MIN_BUBBLE_SIZE_DP.toFloat()..SettingsRepository.MAX_BUBBLE_SIZE_DP.toFloat()
+
+private val BUBBLE_OPACITY_RANGE_PERCENT_F: ClosedFloatingPointRange<Float> =
+    SettingsRepository.MIN_BUBBLE_OPACITY_PERCENT.toFloat()..SettingsRepository.MAX_BUBBLE_OPACITY_PERCENT.toFloat()
 
 private val AUTO_STOP_OPTIONS: List<Int> = listOf(15, 30, 60, 120, 300)
 
