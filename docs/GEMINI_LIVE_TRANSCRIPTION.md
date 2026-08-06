@@ -456,12 +456,76 @@ overflow=false [reject=DEVANAGARI] [lenient=true]
 | `audio/PreReadyAudioBuffer.kt` | Bounded pre-ready buffer (cold connect) |
 | `core/transcript/TranscriptAccumulator.kt` | Cumulative transcript merging |
 | `core/transcript/TranscriptSelector.kt` | User-speech trust validation + `diagnose()` |
+| `core/transcript/TranscriptCompleteness.kt` | Echo/raw content-ratio completeness gate |
+| `core/audio/SessionRecording.kt` | Bounded session recording for audio recovery |
 | `core/model/MutableSessionMetrics.kt` | Monotonic diagnostics + summary |
 | `core/model/LanguageMode.kt` | Mode -> systemInstruction mapping |
 
 ---
 
-## 14. Verification
+## 15. Reliability findings + the 0.4.2 settlement (verified 2026-08-06)
+
+### 15.1 What the probes showed (long dictations were lossy)
+
+Calibration probes replayed 18-82 s of speech through the live API with the app's
+exact wire shape (manual activity detection, `activityStart`/`activityEnd`):
+
+| Input | `inputTranscription` | `outputTranscription` (echo) |
+| --- | --- | --- |
+| 9.6 s script | cumulative, complete (25 words) | cumulative, complete, verbatim |
+| 42.5 s script | cumulative, complete (118 words), ~0.5 s after end | **word-level deltas**, verbatim complete, streamed ~10 s |
+| 82.8 s lecture | **never delivered** (60-90 s wait) | word-level deltas, **2-4 word summary** |
+
+The three failure modes users hit map directly to these findings:
+
+1. **"Just the last word"** — the echo streams as per-word *deltas*; the old
+   accumulator REPLACE rule kept only the last message. Fixed by delta-append
+   accumulation (`TranscriptAccumulator(appendDeltas = true)` for the echo).
+2. **"First few words" / "1-2 word summary"** — the model condenses long turns,
+   so a long echo is inherently short. Fixed by the completeness gate: the echo
+   is inserted only when its content-word ratio covers the raw ASR
+   (`TranscriptCompleteness`), otherwise the complete raw is salvaged.
+3. **"Everything is lost"** — on very long turns neither source is delivered.
+   Fixed by the audio-recovery failsafe: the session recording is re-transcribed
+   via REST (`gemini-3.6-flash`, verified verbatim for 118-word input) whenever
+   the settled text is far below the duration-derived expected words.
+
+### 15.2 Settlement policy (0.4.2) — never lose the user's words
+
+At settle time (`DictationCoordinator.selectSettledText`):
+
+| Condition | Insert |
+| --- | --- |
+| Echo present and covers raw (ratio >= 0.6) | polished echo (`ECHO_COMPLETE`) |
+| Echo absent | raw ASR (`RAW_ONLY`) |
+| Echo present but partial/summary | raw ASR (`ECHO_PARTIAL_RAW`) |
+| Raw absent (echo only) | echo (`ECHO_ONLY`); duration-sanity governs |
+| Settled << duration-derived expected words | **audio-recovery failsafe** re-transcribes the recording |
+
+There is no retry path for "the echo was incomplete": a partial echo never
+causes the whole dictation to fail. `failNoTranscript` only fires when nothing
+(echo, raw, or recovered audio) is usable.
+
+### 15.3 Settlement timing
+
+- Echo-fallback raw settle starts **after `activityEnd`** (never on a
+  provisional mid-activity ASR), with a 2 s echo grace window.
+- The settle debounce is 600 ms (above the measured ~90-300 ms echo delta gaps)
+  so settlement never lands mid-delta-stream.
+- The 20 s hard deadline is unchanged; at the deadline the completeness gate +
+  recovery guarantee full coverage.
+
+### 15.4 Diagnostics
+
+Every session logs a `SESSION DONE` line (never transcript or audio) with the
+settle path and word counts, e.g. `settle=ECHO_PARTIAL_RAW expW=93 settledW=118`
+or `settle=ECHO_ONLY recovery=true recW=118`. Watch `settle=` on device: healthy
+short sessions are `ECHO_COMPLETE`; a `recovery=true` line means both live
+sources under-delivered and the recording saved the dictation.
+
+---
+
+## 16. Verification
 
 - JVM unit tests + lint + assemble: `./gradlew :app:testDebugUnitTest
   :app:lintDebug :app:assembleDebug`.

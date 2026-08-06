@@ -4,6 +4,29 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-08-06 (in development, feature branch)
+
+"Reliability first" — fixes the lost-transcription bug (first-few-words / 1-2 word summary / last-word-only) plus the Wispr-style UI round. Calibration evidence in `docs/GEMINI_LIVE_TRANSCRIPTION.md` §10 and `docs/IMPLEMENTATION_PLAN_3.md` §0.4.2.
+
+### Reliability — never lose a dictation
+
+- **Delta-echo accumulation** — probes proved `outputTranscription` streams as word-level deltas (and the model condenses long turns): the echo accumulator now appends deltas (fixes "just the last word"), and neither accumulator ever shrinks to a strictly shorter revision.
+- **Completeness gate** — the polished echo is inserted only when its content-word ratio covers the raw ASR; a truncated/summarized echo salvages the complete raw instead of inserting a fragment (no more silent partial output).
+- **Audio-recovery failsafe** — the session recording is retained; when the settled text is far below the duration-derived expected words, the recording is re-transcribed via REST (`gemini-3.6-flash`, verified verbatim) and that full text is inserted. Never loses the user's words even when both live sources fail.
+- **Settlement hardening** — settle debounce raised to 600 ms (above measured delta gaps); the raw fallback starts only after `activityEnd` so it is always the final ASR; never a retry because the echo was incomplete.
+- **Instruction hardening** — explicit "never summarize, never shorten, never omit the end" clause in every polish style.
+- **Diagnostics** — per-session settle path (`ECHO_COMPLETE` / `ECHO_PARTIAL_RAW` / `RAW_ONLY` / `ECHO_ONLY` / `NONE`) + word counts + recovery flag in the `SESSION DONE` log line (counts only, never transcript/audio).
+
+### Wispr-style UI
+
+- **Recording pill** — thin translucent capsule: Done (green check) at the bubble anchor, live waveform center, Cancel (red X).
+- **Real-time waveform** — flat on silence, rolling wave while speaking (replaces the circular pulse).
+- **Mini-dot bubble** — the idle bubble auto-minimizes to a small dot (~3 s, 12 dp visual / 48 dp touch) and the dot starts dictation; toggleable in Settings.
+- **Bubble appearance** — size (24-72 dp), opacity (10-100%), and the app-logo icon; brand emerald-teal theme shared by every screen; new launcher icon from `app-logo.png`.
+- **Settings sections** — labeled Recording / Bubble / Dictionary / History / Gemini account sections.
+- **Home stats** — sessions, words, today's words, and WPM from history (with an enable hint when history is off); back returns Home from Settings/History.
+- **X drop-target fix** — drop is checked before the target is hidden.
+
 ## [0.4.1] - 2026-08-06 (in development, feature branch)
 
 Follow-up to 0.4.0 from on-device testing + host probes. See `docs/GEMINI_LIVE_TRANSCRIPTION.md` §9.

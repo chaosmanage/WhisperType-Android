@@ -584,3 +584,34 @@ wave. **No wave requires a connected device.**
   `GEMINI_LIVE_WIRE_REFERENCE.md` documents the voice engine to the minutia.
 - All work lives on the `feature` branch; merged to `main` only on explicit
   request.
+
+---
+
+## 0.4.2 addendum — Reliability-first + Wispr UI round
+
+### Reliability (the "lost transcription" bug)
+
+- **Root cause (host probes)**: `outputTranscription` streams as word-level
+  deltas (the old accumulator REPLACE rule produced "just the last word"); the
+  model condenses long turns (82.8 s lecture -> 2-4 word summary); and
+  `inputTranscription` is never delivered on very long turns. All three mapped
+  to user-visible truncation.
+- **Fixes**: delta-append echo accumulation; a completeness gate
+  (echo/raw content ratio) that salvages the complete raw when the echo is
+  partial/summarized; a duration-sanity check that triggers audio recovery
+  (REST re-transcription of the session recording via `gemini-3.6-flash`,
+  verified verbatim) when both live sources under-deliver; 600 ms settle
+  debounce; raw fallback gated on `activityEnd`; instruction hardening. There is
+  **no retry path for an incomplete echo** — the user's words are never dropped.
+- **Diagnostics**: `settle=` path + word counts + `recovery=` flag in the
+  `SESSION DONE` log line (counts only).
+- Acceptance: device matrix — 9/10 dictations insert the full spoken text,
+  0 partial insertions; healthy sessions log `settle=ECHO_COMPLETE`; the
+  recovery path is the rare backstop, not the norm.
+
+### Wispr-style UI round
+
+- Recording pill (Done green / live wave / Cancel red), real-time waveform,
+  auto-minimizing mini-dot bubble, bubble size + opacity settings, app-logo
+  launcher + bubble icon, emerald brand theme, labeled settings sections, home
+  stats card + back handling.
