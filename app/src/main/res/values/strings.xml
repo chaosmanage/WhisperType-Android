@@ -15,8 +15,6 @@
     <string name="notification_action_open" tools:ignore="UnusedResources">Open WhisperType</string>
 
     <string name="dictation_start">Start dictation</string>
-    <string name="dictation_starting">Starting</string>
-    <string name="dictation_listening">Listening</string>
     <string name="dictation_finalizing">Finalizing</string>
     <string name="dictation_inserting">Inserting</string>
     <string name="dictation_recovering">Hang tight — getting your full text…</string>

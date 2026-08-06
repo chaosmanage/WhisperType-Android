@@ -11,7 +11,7 @@ sealed interface PreReadyOffer {
 
 /**
  * Bounded, memory-only, session-scoped PCM buffer used while a cold Gemini
- * session is still connecting (see docs/TRANSCRIPTION_REMEDIATION_PLAN.md
+ * session is still connecting
  * Release F5). Frames buffered here are replayed in strict order once the
  * session becomes ready.
  *

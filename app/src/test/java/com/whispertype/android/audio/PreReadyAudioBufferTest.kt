@@ -6,7 +6,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-/** Tests for [PreReadyAudioBuffer] (docs/TRANSCRIPTION_REMEDIATION_PLAN.md Release F5). */
+/** Tests for [PreReadyAudioBuffer] (Release F5). */
 class PreReadyAudioBufferTest {
 
     private fun chunk(seq: Long): AudioChunk =

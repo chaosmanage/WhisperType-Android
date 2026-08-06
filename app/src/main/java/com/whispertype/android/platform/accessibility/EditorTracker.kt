@@ -79,8 +79,8 @@ class EditorTracker {
     /**
      * Keyboard heuristic (best effort): the soft input window presence is
      * derived by the service from the interactive-window list
-     * (an AccessibilityWindowInfo of type TYPE_INPUT_METHOD present, see
-     * ACCESSIBILITY_DESIGN.md). On some OEMs the IME window may vanish too
+     * (an AccessibilityWindowInfo of type TYPE_INPUT_METHOD present). On some
+     * OEMs the IME window may vanish too
      * early/late, so this flag is only a coarse gate. Callers update it on
      * every TYPE_WINDOWS_CHANGED.
      */
