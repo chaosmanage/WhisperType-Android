@@ -12,10 +12,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -40,8 +49,11 @@ import kotlinx.coroutines.launch
 
 /**
  * History screen: encrypted dictation transcript list with per-entry copy and
- * delete, plus a delete-all action. A UI shell over [HistoryRepository].
+ * delete. The 0.4.2 redesign uses a standard top app bar (back arrow + title)
+ * with a subtle delete-all icon action and a confirmation dialog, instead of
+ * the heavy text-button header.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(
     historyRepository: HistoryRepository,
@@ -55,41 +67,71 @@ fun HistoryScreen(
 
     var refreshKey by remember { mutableStateOf(0) }
     var entries by remember { mutableStateOf<List<HistoryRepository.HistoryEntry>>(emptyList()) }
+    var showClearConfirm by remember { mutableStateOf(false) }
     LaunchedEffect(refreshKey) { entries = historyRepository.events().first() }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = onBack) {
-                Text(stringResource(R.string.history_back))
-            }
-            Text(
-                text = stringResource(R.string.history_title),
-                style = MaterialTheme.typography.titleLarge,
-            )
-            TextButton(
-                onClick = {
-                    scope.launch {
-                        historyRepository.clear()
-                        refreshKey++
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text(stringResource(R.string.history_delete_all_confirm_title)) },
+            text = { Text(stringResource(R.string.history_delete_all_confirm_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearConfirm = false
+                        scope.launch {
+                            historyRepository.clear()
+                            refreshKey++
+                        }
+                        onCopied(clearedLabel)
+                    },
+                ) {
+                    Text(stringResource(R.string.history_clear))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) {
+                    Text(stringResource(R.string.history_cancel))
+                }
+            },
+        )
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.history_title)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.history_back_desc),
+                        )
                     }
-                    onCopied(clearedLabel)
                 },
-            ) {
-                Text(stringResource(R.string.history_delete_all))
-            }
-        }
+                actions = {
+                    if (entries.isNotEmpty()) {
+                        IconButton(
+                            onClick = { showClearConfirm = true },
+                        ) {
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = stringResource(R.string.history_delete_all),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                },
+            )
+        },
+    ) { padding ->
         if (entries.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center,
+            ) {
                 Text(
                     text = stringResource(R.string.history_empty),
                     style = MaterialTheme.typography.bodyLarge,
@@ -98,7 +140,10 @@ fun HistoryScreen(
             }
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(entries, key = { it.id }) { entry ->

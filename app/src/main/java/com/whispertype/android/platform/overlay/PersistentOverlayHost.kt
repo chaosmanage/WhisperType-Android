@@ -60,6 +60,7 @@ class PersistentOverlayHost(
     bubbleSizeDp: Flow<Int> = flowOf(OverlayAppearance.DEFAULT_BUBBLE_SIZE_DP),
     bubbleOpacityPercent: Flow<Int> = flowOf(100),
     miniDotEnabled: Flow<Boolean> = flowOf(true),
+    miniDotDelaySeconds: Flow<Int> = flowOf(OverlayAppearance.DEFAULT_MINI_DOT_DELAY_SECONDS),
     private val placement: OverlayPlacement = OverlayPlacement(),
     private val maxRetries: Int = MAX_ATTACH_RETRIES,
     private val onBubblePositionChange: ((x: Float, y: Float) -> Unit)? = null,
@@ -173,11 +174,12 @@ class PersistentOverlayHost(
         }
         // 0.4.2: combine the user-configurable bubble appearance settings.
         scope.launch {
-            combine(bubbleSizeDp, bubbleOpacityPercent, miniDotEnabled) { size, opacity, dot ->
+            combine(bubbleSizeDp, bubbleOpacityPercent, miniDotEnabled, miniDotDelaySeconds) { size, opacity, dot, delay ->
                 OverlayAppearance(
                     bubbleSizeDp = size.coerceIn(24, 72),
                     opacityPercent = opacity.coerceIn(10, 100),
                     miniDotEnabled = dot,
+                    miniDotAutoMinimizeMs = delay.coerceIn(1, 60) * 1000L,
                 )
             }
                 .collect { _appearance.value = it }

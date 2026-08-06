@@ -18,6 +18,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import com.whispertype.android.core.model.InsertionResult
 import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.TargetSnapshot
+import com.whispertype.android.data.settings.SettingsRepository
 import com.whispertype.android.platform.ipc.RuntimeIpc
 import com.whispertype.android.platform.runtime.FlowRuntimeService
 import kotlinx.coroutines.CoroutineScope
@@ -104,6 +105,13 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
         // Push eligibility to the runtime on every change so the bubble tracks focus.
         scope.launch {
             tracker.eligibility.collect { pushEligibility() }
+        }
+        // 0.4.2 kill switch: observe the app-enabled setting (DataStore is safe
+        // to read from this process) so toggling it off in Settings immediately
+        // hides the bubble until it is turned back on.
+        scope.launch {
+            val settings = SettingsRepository(this@WhisperTypeAccessibilityService)
+            settings.appEnabled.collect { tracker.setAppEnabled(it) }
         }
         Log.i(TAG, "Accessibility service connected (:accessibility process)")
     }

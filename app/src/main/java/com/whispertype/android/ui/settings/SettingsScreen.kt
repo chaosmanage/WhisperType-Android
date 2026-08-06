@@ -79,6 +79,8 @@ fun SettingsScreen(
     val bubbleOpacity by settings.bubbleOpacityPercent
         .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_BUBBLE_OPACITY_PERCENT)
     val miniDotEnabled by settings.miniDotEnabled.collectAsStateWithLifecycle(initialValue = true)
+    val miniDotDelay by settings.miniDotDelaySeconds
+        .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_MINI_DOT_DELAY_SECONDS)
 
     var hasKey by remember { mutableStateOf(keyProvider.hasKey()) }
     var keyInput by remember { mutableStateOf("") }
@@ -246,6 +248,14 @@ fun SettingsScreen(
                     onCheckedChange = { scope.launch { settings.setMiniDotEnabled(it) } },
                 )
             }
+
+            SettingSlider(
+                title = stringResource(R.string.settings_mini_dot_delay),
+                description = stringResource(R.string.settings_mini_dot_delay_value, miniDotDelay),
+                value = miniDotDelay.toFloat(),
+                range = MINI_DOT_DELAY_RANGE_SECONDS_F,
+                onValueChange = { scope.launch { settings.setMiniDotDelaySeconds(it.roundToInt()) } },
+            )
 
             SettingRow(
                 title = stringResource(R.string.settings_bubble_reset),
@@ -511,6 +521,9 @@ private val BUBBLE_SIZE_RANGE_DP_F: ClosedFloatingPointRange<Float> =
 
 private val BUBBLE_OPACITY_RANGE_PERCENT_F: ClosedFloatingPointRange<Float> =
     SettingsRepository.MIN_BUBBLE_OPACITY_PERCENT.toFloat()..SettingsRepository.MAX_BUBBLE_OPACITY_PERCENT.toFloat()
+
+private val MINI_DOT_DELAY_RANGE_SECONDS_F: ClosedFloatingPointRange<Float> =
+    SettingsRepository.MIN_MINI_DOT_DELAY_SECONDS.toFloat()..SettingsRepository.MAX_MINI_DOT_DELAY_SECONDS.toFloat()
 
 private val AUTO_STOP_OPTIONS: List<Int> = listOf(15, 30, 60, 120, 300)
 

@@ -26,4 +26,7 @@ interface SettingsProvider {
     val bubbleSizeDp: Flow<Int>
     val bubbleOpacityPercent: Flow<Int>
     val miniDotEnabled: Flow<Boolean>
+
+    /** 0.4.2: seconds of idle before the bubble auto-minimizes to the mini dot. */
+    val miniDotDelaySeconds: Flow<Int>
 }

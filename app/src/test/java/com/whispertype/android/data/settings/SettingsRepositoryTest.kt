@@ -264,4 +264,19 @@ class SettingsRepositoryTest {
         repo.setMiniDotEnabled(true)
         assertTrue(repo.miniDotEnabled.first())
     }
+
+    @Test
+    fun `mini dot delay defaults and round-trips within bounds`() = runTest {
+        val repo = newRepository()
+        assertEquals(SettingsRepository.DEFAULT_MINI_DOT_DELAY_SECONDS, repo.miniDotDelaySeconds.first())
+
+        repo.setMiniDotDelaySeconds(15)
+        assertEquals(15, repo.miniDotDelaySeconds.first())
+
+        repo.setMiniDotDelaySeconds(0) // coerced to the min
+        assertEquals(SettingsRepository.MIN_MINI_DOT_DELAY_SECONDS, repo.miniDotDelaySeconds.first())
+
+        repo.setMiniDotDelaySeconds(999) // coerced to the max
+        assertEquals(SettingsRepository.MAX_MINI_DOT_DELAY_SECONDS, repo.miniDotDelaySeconds.first())
+    }
 }

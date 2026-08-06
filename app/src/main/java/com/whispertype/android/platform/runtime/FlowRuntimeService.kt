@@ -237,6 +237,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             bubbleSizeDp = settings.bubbleSizeDp,
             bubbleOpacityPercent = settings.bubbleOpacityPercent,
             miniDotEnabled = settings.miniDotEnabled,
+            miniDotDelaySeconds = settings.miniDotDelaySeconds,
             onBubblePositionChange = { x, y ->
                 scope.launch { settings.setBubblePosition(x, y) }
             },

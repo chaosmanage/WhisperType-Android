@@ -48,6 +48,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         val bubbleSizeDp = intPreferencesKey("bubble_size_dp")
         val bubbleOpacityPercent = intPreferencesKey("bubble_opacity_percent")
         val miniDotEnabled = booleanPreferencesKey("mini_dot_enabled")
+        val miniDotDelaySeconds = intPreferencesKey("mini_dot_delay_seconds")
     }
 
     override val speechMode: Flow<LanguageMode> =
@@ -97,6 +98,9 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     override val miniDotEnabled: Flow<Boolean> =
         dataStore.data.map { it[Keys.miniDotEnabled] ?: true }
+
+    override val miniDotDelaySeconds: Flow<Int> =
+        dataStore.data.map { (it[Keys.miniDotDelaySeconds] ?: DEFAULT_MINI_DOT_DELAY_SECONDS).coerceIn(MIN_MINI_DOT_DELAY_SECONDS, MAX_MINI_DOT_DELAY_SECONDS) }
 
     suspend fun setSpeechMode(mode: LanguageMode) {
         dataStore.edit { it[Keys.speechMode] = mode.name }
@@ -176,6 +180,10 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         dataStore.edit { it[Keys.miniDotEnabled] = enabled }
     }
 
+    suspend fun setMiniDotDelaySeconds(seconds: Int) {
+        dataStore.edit { it[Keys.miniDotDelaySeconds] = seconds.coerceIn(MIN_MINI_DOT_DELAY_SECONDS, MAX_MINI_DOT_DELAY_SECONDS) }
+    }
+
     /** Decodes the stored dictionary JSON; malformed or unset input yields an empty list. */
     private fun decodeDictionary(raw: String?): List<DictionaryEntry> {
         if (raw.isNullOrBlank()) return emptyList()
@@ -203,6 +211,9 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         const val DEFAULT_BUBBLE_OPACITY_PERCENT = 100
         const val MIN_BUBBLE_OPACITY_PERCENT = 10
         const val MAX_BUBBLE_OPACITY_PERCENT = 100
+        const val DEFAULT_MINI_DOT_DELAY_SECONDS = 3
+        const val MIN_MINI_DOT_DELAY_SECONDS = 1
+        const val MAX_MINI_DOT_DELAY_SECONDS = 60
         val DEFAULT_POLISH_LEVEL = TranscriptionStyle.MEDIUM
     }
 }

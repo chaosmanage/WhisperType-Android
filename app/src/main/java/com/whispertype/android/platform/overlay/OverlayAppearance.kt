@@ -17,5 +17,6 @@ data class OverlayAppearance(
 
     companion object {
         const val DEFAULT_BUBBLE_SIZE_DP = 36
+        const val DEFAULT_MINI_DOT_DELAY_SECONDS = 3
     }
 }
