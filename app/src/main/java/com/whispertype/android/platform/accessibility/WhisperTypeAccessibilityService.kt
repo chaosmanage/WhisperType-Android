@@ -52,6 +52,11 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
     @Volatile
     private var runtimeMessenger: Messenger? = null
 
+    /** 0.5.4: app-enabled snapshot so a system restart of this accessibility
+     *  service while the app is disabled does not resurrect the runtime. */
+    @Volatile
+    private var cachedAppEnabled: Boolean = true
+
     private var insertionJob: Job? = null
 
     private val replyHandler = object : Handler(Looper.getMainLooper()) {
@@ -100,7 +105,9 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
         // Focus + keyboard are (re)initialized on connect and on every window
         // change (§2.3), so a bubble decision is never made from a stale editor.
         refreshFocusedEditorAndKeyboard()
-        bindToRuntime()
+        // 0.5.4: never resurrect the runtime while the app is disabled; the
+        // app-enabled collector rebinds when the app is re-enabled.
+        if (cachedAppEnabled) bindToRuntime()
 
         // Push eligibility to the runtime on every change so the bubble tracks focus.
         scope.launch {
@@ -109,14 +116,33 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
         // 0.4.2 kill switch: observe the app-enabled setting (DataStore is safe
         // to read from this process) so toggling it off in Settings immediately
         // hides the bubble until it is turned back on.
+        // 0.5.4: while disabled the process releases its runtime binding so the
+        // runtime service can fully die, and rebinds (re-establishing IPC) when
+        // re-enabled.
         scope.launch {
             val settings = SettingsRepository(this@WhisperTypeAccessibilityService)
-            settings.appEnabled.collect { tracker.setAppEnabled(it) }
+            settings.appEnabled.collect { enabled ->
+                cachedAppEnabled = enabled
+                tracker.setAppEnabled(enabled)
+                if (enabled) {
+                    bindToRuntime()
+                } else {
+                    runtimeMessenger = null
+                    try {
+                        unbindService(runtimeConnection)
+                    } catch (_: Throwable) {
+                        // never bound
+                    }
+                }
+            }
         }
         Log.i(TAG, "Accessibility service connected (:accessibility process)")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
+        // 0.5.4: while the app is disabled the accessibility process is fully
+        // inert — no focus/keyboard tracking, no eligibility, nothing.
+        if (!cachedAppEnabled) return
         when (event.eventType) {
             AccessibilityEvent.TYPE_VIEW_FOCUSED -> tracker.onViewFocused(event)
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> tracker.refreshFromRoot(rootInActiveWindow)

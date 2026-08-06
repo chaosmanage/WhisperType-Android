@@ -55,7 +55,7 @@ The bubble requires all of the following at once:
 3. Accessibility Service enabled.
 4. Microphone permission granted.
 5. A Gemini API key saved (key status is shown on the Home tab and under `Settings -> Gemini account`).
-6. The app is enabled: `Settings -> General -> App enabled` must be ON. When it is off, the bubble is hidden entirely — this is the kill switch.
+6. The app is enabled: `Settings -> General -> App enabled` must be ON. When it is off, the runtime is fully stopped — bubble, notifications, and dictation are all off until you turn it back on. This is the kill switch.
 7. A focused text field that is not secure (password/PIN/payment fields never show the bubble).
 8. A fully visible, supported docked keyboard (no floating/split layouts).
 9. The screen is unlocked.

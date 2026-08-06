@@ -4,6 +4,30 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-08-06
+
+"App enabled" is now a genuine kill switch.
+
+- **Off fully stops the runtime** — toggling `Settings -> General -> App enabled`
+  off no longer just hides the bubble: it aborts any active dictation, removes
+  the overlay window (clearing the system "displaying over other apps"
+  notification), removes the "WhisperType is listening" foreground notification,
+  and terminates the runtime service. Turning it back on restarts everything.
+- **Accessibility Service stays registered but inert** — Android does not let an
+  app disable its own system accessibility service, so while the app is off the
+  service stops tracking, stops pushing eligibility, and releases its runtime
+  binding; it resumes when the app is re-enabled.
+
+## [0.5.3] - 2026-08-06
+
+Hinglish mode stops translating English speech.
+
+- **English stays English** — Hinglish mode previously let the model convert
+  English dictation into Hinglish (e.g. "Let's meet tomorrow" becoming
+  "kal milte hain"). The Hinglish instruction now carries an explicit
+  no-translate rule: English spoken by the user is echoed in English, and only
+  Hindi words the user actually says are romanized to Latin script.
+
 ## [0.5.2] - 2026-08-06
 
 Self-mitigating "bubble missing" diagnostics.

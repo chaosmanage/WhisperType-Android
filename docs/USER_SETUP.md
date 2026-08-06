@@ -170,7 +170,15 @@ Higher polish levels ask the transcription engine to clean up filler words, disf
 
 ## Enable / disable dictation (App enabled)
 
-`Settings → General → App enabled` is a kill switch. When it is off, the bubble is hidden entirely and dictation cannot start, even though the Accessibility Service and permissions are still granted. Leave it on for normal use; turn it off to hide the bubble without touching any permissions.
+`Settings → General → App enabled` is a genuine kill switch. Turning it **off**
+fully stops the runtime: the bubble and overlay are removed, the "WhisperType is
+listening" foreground notification and the system "displaying over other apps"
+notification disappear, any in-progress dictation is aborted, and the runtime
+service is terminated. The Accessibility Service stays registered (Android does
+not let apps disable a system accessibility service) but becomes fully inert
+until re-enabled. Turning it back **on** restarts the runtime and restores the
+bubble. Leave it on for normal use; turn it off to completely stop WhisperType
+without touching any permissions.
 
 ## Set up the custom dictionary
 

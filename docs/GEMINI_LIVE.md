@@ -230,8 +230,12 @@ The Hinglish rule appended for every style:
 > Never use Devanagari (Hindi) script - never output a single Devanagari
 > character. Even though the user is speaking in Hindi, render every Hindi word
 > in Latin letters as it sounds, exactly as if the user were speaking in Latin
-> script (for example write 'main theek hoon', never 'मैं ठीक हूँ'). This
-> applies to the whole output with no exceptions."
+> script (for example write 'main theek hoon', never 'मैं ठीक हूँ'). CRITICAL
+> LANGUAGE RULE: NEVER translate the user's speech into a different language. If
+> the user speaks English, output it in English exactly as spoken (with the
+> polish style above applied) - never convert English words into Hindi or
+> Hinglish. Only the Hindi words the user actually says are written in Latin
+> letters. These rules apply to the whole output with no exceptions."
 
 So English + `NONE` yields no instruction key; **Hinglish always carries the
 Latin-script rule** regardless of style. For Hinglish with a NONE-style base the
@@ -242,11 +246,16 @@ composed instruction reads:
 > script - never output a single Devanagari character. Even though the user is
 > speaking in Hindi, render every Hindi word in Latin letters as it sounds,
 > exactly as if the user were speaking in Latin script (for example write 'main
-> theek hoon', never 'मैं ठीक हूँ'). This applies to the whole output with no
-> exceptions. Output only the transcription, nothing else."
+> theek hoon', never 'मैं ठीक हूँ'). CRITICAL LANGUAGE RULE: NEVER translate the
+> user's speech into a different language. If the user speaks English, output it
+> in English exactly as spoken (with the polish style above applied) - never
+> convert English words into Hindi or Hinglish. Only the Hindi words the user
+> actually says are written in Latin letters. These rules apply to the whole
+> output with no exceptions. Output only the transcription, nothing else."
 
 This biases the Live transcription to produce **Latin-script romanized Hinglish**
-for mixed Hindi+English speech.
+for mixed Hindi+English speech — English spoken by the user stays English,
+only Hindi words are romanized, never a wholesale translation.
 
 ---
 

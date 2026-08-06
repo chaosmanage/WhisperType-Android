@@ -141,7 +141,8 @@ If a precondition fails: reinstall (`install -r`), grant permissions, re-enable 
 - **Custom dictionary corrections.** Add a word plus an optional `Always write as` correction in the Custom dictionary page; dictate the uncorrected form. Pass: the inserted text uses the corrected spelling (applied at insertion, word-boundary, case-insensitive); the live transcript is not rewritten mid-session.
 - **History list / copy / delete / delete-all.** Enable `Local history`, complete a dictation, open the History tab. Pass: the transcript appears; Copy copies the text; Delete removes one entry; `Clear all history` empties the list; entries respect the retention period.
 - **Mini-dot auto-minimize.** With the mini-dot option enabled and an idle bubble, Pass: the bubble shrinks to a small dot after the configured delay and the dot still starts dictation.
-- **Kill switch / app-enabled.** Disable the app-enabled setting: Pass: the idle bubble hides until re-enabled, and re-enabling restores it.
+- **Kill switch / app-enabled.** Disable the app-enabled setting. Pass: the runtime fully stops — the "WhisperType is listening" foreground notification disappears, the system "displaying over other apps" notification disappears, the bubble/overlay is gone, and a live dictation is aborted. Re-enabling restores the bubble, notifications, and dictation.
+- **Kill switch / no resurrection.** With the app disabled, force-stop the app and reopen it (or restart the Accessibility Service). Pass: the runtime stays off while `App enabled` is OFF; only turning it back on restarts the runtime.
 - **Dark mode.** Toggle dark mode: Pass: app screens render in the dark theme and the overlay remains legible.
 
 ### Decision table
@@ -201,7 +202,8 @@ Run this sequence on every supported phone/keyboard combination before declaring
 | Dictionary correction applied at insertion | 5 | corrected spelling in the inserted text |
 | History list / copy / delete / delete-all | 5 | all operations behave |
 | Mini-dot auto-minimize + dot tap | 5 | bubble shrinks to dot; dot starts dictation |
-| Kill switch hide / re-enable | 5 | idle bubble hidden while disabled, restored on re-enable |
+| Kill switch stop / restore | 5 | off = runtime fully stopped (no FGS/overlay notifications, no bubble, dictation aborted); on = fully restored |
+| Kill switch no-resurrection | 5 | force-stop while disabled; runtime stays off until re-enabled |
 | Dark mode rendering | 5 | screens and overlay legible in dark theme |
 | Android 13 tablet first install | 3 | installs; both runtime permissions granted |
 

@@ -86,6 +86,7 @@ import com.whispertype.android.ui.settings.SettingsScreen
 import com.whispertype.android.ui.theme.WhisperTypeTheme
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -170,6 +171,16 @@ class MainActivity : ComponentActivity() {
         if (canDrawOverlays()) {
             startRuntime()
         }
+        // 0.5.4: re-enabling the app from the kill switch restarts the runtime.
+        // The gate inside startRuntime() keeps every other start path (onResume,
+        // the Home Runtime tile) from fighting the kill switch while disabled.
+        lifecycleScope.launch {
+            settingsRepository.appEnabled.collect { enabled ->
+                if (enabled && canDrawOverlays() && !FlowRuntimeService.isRunning) {
+                    startRuntime()
+                }
+            }
+        }
         lifecycleScope.launch {
             settingsRepository.historyRetentionDays.collect { cachedHistoryRetentionDays = it }
         }
@@ -194,7 +205,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startRuntime() {
-        startForegroundService(Intent(this, FlowRuntimeService::class.java))
+        // 0.5.4: never start the runtime while the app is disabled — the kill
+        // switch is a full stop until the user re-enables it.
+        lifecycleScope.launch {
+            if (settingsRepository.appEnabled.first()) {
+                startForegroundService(Intent(this@MainActivity, FlowRuntimeService::class.java))
+            }
+        }
     }
 
     private fun isAccessibilityEnabled(): Boolean {

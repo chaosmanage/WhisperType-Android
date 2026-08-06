@@ -85,6 +85,16 @@ class LanguageModeTest {
     }
 
     @Test
+    fun `Hinglish never translates English speech into Hinglish`() {
+        for (style in TranscriptionStyle.entries) {
+            val instruction = LanguageMode.HINGLISH.liveInstruction(style)
+            assertTrue(instruction.contains("NEVER translate the user's speech"), "$style")
+            assertTrue(instruction.contains("never convert English words"), "$style")
+            assertTrue(instruction.contains("Only the Hindi words"), "$style")
+        }
+    }
+
+    @Test
     fun `every style carries the appropriate verbatim or content clause`() {
         for (mode in LanguageMode.entries) {
             for (style in TranscriptionStyle.entries) {

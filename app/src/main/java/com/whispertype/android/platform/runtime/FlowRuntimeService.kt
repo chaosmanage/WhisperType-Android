@@ -168,6 +168,11 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     @Volatile
     private var a11yDropNotified: Boolean = false
 
+    /** 0.5.4: true once the kill switch has shut the runtime down; prevents
+     *  re-entrant shutdown while the service drains to onDestroy. */
+    @Volatile
+    private var killSwitchFired: Boolean = false
+
     private val incomingHandler = object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(msg: Message) {
             when (msg.what) {
@@ -229,7 +234,14 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         scope.launch { settings.bubbleY.collect { cachedBubbleY = it } }
         // 0.4.2 kill switch: cache the app-enabled setting in this (main)
         // process so the overlay can hide the bubble immediately and reliably.
-        scope.launch { settings.appEnabled.collect { cachedAppEnabled = it } }
+        // 0.5.4: disabling is now a genuine kill switch — the runtime stops
+        // itself (overlay, notifications, mic, Gemini) until re-enabled.
+        scope.launch {
+            settings.appEnabled.collect { enabled ->
+                cachedAppEnabled = enabled
+                if (!enabled) shutdownForKillSwitch()
+            }
+        }
         // 0.5.2: surface a silent accessibility-service drop instead of an
         // unexplained missing bubble.
         scope.launch { runA11yWatchdog() }
@@ -268,6 +280,27 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             OverlayIntent.DISMISS -> coordinator.dismiss()
             OverlayIntent.COPY -> Unit
         }
+    }
+
+    /**
+     * 0.5.4: the "App enabled" kill switch. When disabled, this genuinely
+     * terminates the runtime: any active dictation is aborted, the warm Live
+     * session is closed, the overlay window is removed (which also clears the
+     * system "displaying over other apps" notification), the foreground
+     * notification is removed, and the service is stopped. The service is both
+     * started and bound, so it only fully dies once the accessibility process
+     * releases its binding; on re-enable the activity restarts it.
+     */
+    private fun shutdownForKillSwitch() {
+        if (killSwitchFired) return
+        killSwitchFired = true
+        Log.i(TAG, "Kill switch: stopping runtime")
+        coordinator.cancel()
+        warmManager.onEligibilityChanged(false)
+        dismissA11yDropNotification()
+        overlayHost?.detach()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     /**

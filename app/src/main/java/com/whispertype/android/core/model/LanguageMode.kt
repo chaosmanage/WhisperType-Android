@@ -16,8 +16,10 @@ enum class LanguageMode {
      * (`outputTranscription`): native audio Live models only output AUDIO, so the
      * instruction tells the model to repeat the user's speech back verbatim (the
      * echo) and apply the selected polish level; for Hinglish it additionally
-     * forces Roman/Latin script. `inputTranscription` (raw ASR) cannot be
-     * influenced by the instruction and is used as the fast fallback.
+     * forces Roman/Latin script and forbids translating English speech (English
+     * stays English, only Hindi words are romanized). `inputTranscription` (raw
+     * ASR) cannot be influenced by the instruction and is used as the fast
+     * fallback.
      * Verified on-device via host probes (0.4.1).
      */
     fun liveInstruction(style: TranscriptionStyle = TranscriptionStyle.MEDIUM): String {
@@ -70,7 +72,12 @@ enum class LanguageMode {
                         "character. Even though the user is speaking in Hindi, render every Hindi " +
                         "word in Latin letters as it sounds, exactly as if the user were speaking " +
                         "in Latin script (for example write 'main theek hoon', never 'मैं ठीक हूँ'). " +
-                        "This applies to the whole output with no exceptions."
+                        "CRITICAL LANGUAGE RULE: NEVER translate the user's speech into a different " +
+                        "language. If the user speaks English, output it in English exactly as " +
+                        "spoken (with the polish style above applied) - never convert English words " +
+                        "into Hindi or Hinglish. Only the Hindi words the user actually says are " +
+                        "written in Latin letters. These rules apply to the whole output with no " +
+                        "exceptions."
                 "$styleText $hinglishRule $base $tail"
             }
         }
