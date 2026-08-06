@@ -123,7 +123,7 @@ class OkHttpGeminiLiveSessionTest {
             (modalities as kotlinx.serialization.json.JsonArray).map { it.jsonPrimitive.content },
         )
         assertTrue(setup.containsKey("inputAudioTranscription"))
-        assertFalse(setup.containsKey("outputAudioTranscription"), "output transcription must be off by default")
+        assertTrue(setup.containsKey("outputAudioTranscription"), "output transcription (echo) must be on by default")
         val automaticActivityDetection = setup["realtimeInputConfig"]!!.jsonObject["automaticActivityDetection"]!!.jsonObject
         assertTrue(automaticActivityDetection["disabled"]!!.jsonPrimitive.boolean)
         assertFalse(setup.containsKey("systemInstruction"))
@@ -295,24 +295,26 @@ class OkHttpGeminiLiveSessionTest {
     }
 
     @Test
-    fun `outputTranscription never emits a user candidate`() = runBlocking {
+    fun `outputTranscription emits an ECHO candidate and modelTurn text never emits`() = runBlocking {
         val session = newSession()
         val events = bufferEvents(session)
         session.awaitReady()
         receiveWithTimeout(events)
 
-        serverSocket.push("""{"serverContent":{"outputTranscription":{"text":"I understand."}}}""")
+        serverSocket.push("""{"serverContent":{"outputTranscription":{"text":"We should meet on Thursday."}}}""")
+        val echo = receiveWithTimeout(events)
+        assertIs<GeminiEvent.TranscriptCandidates>(echo)
+        assertEquals(listOf("We should meet on Thursday."), echo.candidates.map { it.raw })
+        assertEquals(GeminiEvent.TranscriptSource.ECHO, echo.source, "echo must be tagged as ECHO")
+
         serverSocket.push("""{"serverContent":{"modelTurn":{"parts":[{"text":"hello world"}]}}}""")
         serverSocket.push("""{"serverContent":{"inputTranscription":{"text":"the birch canoe"}}}""")
-        val event = receiveWithTimeout(events)
-        assertIs<GeminiEvent.TranscriptCandidates>(event)
-        assertEquals(
-            listOf("the birch canoe"),
-            event.candidates.map { it.raw },
-            "only the user's inputTranscription may ever become a candidate",
-        )
-        // No additional candidate may arrive from the echo or model-turn frames.
-        assertNull(events.tryReceive().getOrNull(), "echo/model-turn must never emit a user candidate")
+        val input = receiveWithTimeout(events)
+        assertIs<GeminiEvent.TranscriptCandidates>(input)
+        assertEquals(listOf("the birch canoe"), input.candidates.map { it.raw })
+        assertEquals(GeminiEvent.TranscriptSource.INPUT, input.source)
+        // modelTurn text must never emit a candidate.
+        assertNull(events.tryReceive().getOrNull(), "modelTurn text must never emit a candidate")
         session.close()
     }
 

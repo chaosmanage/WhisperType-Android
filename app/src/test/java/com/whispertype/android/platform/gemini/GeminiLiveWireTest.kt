@@ -70,17 +70,17 @@ class GeminiLiveWireTest {
     }
 
     @Test
-    fun `buildSetup omits outputAudioTranscription by default`() {
+    fun `buildSetup includes outputAudioTranscription by default`() {
         val bare = GeminiSessionConfig(model = "m")
         val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(bare)).jsonObject
-        assertFalse(root["setup"]!!.jsonObject.containsKey("outputAudioTranscription"))
+        assertTrue(root["setup"]!!.jsonObject.containsKey("outputAudioTranscription"))
     }
 
     @Test
-    fun `buildSetup includes outputAudioTranscription when explicitly enabled`() {
-        val on = GeminiSessionConfig(model = "m", outputAudioTranscription = true)
-        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(on)).jsonObject
-        assertTrue(root["setup"]!!.jsonObject.containsKey("outputAudioTranscription"))
+    fun `buildSetup omits outputAudioTranscription when explicitly disabled`() {
+        val off = GeminiSessionConfig(model = "m", outputAudioTranscription = false)
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(off)).jsonObject
+        assertFalse(root["setup"]!!.jsonObject.containsKey("outputAudioTranscription"))
     }
 
     @Test

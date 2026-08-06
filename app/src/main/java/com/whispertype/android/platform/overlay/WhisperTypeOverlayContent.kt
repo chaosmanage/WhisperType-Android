@@ -58,14 +58,18 @@ import com.whispertype.android.ui.waveform.CircularWaveform
 fun WhisperTypeOverlayContent(
     uiState: OverlayUiState,
     onIntent: (OverlayIntent) -> Unit,
+    onDragStart: (() -> Unit)? = null,
     onDragBubble: ((dx: Float, dy: Float) -> Unit)? = null,
+    onDragEnd: (() -> Unit)? = null,
 ) {
     WhisperTypeTheme {
         when (visibilityOf(uiState)) {
             OverlayVisibility.Hidden -> Unit
             OverlayVisibility.IdleBubble -> IdleBubble(
                 onIntent = onIntent,
+                onDragStart = onDragStart,
                 onDragBubble = onDragBubble,
+                onDragEnd = onDragEnd,
             )
             OverlayVisibility.Starting -> StartingCapsule(onIntent = onIntent)
             OverlayVisibility.Listening -> ListeningCapsule(
@@ -88,7 +92,9 @@ fun WhisperTypeOverlayContent(
 @Composable
 private fun IdleBubble(
     onIntent: (OverlayIntent) -> Unit,
+    onDragStart: (() -> Unit)?,
     onDragBubble: ((dx: Float, dy: Float) -> Unit)?,
+    onDragEnd: (() -> Unit)?,
 ) {
     val minSize = with(LocalDensity.current) { 48.dp }
     val interaction = remember { MutableInteractionSource() }
@@ -96,10 +102,15 @@ private fun IdleBubble(
     val startLabel = stringResource(R.string.dictation_start)
     Box(
         modifier = Modifier.pointerInput(onDragBubble) {
-            detectDragGestures(onDrag = { change, dragAmount ->
-                change.consume()
-                onDragBubble?.invoke(dragAmount.x, dragAmount.y)
-            })
+            detectDragGestures(
+                onDragStart = { onDragStart?.invoke() },
+                onDrag = { change, dragAmount ->
+                    change.consume()
+                    onDragBubble?.invoke(dragAmount.x, dragAmount.y)
+                },
+                onDragEnd = { onDragEnd?.invoke() },
+                onDragCancel = { onDragEnd?.invoke() },
+            )
         },
         contentAlignment = Alignment.Center,
     ) {

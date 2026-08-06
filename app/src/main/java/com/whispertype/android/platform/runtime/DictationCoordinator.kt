@@ -87,6 +87,7 @@ private class ActiveLiveSession(
     val sessionId: SessionId,
     val metrics: MutableSessionMetrics,
     val accumulator: TranscriptAccumulator,
+    val echoAccumulator: TranscriptAccumulator,
     var language: LanguageMode = LanguageMode.ENGLISH,
 ) {
     var session: GeminiLiveSession? = null
@@ -100,6 +101,7 @@ private class ActiveLiveSession(
     var finalizationJob: Job? = null
     var settleJob: Job? = null
     var deadlineJob: Job? = null
+    var echoFallbackJob: Job? = null
     var inserted: Boolean = false
 
     /** The settled dictation text when one existed (opt-in history hook). */
@@ -135,8 +137,14 @@ class DictationCoordinator(
 
     /** Tunable timing knobs (all monotonic delays, host-tested via virtual time). */
     data class Config(
-        /** One absolute deadline from STOP: selection or an explicit failure (Release E4). */
-        val hardDeadlineMs: Long = 3_000,
+        /** Absolute deadline from STOP (0.4.1): the polished echo for long
+         *  dictations can take several seconds, so the cap is generous (~20 s).
+         *  The echo-fallback watchdog settles on the fast raw transcript when no
+         *  echo arrives at all. */
+        val hardDeadlineMs: Long = 20_000,
+        /** If no echo (outputTranscription) has arrived this many ms after STOP,
+         *  settle on the fast raw inputTranscription instead of waiting. */
+        val echoFallbackWaitMs: Long = 2_000,
         /** Short settle debounce after the last transcript revision / turn complete. */
         val settleDebounceMs: Long = 250,
         val returnToIdleMs: Long = 1_200,
@@ -177,6 +185,7 @@ class DictationCoordinator(
             sessionId = sessionId,
             metrics = metrics,
             accumulator = TranscriptAccumulator(),
+            echoAccumulator = TranscriptAccumulator(),
         )
         active = holder
         publish(DictationState.Starting(sessionId, EMPTY_TARGET(sessionId)))
@@ -436,10 +445,14 @@ class DictationCoordinator(
             GeminiEvent.Ready -> Unit
             is GeminiEvent.Amplitude -> Unit // waveform comes from the capture flow
             is GeminiEvent.TranscriptCandidates -> {
+                // ECHO (outputTranscription, instruction-controlled) is the primary
+                // source; INPUT (raw ASR) is the fast fallback.
+                val isEcho = event.source == GeminiEvent.TranscriptSource.ECHO
+                val target = if (isEcho) holder.echoAccumulator else holder.accumulator
                 event.candidates.forEach { candidate ->
-                    holder.accumulator.accept(candidate.raw)
+                    target.accept(candidate.raw)
                 }
-                onTranscriptUpdate(holder)
+                onTranscriptUpdate(holder, isEcho)
             }
             GeminiEvent.TurnComplete -> onTurnComplete(holder)
             is GeminiEvent.Failed -> fail(holder, event.failure)
@@ -478,6 +491,19 @@ class DictationCoordinator(
                 settle(holder)
             }
         }
+        // 0.4.1 echo fallback: if the model never produces an echo within a short
+        // window, settle on the fast raw inputTranscription instead of waiting up
+        // to the 20 s deadline. When an echo IS streaming, the debounce /
+        // turnComplete path settles it and this watchdog is cancelled.
+        holder.echoFallbackJob = scope.launch {
+            delay(config.echoFallbackWaitMs)
+            if (active === holder && isFinalizing(holder) &&
+                holder.echoAccumulator.settledText().isNullOrBlank() &&
+                holder.accumulator.settledText()?.isNotBlank() == true
+            ) {
+                settle(holder)
+            }
+        }
         // Orderly producer drain before the completion boundary: request stop,
         // let the producer flush its final partial frame and close the channel,
         // join the ordered sender, then send the boundary.
@@ -500,11 +526,16 @@ class DictationCoordinator(
         }
     }
 
-    /** A new input transcript revision arrived; reset the settle debounce (E5). */
-    private fun onTranscriptUpdate(holder: ActiveLiveSession) {
+    /**
+     * A new transcript revision arrived while finalizing. Only the echo
+     * (instruction-controlled) resets the settle debounce — the raw input is the
+     * fallback and is settled by the echo-fallback watchdog or the hard deadline,
+     * so it never cuts short a pending echo (0.4.1).
+     */
+    private fun onTranscriptUpdate(holder: ActiveLiveSession, isEcho: Boolean) {
         if (active !== holder) return
         if (!isFinalizing(holder)) return
-        restartSettleDebounce(holder)
+        if (isEcho) restartSettleDebounce(holder)
     }
 
     /** The server completed the turn; retained even when it precedes STOP (E7). */
@@ -537,14 +568,20 @@ class DictationCoordinator(
     }
 
     private fun hasValidTranscript(holder: ActiveLiveSession): Boolean =
-        holder.accumulator.settledText()?.isNotBlank() == true
+        preferredSettledText(holder)?.isNotBlank() == true
+
+    /** Echo (instruction-controlled) is preferred; raw input is the fallback. */
+    private fun preferredSettledText(holder: ActiveLiveSession): String? =
+        holder.echoAccumulator.settledText()?.takeIf { it.isNotBlank() }
+            ?: holder.accumulator.settledText()
 
     private fun settle(holder: ActiveLiveSession) {
         if (active !== holder) return
         holder.settleJob?.cancel()
         holder.deadlineJob?.cancel()
+        holder.echoFallbackJob?.cancel()
         holder.metrics.mark(MutableSessionMetrics.Event.TranscriptSettled)
-        val raw = holder.accumulator.settledText()
+        val raw = preferredSettledText(holder)
         val candidate = raw?.let {
             ResultCandidate(raw = it, cleaned = null, language = holder.language)
         }
@@ -663,6 +700,7 @@ class DictationCoordinator(
         holder.readyJob?.cancel()
         holder.settleJob?.cancel()
         holder.deadlineJob?.cancel()
+        holder.echoFallbackJob?.cancel()
         holder.finalizationJob?.cancel()
         holder.audioJob?.cancel()
         holder.amplitudeJob?.cancel()

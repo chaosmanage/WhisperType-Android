@@ -12,8 +12,19 @@ sealed interface GeminiEvent {
     /** Throttled amplitude for the waveform meter (never raw audio). */
     data class Amplitude(val level: Float) : GeminiEvent
 
-    /** Raw and cleaned transcript candidates for one turn. */
-    data class TranscriptCandidates(val candidates: List<ResultCandidate>) : GeminiEvent
+    /**
+     * Which server text channel produced a [TranscriptCandidates] event.
+     * [INPUT] is the raw ASR of the user's speech (`inputTranscription`);
+     * [ECHO] is the model's own spoken reply (`outputTranscription`), which the
+     * systemInstruction controls (verbatim echo, polish, Latin script).
+     */
+    enum class TranscriptSource { INPUT, ECHO }
+
+    /** Transcript candidates for one frame, tagged by their source channel. */
+    data class TranscriptCandidates(
+        val candidates: List<ResultCandidate>,
+        val source: TranscriptSource = TranscriptSource.INPUT,
+    ) : GeminiEvent
 
     /** Activity end acknowledged by the server. */
     data object TurnComplete : GeminiEvent

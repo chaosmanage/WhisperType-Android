@@ -265,16 +265,12 @@ class OkHttpGeminiLiveSession(
             TAG,
             "serverContent: inputTx=${message.inputTranscription?.length ?: 0} outputTx=${message.outputTranscription?.length ?: 0} textParts=${message.textParts.size} turnComplete=${message.turnComplete}",
         )
-        // The dictation source is inputTranscription (the user's speech as
-        // recognized by the server's ASR). outputTranscription (the model's own
-        // audio reply) and modelTurn text are never user dictation: they can
-        // carry greetings, acknowledgments, or instruction echoes, so they are
-        // never selected as candidates. Only their presence is counted for
-        // diagnostics; their text is never logged.
+        // 0.4.1 echo architecture: the dictation source is outputTranscription —
+        // the model's spoken reply, which the systemInstruction turns into a
+        // verbatim, polished, Latin-script echo of the user's speech. The raw
+        // inputTranscription (ASR, not instruction-influenced) is emitted as the
+        // fast fallback. Never log transcript text.
         val m = metrics
-        if (message.outputTranscription != null && message.outputTranscription.isNotEmpty() && m != null) {
-            m.outputTranscriptionCount += 1
-        }
         val inputTranscription = message.inputTranscription
         if (inputTranscription != null && inputTranscription.isNotEmpty()) {
             if (m != null) {
@@ -284,6 +280,17 @@ class OkHttpGeminiLiveSession(
             _events.trySend(
                 GeminiEvent.TranscriptCandidates(
                     listOf(ResultCandidate(raw = inputTranscription, cleaned = null, language = config.language)),
+                    source = GeminiEvent.TranscriptSource.INPUT,
+                ),
+            )
+        }
+        val outputTranscription = message.outputTranscription
+        if (outputTranscription != null && outputTranscription.isNotEmpty()) {
+            if (m != null) m.outputTranscriptionCount += 1
+            _events.trySend(
+                GeminiEvent.TranscriptCandidates(
+                    listOf(ResultCandidate(raw = outputTranscription, cleaned = null, language = config.language)),
+                    source = GeminiEvent.TranscriptSource.ECHO,
                 ),
             )
         }

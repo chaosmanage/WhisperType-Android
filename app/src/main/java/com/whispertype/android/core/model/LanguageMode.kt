@@ -11,39 +11,44 @@ enum class LanguageMode {
     ;
 
     /**
-     * Optional setup instruction biasing the Live model's transcription.
-     * NOTE: the Live API rejects a languageCode field on inputAudioTranscription
-     * ("unknown name language code") and the voice model cannot post-process
-     * text, so language and polishing bias is done via the systemInstruction.
+     * The systemInstruction that makes the Live model's *spoken reply* be the
+     * dictation. The dictation source is the model's echo
+     * (`outputTranscription`): native audio Live models only output AUDIO, so the
+     * instruction tells the model to repeat the user's speech back verbatim (the
+     * echo) and apply the selected polish level; for Hinglish it additionally
+     * forces Roman/Latin script. `inputTranscription` (raw ASR) cannot be
+     * influenced by the instruction and is used as the fast fallback.
+     * Verified on-device via host probes (0.4.1).
      */
-    fun liveInstruction(style: TranscriptionStyle = TranscriptionStyle.MEDIUM): String? {
+    fun liveInstruction(style: TranscriptionStyle = TranscriptionStyle.MEDIUM): String {
         val styleText = when (style) {
             TranscriptionStyle.NONE ->
-                "Transcribe the user's speech verbatim, exactly as spoken. Do not add " +
-                    "or change punctuation, capitalization, grammar, or wording. Output " +
-                    "only the words spoken."
+                "Repeat the user's speech back exactly as spoken, including filler " +
+                    "words like um, uh, ah. Do not add punctuation, capitalization, or " +
+                    "grammar."
             TranscriptionStyle.LOW ->
-                "Transcribe the user's speech with light cleanup: add basic sentence " +
-                    "punctuation and capitalization, but keep the exact words and natural " +
-                    "spoken phrasing."
+                "Repeat the user's speech back and add basic sentence punctuation and " +
+                    "capitalization. Keep the exact words and the natural spoken phrasing."
             TranscriptionStyle.MEDIUM ->
-                "Transcribe the user's speech into clean written text: proper punctuation, " +
-                    "capitalization, and standard grammar, while keeping the user's words " +
-                    "and meaning."
+                "Repeat the user's speech back and lightly polish it: add proper " +
+                    "punctuation and capitalization, remove frequent fillers (um, uh, ah), " +
+                    "and fix obvious grammar while keeping the user's words and meaning."
             TranscriptionStyle.HIGH ->
-                "Transcribe the user's speech into polished, well-structured written text: " +
-                    "correct grammar, proper punctuation and capitalization, clear sentence " +
-                    "structure, and logical organization, with paragraphs and lists where " +
-                    "appropriate. Keep the user's meaning and words wherever possible."
+                "Repeat the user's speech back and fully polish it: remove all filler " +
+                    "words (um, uh, ah, you know, like, i mean), correct grammar, add proper " +
+                    "punctuation and capitalization, and structure it into clear, " +
+                    "well-formed sentences. Keep the user's meaning and as many of their " +
+                    "words as possible."
         }
+        val base =
+            "Output ONLY the repeated text and nothing else - no greetings, no " +
+                "acknowledgments, no questions, no commentary."
         return when (this) {
-            ENGLISH -> if (style == TranscriptionStyle.NONE) null else styleText
+            ENGLISH -> "$styleText $base"
             HINGLISH -> {
                 val hinglishRule =
-                    "Write Hindi words in Latin script (romanized Hindi / Hinglish), " +
-                        "never in Devanagari script. Keep English words and phrases " +
-                        "exactly as spoken."
-                "$styleText $hinglishRule Output only the transcription, nothing else."
+                    "Write Hindi words in Roman (Latin) script only, never in Devanagari."
+                "$styleText $hinglishRule $base"
             }
         }
     }

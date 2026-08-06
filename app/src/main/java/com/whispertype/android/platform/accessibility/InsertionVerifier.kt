@@ -18,6 +18,13 @@ object InsertionVerifier {
         committed: String,
     ): Boolean? {
         if (before == null || after == null) return null
-        return after != before && after.contains(committed)
+        if (after == before) return false
+        // A full `contains` may fail when the IME truncates the surrounding-text
+        // read for long commits; accept a confirmed change when the read ends with
+        // the committed text's tail (robust to truncation and trailing whitespace).
+        return after.contains(committed) ||
+            after.trimEnd().endsWith(committed.trimEnd().takeLast(TAIL_MATCH_CHARS))
     }
+
+    private const val TAIL_MATCH_CHARS = 64
 }

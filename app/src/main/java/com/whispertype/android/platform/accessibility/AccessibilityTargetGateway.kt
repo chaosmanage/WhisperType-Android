@@ -125,7 +125,9 @@ class AccessibilityTargetGateway(
 
     private companion object {
         const val NEW_CURSOR_POSITION = 1
-        const val SURROUNDING_BEFORE = 200
-        const val SURROUNDING_AFTER = 400
+        // Large windows so long dictation text is fully readable after commit;
+        // small IME caps are handled by the tail-match in InsertionVerifier.
+        const val SURROUNDING_BEFORE = 5000
+        const val SURROUNDING_AFTER = 500
     }
 }

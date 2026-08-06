@@ -398,7 +398,11 @@ class DictationCoordinatorTest {
     @Test
     fun `transcript arriving just before the deadline is settled and inserted`() = runTest {
         val host = FakeHost()
-        val coordinator = coordinator(this, host)
+        val coordinator = coordinator(
+            this,
+            host,
+            DictationCoordinator.Config(hardDeadlineMs = 3_000, echoFallbackWaitMs = 4_000),
+        )
         coordinator.start()
         advanceUntilIdle()
         coordinator.stop()
@@ -418,7 +422,11 @@ class DictationCoordinatorTest {
     @Test
     fun `deadline cannot be extended by repeated transcript revisions`() = runTest {
         val host = FakeHost()
-        val coordinator = coordinator(this, host)
+        val coordinator = coordinator(
+            this,
+            host,
+            DictationCoordinator.Config(hardDeadlineMs = 3_000, echoFallbackWaitMs = 4_000),
+        )
         coordinator.start()
         advanceUntilIdle()
         coordinator.stop()
@@ -464,7 +472,11 @@ class DictationCoordinatorTest {
     @Test
     fun `clearly provisional single-character transcript at the hard deadline fails`() = runTest {
         val host = FakeHost()
-        val coordinator = coordinator(this, host)
+        val coordinator = coordinator(
+            this,
+            host,
+            DictationCoordinator.Config(hardDeadlineMs = 3_000, echoFallbackWaitMs = 4_000),
+        )
         coordinator.start()
         advanceUntilIdle()
         coordinator.stop()
@@ -719,5 +731,80 @@ class DictationCoordinatorTest {
         coordinator.dismiss()
         advanceUntilIdle()
         assertEquals(listOf<String?>(null), host.finishedTranscripts)
+    }
+
+    // ------------------------------------------------------------------
+    // 0.4.1: echo (outputTranscription) is the primary dictation source
+    // ------------------------------------------------------------------
+
+    private suspend fun sendEcho(host: FakeHost, text: String) {
+        host.session.events.send(
+            GeminiEvent.TranscriptCandidates(
+                listOf(com.whispertype.android.core.model.ResultCandidate(raw = text, cleaned = null, language = LanguageMode.ENGLISH)),
+                source = GeminiEvent.TranscriptSource.ECHO,
+            ),
+        )
+    }
+
+    @Test
+    fun `echo transcript is preferred over raw input at settlement`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "um like we should so meet") // raw input arrives first
+        sendEcho(host, "We should meet on Thursday.") // styled echo arrives
+        advanceTimeBy(500)
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("We should meet on Thursday.", host.insertions[0].second)
+        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `echo absent falls back to raw input after the echo-fallback window`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host) // echoFallbackWaitMs default 2000
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "the birch canoe slid")
+        advanceTimeBy(1_000)
+        assertTrue(host.insertions.isEmpty(), "must wait for the echo before the fallback window")
+
+        advanceTimeBy(1_500) // crosses the 2s fallback
+        assertEquals(1, host.insertions.size)
+        assertEquals("the birch canoe slid", host.insertions[0].second)
+        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `an arriving echo prevents the fast raw fallback from settling`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "raw text first") // raw arrives immediately
+        advanceTimeBy(500)
+        sendEcho(host, "Polished echo text.")
+        advanceTimeBy(2_500) // well past the echo-fallback window
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("Polished echo text.", host.insertions[0].second, "an echo present must win over the raw fallback")
+        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        advanceUntilIdle()
     }
 }

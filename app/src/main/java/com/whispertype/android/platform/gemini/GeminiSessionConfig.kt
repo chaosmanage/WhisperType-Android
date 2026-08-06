@@ -21,9 +21,9 @@ class GeminiSessionConfig(
     val inputAudioTranscription: Boolean = true,
     /** When true, the setup enables `outputAudioTranscription` so the server
      *  transcribes the model's audio reply (`serverContent.outputTranscription`).
-     *  Release B default is false: the model's own output is never a dictation
-     *  candidate, so requesting its transcription is unnecessary overhead. */
-    val outputAudioTranscription: Boolean = false,
+     *  0.4.1: this is the primary dictation source — the model is instructed to
+     *  echo the user's speech (styled/polished/Latin), and the echo is read here. */
+    val outputAudioTranscription: Boolean = true,
     /** When true (Release B default), the setup disables automatic activity
      *  detection (`realtimeInputConfig.automaticActivityDetection.disabled`) so
      *  the client must delimit push-to-talk utterances with explicit
