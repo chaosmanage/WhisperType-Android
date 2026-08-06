@@ -43,12 +43,20 @@ enum class LanguageMode {
         val base =
             "Output ONLY the repeated text and nothing else - no greetings, no " +
                 "acknowledgments, no questions, no commentary."
+        // 0.4.2 reliability: long dictations must never be condensed. The model is
+        // prone to summarizing or truncating long input, so this clause is explicit
+        // and repeated to maximize verbatim coverage.
+        val verbatim =
+            "CRITICAL: repeat the ENTIRE speech verbatim, every single word, from the " +
+                "first to the last. NEVER summarize, NEVER shorten, NEVER omit the end of " +
+                "what the user said, NEVER stop early, even when the user speaks for a " +
+                "very long time. Your output must contain every word the user said."
         return when (this) {
-            ENGLISH -> "$styleText $base"
+            ENGLISH -> "$styleText $base $verbatim"
             HINGLISH -> {
                 val hinglishRule =
                     "Write Hindi words in Roman (Latin) script only, never in Devanagari."
-                "$styleText $hinglishRule $base"
+                "$styleText $hinglishRule $base $verbatim"
             }
         }
     }

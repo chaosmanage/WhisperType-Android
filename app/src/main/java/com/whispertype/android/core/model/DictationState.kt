@@ -29,6 +29,11 @@ sealed interface DictationState {
 
     data class Finalizing(val sessionId: SessionId) : DictationState
 
+    /** 0.4.2: the audio-recovery failsafe is re-transcribing the session
+     *  recording because neither the echo nor the raw ASR plausibly covered the
+     *  recorded speech. The capsule shows "Recovering full text…". */
+    data class Recovering(val sessionId: SessionId) : DictationState
+
     data class Inserting(val sessionId: SessionId) : DictationState
 
     data class Success(val sessionId: SessionId) : DictationState

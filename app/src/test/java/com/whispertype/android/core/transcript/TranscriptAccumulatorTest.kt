@@ -116,4 +116,75 @@ class TranscriptAccumulatorTest {
         assertEquals("again", accumulator.accept("again"))
         assertEquals(1, accumulator.revisionCount)
     }
+
+    // ------------------------------------------------------------------
+    // 0.4.2: anti-shrink and delta-append hardening
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `strictly shorter non-prefix revision never shrinks the current value`() {
+        val accumulator = TranscriptAccumulator()
+        accumulator.accept("I want to order a pizza for delivery")
+        assertEquals("I want to order a pizza for delivery", accumulator.accept("order pizza"))
+        assertEquals("I want to order a pizza for delivery", accumulator.current)
+        assertEquals(1, accumulator.revisionCount)
+    }
+
+    @Test
+    fun `same length correction still replaces the prior value`() {
+        val accumulator = TranscriptAccumulator()
+        accumulator.accept("schedule the meeting")
+        assertEquals("schedule the demo", accumulator.accept("schedule the demo"))
+        assertEquals("schedule the demo", accumulator.current)
+        assertEquals(2, accumulator.revisionCount)
+    }
+
+    @Test
+    fun `appendDeltas accumulates streamed word deltas into the full echo`() {
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        accumulator.accept("This is")
+        accumulator.accept(" a test")
+        accumulator.accept(" of the")
+        accumulator.accept(" system.")
+        assertEquals("This is a test of the system.", accumulator.current)
+        assertEquals(4, accumulator.revisionCount)
+    }
+
+    @Test
+    fun `appendDeltas still ignores reverse prefix partial messages`() {
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        accumulator.accept("schedule the meeting")
+        assertEquals("schedule the meeting", accumulator.accept("schedule the"))
+        assertEquals("schedule the meeting", accumulator.current)
+        assertEquals(1, accumulator.revisionCount)
+    }
+
+    @Test
+    fun `appendDeltas does not append an overlapping revision as new content`() {
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        accumulator.accept("I want pizza")
+        // A revision whose leading word overlaps the current tail is a correction,
+        // not a delta continuation.
+        assertEquals("I want pasta", accumulator.accept("I want pasta"))
+        assertEquals("I want pasta", accumulator.current)
+    }
+
+    @Test
+    fun `appendDeltas keeps the longest value when a cumulative extension arrives after deltas`() {
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        accumulator.accept("hello")
+        accumulator.accept(" world")
+        assertEquals("hello world", accumulator.current)
+        assertEquals("hello world there", accumulator.accept("hello world there"))
+        assertEquals("hello world there", accumulator.current)
+    }
+
+    @Test
+    fun `merge only accumulator replaces delta style messages as before`() {
+        // Without appendDeltas the old replace semantics stay for the ASR source.
+        val accumulator = TranscriptAccumulator()
+        accumulator.accept("hello")
+        assertEquals("world", accumulator.accept("world"))
+        assertEquals("world", accumulator.current)
+    }
 }

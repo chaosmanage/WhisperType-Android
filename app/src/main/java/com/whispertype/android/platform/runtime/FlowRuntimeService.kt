@@ -46,12 +46,16 @@ import com.whispertype.android.data.secrets.KeystoreKeyProvider
 import com.whispertype.android.data.secrets.KeyProvider
 import com.whispertype.android.data.settings.SettingsRepository
 import com.whispertype.android.platform.gemini.GeminiLiveException
+import com.whispertype.android.platform.gemini.GeminiLiveWire
 import com.whispertype.android.platform.gemini.GeminiSessionConfig
 import com.whispertype.android.platform.gemini.GeminiSessionFactory
 import com.whispertype.android.platform.gemini.WarmLiveSessionManager
 import com.whispertype.android.platform.ipc.RuntimeIpc
 import com.whispertype.android.platform.overlay.OverlayOwners
 import com.whispertype.android.platform.overlay.PersistentOverlayHost
+import java.io.File
+import java.io.FileOutputStream
+import java.util.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -61,7 +65,18 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import kotlinx.serialization.json.jsonArray
 
 /**
  * The main-process foreground service that owns the overlay runtime: overlay
@@ -385,6 +400,87 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         return sendInsert(sessionId, corrected, reply)
     }
 
+    /**
+     * 0.4.2 audio-recovery failsafe: re-transcribes the session recording via a
+     * non-live generateContent call (verified verbatim for long audio) so the
+     * user's words are recovered even when BOTH the live echo and the raw ASR
+     * failed. The temp WAV is app-private and deleted in all paths; never logs
+     * audio or transcript content.
+     */
+    override suspend fun recoverTranscript(sessionId: SessionId, wav: ByteArray): String? =
+        withContext(Dispatchers.IO) {
+            val key = keyProvider.provideKey() ?: return@withContext null
+            val temp = File(cacheDir, "wt_recovery_${sessionId.value}.wav")
+            try {
+                FileOutputStream(temp).use { it.write(wav) }
+                val base64 = Base64.getEncoder().encodeToString(wav)
+                val body = buildJsonObject {
+                    put(
+                        "contents",
+                        buildJsonArray {
+                            add(
+                                buildJsonObject {
+                                    put(
+                                        "parts",
+                                        buildJsonArray {
+                                            add(
+                                                buildJsonObject {
+                                                    put(
+                                                        "inlineData",
+                                                        buildJsonObject {
+                                                            put("mimeType", "audio/wav")
+                                                            put("data", base64)
+                                                        },
+                                                    )
+                                                },
+                                            )
+                                        },
+                                    )
+                                },
+                            )
+                        },
+                    )
+                    put(
+                        "systemInstruction",
+                        buildJsonObject {
+                            put(
+                                "parts",
+                                buildJsonArray {
+                                    add(buildJsonObject { put("text", cachedSpeechMode.liveInstruction(cachedPolishLevel)) })
+                                },
+                            )
+                        },
+                    )
+                }
+                val request = Request.Builder()
+                    .url("$RECOVERY_BASE/models/$RECOVERY_MODEL:generateContent?key=$key")
+                    .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
+                    .build()
+                sharedOkHttpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@withContext null
+                    val root = GeminiLiveWire.json.parseToJsonElement(response.body.string())
+                        .jsonObject
+                    val parts = root["candidates"]
+                        ?.jsonArray
+                        ?.firstOrNull()
+                        ?.jsonObject
+                        ?.get("content")
+                        ?.jsonObject
+                        ?.get("parts")
+                        ?.jsonArray
+                        ?: return@withContext null
+                    parts.mapNotNull { it.jsonObject["text"]?.jsonPrimitive?.contentOrNull }
+                        .joinToString("")
+                        .takeIf { it.isNotBlank() }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Audio recovery failed: ${e.message}")
+                null
+            } finally {
+                temp.delete()
+            }
+        }
+
     override fun onSessionFinished(state: DictationState, metrics: MutableSessionMetrics, transcript: String?) {
         // Aggregate per-session outcome + stage latencies. Never transcript or audio.
         Log.i(TAG, "SESSION DONE outcome=${state::class.simpleName} ${metrics.summary()}")
@@ -495,6 +591,14 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         const val TAG = "FlowRuntimeService"
         const val NOTIFICATION_ID = 1001
         const val NOTIFICATION_CHANNEL_ID = "whispertype_runtime"
+
+        /** REST endpoint + model for the 0.4.2 audio-recovery failsafe
+         *  (verified verbatim transcription of long audio, unlike the live
+         *  echo which condenses long turns). */
+        const val RECOVERY_BASE = "https://generativelanguage.googleapis.com/v1beta"
+        const val RECOVERY_MODEL = "gemini-3.6-flash"
+
+        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
         /** Process-local service-liveness flag for the app UI (set in onCreate/onDestroy). */
         @Volatile

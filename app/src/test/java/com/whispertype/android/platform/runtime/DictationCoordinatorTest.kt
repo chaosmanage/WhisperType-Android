@@ -13,6 +13,7 @@ import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.core.model.MutableSessionMetrics
 import com.whispertype.android.core.model.SendResult
 import com.whispertype.android.core.model.SessionId
+import com.whispertype.android.core.model.SettlePath
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -118,9 +119,11 @@ class DictationCoordinatorTest {
         val capture = FakeCapture()
         val finished = mutableListOf<Pair<DictationState, MutableSessionMetrics>>()
         val finishedTranscripts = mutableListOf<String?>()
+        val recoverCalls = mutableListOf<ByteArray>()
         var resolveResult: SessionResolve = SessionResolve.Ok(SessionResolution(session, LanguageMode.ENGLISH))
         var captureStart: CaptureStart = CaptureStart.Started(capture)
         var insertionAccepted = true
+        var recoverResult: String? = null
 
         override fun publish(state: DictationState) {
             published += state
@@ -133,6 +136,11 @@ class DictationCoordinatorTest {
         override fun sendInsertion(sessionId: SessionId, text: String): Boolean {
             insertions += sessionId to text
             return insertionAccepted
+        }
+
+        override suspend fun recoverTranscript(sessionId: SessionId, wav: ByteArray): String? {
+            recoverCalls += wav
+            return recoverResult
         }
 
         override fun onSessionFinished(state: DictationState, metrics: MutableSessionMetrics, transcript: String?) {
@@ -756,12 +764,12 @@ class DictationCoordinatorTest {
         coordinator.stop()
         runCurrent()
 
-        sendTranscript(host, "um like we should so meet") // raw input arrives first
-        sendEcho(host, "We should meet on Thursday.") // styled echo arrives
-        advanceTimeBy(500)
+        sendTranscript(host, "um we should like meet") // raw input arrives first
+        sendEcho(host, "We should meet.") // styled echo covers the raw content
+        advanceTimeBy(700) // past the 600ms settle debounce
 
         assertEquals(1, host.insertions.size)
-        assertEquals("We should meet on Thursday.", host.insertions[0].second)
+        assertEquals("We should meet.", host.insertions[0].second)
         coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
         advanceUntilIdle()
     }
@@ -804,6 +812,177 @@ class DictationCoordinatorTest {
 
         assertEquals(1, host.insertions.size)
         assertEquals("Polished echo text.", host.insertions[0].second, "an echo present must win over the raw fallback")
+        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    // ------------------------------------------------------------------
+    // 0.4.2 reliability: completeness gate, delta echo, audio recovery
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `partial echo salvages the complete raw instead of losing words`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        runCurrent()
+
+        sendEcho(host, "We should") // echo truncated to the first words
+        sendTranscript(host, "We should meet on Thursday") // complete raw ASR
+        advanceUntilIdle()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("We should meet on Thursday", host.insertions[0].second)
+        assertEquals(SettlePath.ECHO_PARTIAL_RAW, coordinator.activeMetrics()!!.settlePath)
+        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `one word summary echo with a complete raw never loses the words`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        runCurrent()
+
+        sendEcho(host, "Meeting") // model condensed the whole turn to one word
+        sendTranscript(host, "The team meeting is scheduled for nine in the morning")
+        advanceUntilIdle()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("The team meeting is scheduled for nine in the morning", host.insertions[0].second)
+        assertEquals(SettlePath.ECHO_PARTIAL_RAW, coordinator.activeMetrics()!!.settlePath)
+        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `delta-style echo chunks are accumulated into the full echo`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        runCurrent()
+
+        // The server streams outputTranscription as word deltas (0.4.2 probe).
+        sendEcho(host, "This is")
+        advanceTimeBy(200)
+        sendEcho(host, " a test")
+        advanceTimeBy(200)
+        sendEcho(host, " of the")
+        advanceTimeBy(200)
+        sendEcho(host, " system.")
+        advanceUntilIdle()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("This is a test of the system.", host.insertions[0].second)
+        // No raw arrived in this session, so the reconstructed echo is the only
+        // source (ECHO_ONLY); the completeness gate has no baseline to compare.
+        assertEquals(SettlePath.ECHO_ONLY, coordinator.activeMetrics()!!.settlePath)
+        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `settle during a long echo gap still salvages the raw`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        runCurrent()
+
+        // Echo deltas stop for longer than the debounce; settlement happens with
+        // only the first delta, so the complete raw must be salvaged.
+        sendEcho(host, "The quick brown")
+        sendTranscript(host, "The quick brown fox jumps over the lazy dog")
+        advanceTimeBy(700)
+        assertEquals(1, host.insertions.size)
+        assertEquals("The quick brown fox jumps over the lazy dog", host.insertions[0].second)
+        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    private suspend fun streamChunks(host: FakeHost, count: Int) {
+        for (i in 0 until count) host.capture.chunksChannel.send(chunk(i.toLong()))
+    }
+
+    @Test
+    fun `both sources truncated triggers the audio recovery failsafe`() = runTest {
+        val host = FakeHost()
+        host.recoverResult = "This is the full recovered dictation text"
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        // ~4s of audio: expected ~8.8 words, so a 1-word result is clearly partial.
+        streamChunks(host, 200)
+        advanceUntilIdle()
+        coordinator.stop()
+        runCurrent()
+
+        sendEcho(host, "Test") // the only thing that came back
+        advanceUntilIdle()
+
+        assertEquals(1, host.recoverCalls.size)
+        assertEquals(1, host.insertions.size)
+        assertEquals("This is the full recovered dictation text", host.insertions[0].second)
+        assertTrue(states(host).any { it is DictationState.Recovering })
+        assertTrue(coordinator.activeMetrics()!!.usedAudioRecovery)
+        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `recovery failure keeps the best available text`() = runTest {
+        val host = FakeHost()
+        host.recoverResult = null // recovery unavailable
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        streamChunks(host, 200)
+        advanceUntilIdle()
+        coordinator.stop()
+        runCurrent()
+
+        sendEcho(host, "Test")
+        advanceUntilIdle()
+
+        assertEquals(1, host.recoverCalls.size)
+        assertEquals(1, host.insertions.size)
+        assertEquals("Test", host.insertions[0].second, "the best available text is never discarded")
+        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `a complete echo does not trigger recovery`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        streamChunks(host, 200) // ~4s
+        advanceUntilIdle()
+        coordinator.stop()
+        runCurrent()
+
+        sendEcho(host, "This is a reasonably complete sentence for testing")
+        advanceUntilIdle()
+
+        assertTrue(host.recoverCalls.isEmpty())
+        assertEquals(1, host.insertions.size)
+        assertEquals("This is a reasonably complete sentence for testing", host.insertions[0].second)
         coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
         advanceUntilIdle()
     }

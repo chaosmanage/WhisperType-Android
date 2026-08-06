@@ -1,12 +1,12 @@
 package com.whispertype.android.core.transcript
 
 /**
- * Session-local accumulator for the current input transcript (remediation plan
- * Release E1/E2).
+ * Session-local accumulator for a streamed transcript (remediation plan
+ * Release E1/E2, hardened in 0.4.2 for reliability).
  *
- * Tracks ONE current cumulative revision of the input transcription streamed
- * by the Gemini Live server, which may deliver independent deltas, cumulative
- * revisions, corrected revisions, or a mixture. Merge priority:
+ * The Gemini Live server may deliver independent deltas, cumulative revisions,
+ * corrected revisions, or a mixture, so this tracks ONE current cumulative
+ * revision with content-preserving merge rules (longer content always wins):
  *
  *  1. Empty/blank message: ignored (no change, no revision bump).
  *  2. Exact duplicate of [current]: ignored.
@@ -15,16 +15,23 @@ package com.whispertype.android.core.transcript
  *     merged, so the longer cumulative value wins.
  *  5. Reverse prefix (message is a shorter/partial revision of [current]):
  *     ignored; the longer cumulative value wins.
- *  6. Otherwise (correction/replacement of a prior provisional value):
- *     replaced.
+ *  6. [appendDeltas] only — a delta-style message whose leading content word
+ *     does not overlap the current tail (observed for `outputTranscription`,
+ *     where the server streams the model's spoken reply as word deltas):
+ *     appended on a word boundary, so the full reply is reconstructed instead
+ *     of each delta replacing the last one.
+ *  7. A strictly shorter revision (fewer content words, whatever the wording):
+ *     ignored — a mid-stream condense can never permanently shrink the text
+ *     that later gets settled.
+ *  8. Otherwise (same-or-longer correction/replacement): replaced.
  *
  * Every accepted change bumps [revisionCount].
- *
- * The extension-boundary heuristic is provisional and will be calibrated from
- * measured server message semantics; per the remediation plan only
- * prefix/overlap-length diagnostics are logged, never transcript content.
  */
-class TranscriptAccumulator {
+class TranscriptAccumulator(
+    /** When true, accepts delta-style streamed messages (see rule 6). Use for
+     *  the echo source; keep false for the ASR source where revisions replace. */
+    private val appendDeltas: Boolean = false,
+) {
     var current: String? = null
         private set
 
@@ -47,6 +54,12 @@ class TranscriptAccumulator {
             return current
         }
         if (existing.startsWith(message)) return current
+        if (appendDeltas && isAppendableDelta(existing, message)) {
+            current = join(existing, message)
+            revisionCount += 1
+            return current
+        }
+        if (contentWords(message).size < contentWords(existing).size) return current
         current = message
         revisionCount += 1
         return current
@@ -62,6 +75,26 @@ class TranscriptAccumulator {
     }
 
     /**
+     * True when [message] is a streamed delta: its leading content word does
+     * not overlap the tail of [existing], i.e. it continues the speech rather
+     * than revising it. [OVERLAP_TAIL] recent content words are consulted so a
+     * repeated connector word ("for the", "and") still reads as new content.
+     */
+    private fun isAppendableDelta(existing: String, message: String): Boolean {
+        val head = contentWords(message).firstOrNull() ?: return false
+        val tail = contentWords(existing).takeLast(OVERLAP_TAIL)
+        return head !in tail
+    }
+
+    /** Joins a delta onto [existing] on a word boundary. */
+    private fun join(existing: String, message: String): String {
+        val delta = message.trim()
+        return if (delta.isEmpty()) existing
+        else if (existing.endsWith(" ")) existing + delta
+        else "$existing $delta"
+    }
+
+    /**
      * True when [message] cumulatively extends [current] on a word boundary:
      * [message] starts with [current] and either the character directly after
      * [current] is whitespace or [current] itself already ends on a trailing
@@ -72,5 +105,13 @@ class TranscriptAccumulator {
         if (!message.startsWith(current)) return false
         if (message.length == current.length) return false
         return message[current.length].isWhitespace() || current.last().isWhitespace()
+    }
+
+    /** Lower-cased sequence of letter/digit runs in [text]. */
+    private fun contentWords(text: String): List<String> = TranscriptCompleteness.contentWords(text)
+
+    private companion object {
+        /** Recent content words of the current value consulted for delta overlap. */
+        const val OVERLAP_TAIL: Int = 4
     }
 }

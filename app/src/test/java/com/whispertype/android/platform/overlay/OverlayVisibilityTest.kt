@@ -104,6 +104,14 @@ class OverlayVisibilityTest {
     }
 
     @Test
+    fun `recovering maps to recovering panel`() {
+        assertEquals(
+            OverlayVisibility.Recovering,
+            visibilityOf(ui(DictationState.Recovering(session("s")))),
+        )
+    }
+
+    @Test
     fun `copy available maps to copy available panel`() {
         assertEquals(
             OverlayVisibility.CopyAvailable,

@@ -97,6 +97,11 @@ class PersistentOverlayHost(
     @Volatile
     private var wasEligible = false
 
+    /** startOwners() must run once per owner lifecycle — retries must not re-run it
+     *  (SavedStateRegistryController.performAttach throws otherwise). */
+    @Volatile
+    private var ownersStarted = false
+
     @Volatile
     private var dropTargetView: View? = null
 
@@ -118,8 +123,14 @@ class PersistentOverlayHost(
                 .collect { ui ->
                     val eligible = ui.eligibility.eligible
                     // A fresh eligibility cycle (ineligible -> eligible) re-shows a
-                    // dismissed bubble.
-                    if (eligible && !wasEligible) dismissed = false
+                    // dismissed bubble and re-attempts a failed overlay attach
+                    // (e.g. after the user grants Display-over-other-apps).
+                    if (eligible && !wasEligible) {
+                        dismissed = false
+                        // Re-attempt a failed overlay attach (e.g. after the user
+                        // grants Display-over-other-apps). No-op when attached.
+                        if (machine.status is OverlayHostStatus.AttachFailed) attach()
+                    }
                     wasEligible = eligible
                     val effective =
                         if (dismissed && ui.state is DictationState.Idle) OverlayUiState.Hidden
@@ -161,7 +172,10 @@ class PersistentOverlayHost(
                 }
             }
             container.addView(composeView)
-            owners.startOwners()
+            if (!ownersStarted) {
+                owners.startOwners()
+                ownersStarted = true
+            }
             wm.addView(container, buildLayoutParams(serviceContext, placement))
             view = container
             windowManager = wm
@@ -200,6 +214,7 @@ class PersistentOverlayHost(
             windowManager = null
         }
         owners.stopOwners()
+        ownersStarted = false
         _status.value = machine.status
     }
 

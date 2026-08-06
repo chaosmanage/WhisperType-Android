@@ -78,6 +78,8 @@ fun WhisperTypeOverlayContent(
             )
             OverlayVisibility.Finalizing ->
                 StatusCapsule(stringResource(R.string.dictation_finalizing))
+            OverlayVisibility.Recovering ->
+                StatusCapsule(stringResource(R.string.dictation_recovering))
             OverlayVisibility.Inserting ->
                 StatusCapsule(stringResource(R.string.dictation_inserting))
             OverlayVisibility.Success -> Unit

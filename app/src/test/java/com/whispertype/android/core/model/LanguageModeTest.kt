@@ -82,4 +82,16 @@ class LanguageModeTest {
             LanguageMode.HINGLISH.liveInstruction(),
         )
     }
+
+    @Test
+    fun `every style carries the 0_4_2 never summarize clause`() {
+        for (mode in LanguageMode.entries) {
+            for (style in TranscriptionStyle.entries) {
+                val instruction = mode.liveInstruction(style)
+                assertTrue(instruction.contains("NEVER summarize"), "$mode $style")
+                assertTrue(instruction.contains("every single word"), "$mode $style")
+                assertTrue(instruction.contains("NEVER omit the end"), "$mode $style")
+            }
+        }
+    }
 }
