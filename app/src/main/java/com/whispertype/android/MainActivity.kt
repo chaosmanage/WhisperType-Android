@@ -248,8 +248,33 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(8.dp))
                     HomeHeader()
                     Spacer(Modifier.height(24.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        ActionCard(
+                            icon = Icons.Filled.Settings,
+                            label = stringResource(R.string.home_open_settings),
+                            tint = Color(0xFF0E9B8A),
+                            onClick = { showSettings = true },
+                            modifier = Modifier.weight(1f),
+                        )
+                        ActionCard(
+                            icon = Icons.Filled.History,
+                            label = stringResource(R.string.home_open_history),
+                            tint = Color(0xFF3B82F6),
+                            onClick = { showHistory = true },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Spacer(Modifier.height(24.dp))
+                    StatsSection(
+                        historyEnabled = historyEnabled,
+                        entries = historyEntries,
+                    )
+                    Spacer(Modifier.height(24.dp))
                     Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(12.dp)) {
+                        Column(modifier = Modifier.padding(8.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -320,31 +345,6 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     Spacer(Modifier.height(24.dp))
-                    StatsSection(
-                        historyEnabled = historyEnabled,
-                        entries = historyEntries,
-                    )
-                    Spacer(Modifier.height(24.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        ActionCard(
-                            icon = Icons.Filled.Settings,
-                            label = stringResource(R.string.home_open_settings),
-                            tint = Color(0xFF0E9B8A),
-                            onClick = { showSettings = true },
-                            modifier = Modifier.weight(1f),
-                        )
-                        ActionCard(
-                            icon = Icons.Filled.History,
-                            label = stringResource(R.string.home_open_history),
-                            tint = Color(0xFF3B82F6),
-                            onClick = { showHistory = true },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    Spacer(Modifier.height(24.dp))
                     Text(
                         text = stringResource(
                             R.string.home_version,
@@ -410,14 +410,14 @@ class MainActivity : ComponentActivity() {
             },
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = label,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
@@ -428,7 +428,7 @@ class MainActivity : ComponentActivity() {
                                 else -> R.string.status_off
                             },
                         ),
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = if (on) {
                             MaterialTheme.colorScheme.primary
                         } else {
@@ -441,7 +441,7 @@ class MainActivity : ComponentActivity() {
                         Icons.Filled.ChevronRight,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(18.dp),
                     )
                 }
             }
