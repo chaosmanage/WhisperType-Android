@@ -49,6 +49,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -111,8 +112,10 @@ class MainActivity : ComponentActivity() {
             val darkMode by settingsRepository.darkMode.collectAsState(initial = false)
             WhisperTypeTheme(darkTheme = darkMode) {
                 // Re-evaluate the overlay gate on every resume so returning from
-                // the overlay settings screen immediately shows Home (0.4.2).
+                // the overlay settings screen immediately updates the checklist
+                // (0.4.2). Onboarding stays until the user explicitly continues.
                 var overlayGranted by remember { mutableStateOf(canDrawOverlays()) }
+                val onboardingDone by settingsRepository.onboardingCompleted.collectAsState(initial = false)
                 val lifecycleOwner = LocalLifecycleOwner.current
                 DisposableEffect(lifecycleOwner) {
                     val observer = LifecycleEventObserver { _, event ->
@@ -126,7 +129,8 @@ class MainActivity : ComponentActivity() {
                 val permissionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestMultiplePermissions(),
                 ) { /* result handled on the next ON_RESUME refresh */ }
-                if (overlayGranted) {
+                val scope = rememberCoroutineScope()
+                if (overlayGranted && onboardingDone) {
                     HomeScreen(
                         settings = settingsRepository,
                         keyProvider = keyProvider,
@@ -134,6 +138,7 @@ class MainActivity : ComponentActivity() {
                     )
                 } else {
                     OnboardingScreen(
+                        overlayGranted = overlayGranted,
                         hasMic = ::hasMicPermission,
                         hasNotifications = ::hasNotificationPermission,
                         hasAccessibility = ::isAccessibilityEnabled,
@@ -149,6 +154,9 @@ class MainActivity : ComponentActivity() {
                         },
                         onOpenAccessibility = {
                             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        },
+                        onContinue = {
+                            scope.launch { settingsRepository.setOnboardingCompleted(true) }
                         },
                     )
                 }

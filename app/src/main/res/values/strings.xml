@@ -56,6 +56,8 @@
     <string name="onboarding_grant">Grant</string>
     <string name="onboarding_open">Open</string>
     <string name="onboarding_done">Done</string>
+    <string name="onboarding_get_started">Get started</string>
+    <string name="onboarding_overlay_pending_hint">Grant the overlay permission first — it lets the bubble appear above your keyboard.</string>
     <string name="onboarding_footer">Everything is stored on your device and encrypted. Audio and transcripts are never logged.</string>
     <string name="runtime_started_toast" tools:ignore="UnusedResources">WhisperType runtime started</string>
 

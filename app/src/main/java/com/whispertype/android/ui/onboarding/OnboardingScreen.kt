@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -52,6 +53,7 @@ import com.whispertype.android.R
  */
 @Composable
 fun OnboardingScreen(
+    overlayGranted: Boolean,
     hasMic: () -> Boolean,
     hasNotifications: () -> Boolean,
     hasAccessibility: () -> Boolean,
@@ -59,6 +61,7 @@ fun OnboardingScreen(
     onRequestOverlay: () -> Unit,
     onRequestMicNotifications: () -> Unit,
     onOpenAccessibility: () -> Unit,
+    onContinue: () -> Unit,
 ) {
     var refresh by remember { mutableStateOf(0) }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -137,7 +140,7 @@ fun OnboardingScreen(
                     PermissionRow(
                         title = stringResource(R.string.onboarding_overlay),
                         description = stringResource(R.string.onboarding_overlay_desc),
-                        granted = false,
+                        granted = overlayGranted,
                         actionLabel = stringResource(R.string.onboarding_grant),
                         onAction = onRequestOverlay,
                     )
@@ -171,7 +174,23 @@ fun OnboardingScreen(
                     )
                 }
             }
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(20.dp))
+            Button(
+                onClick = onContinue,
+                enabled = overlayGranted,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.onboarding_get_started))
+            }
+            if (!overlayGranted) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.onboarding_overlay_pending_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(16.dp))
             Text(
                 text = stringResource(R.string.onboarding_footer),
                 style = MaterialTheme.typography.bodySmall,
