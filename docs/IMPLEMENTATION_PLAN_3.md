@@ -5,6 +5,21 @@
 **Date:** 2026-08-06
 **Status:** Approved plan; execution happens on `feature` in modular, sub-agent-driven waves.
 
+> **0.4.1 follow-up (in progress, same `feature` branch).** On-device testing of
+> 0.4.0 surfaced three fixes, one of which changes the transcription engine:
+> - **Echo architecture (replaces the client-side/instruction-on-ASR approach).**
+>   Host probes against `gemini-3.1-flash-live-preview` proved that
+>   `inputTranscription` (ASR) ignores the `systemInstruction`, while the model's
+>   spoken reply (`outputTranscription`) IS instruction-controlled — so the engine
+>   now instructs a verbatim, per-polish-level, Hinglish-Latin **echo** and reads
+>   `outputTranscription` as the primary source, with `inputTranscription` as the
+>   2 s fast fallback. See `docs/GEMINI_LIVE_TRANSCRIPTION.md` §9 and
+>   `docs/GEMINI_LIVE_WIRE_REFERENCE.md` §2.1/§3/§7.3 for the verified mechanics.
+> - **Bubble simplified** to the standard one-window `TOP|START` + pixel drag with
+>   a drag-to-remove X (the §5 placement framework was over-engineered).
+> - **Long-dictation insertion** verification window enlarged + truncation-robust
+>   tail match (fixes the "could not confirm inserted / Copy" error).
+
 ---
 
 ## 1. Purpose

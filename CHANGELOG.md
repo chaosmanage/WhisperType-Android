@@ -4,6 +4,15 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-08-06 (in development, feature branch)
+
+Follow-up to 0.4.0 from on-device testing + host probes. See `docs/GEMINI_LIVE_TRANSCRIPTION.md` §9.
+
+- **Echo transcription engine** — the dictation source is now the model's instructed spoken reply (`outputTranscription`): the `systemInstruction` tells the model to repeat the user's speech back verbatim with the selected polish level (and, for Hinglish, in Roman/Latin script). Host probes proved `outputTranscription` works even with a `systemInstruction`, controls Latin script and polish, and streams in ~0.6 s (sentence) to ~8 s (100 words). `inputTranscription` (raw ASR) is the 2 s fast fallback; settlement prefers the echo (always waits for it, 20 s cap).
+- **Bubble simplified** — one `TYPE_APPLICATION_OVERLAY` window, always `TOP|START` with an absolute pixel position and real-measured-size clamp; drag shows an X drop-target that hides the bubble until the next eligible field. Removed the gravity-switching placement logic that caused the jump-to-corner bug.
+- **Long-dictation insertion fix** — surrounding-text verification window enlarged (5000/500) and a truncation-robust tail match, fixing "Could not confirm the text was inserted / Use Copy" on long dictations.
+- **Docs** — `GEMINI_LIVE_TRANSCRIPTION.md` §9 and `GEMINI_LIVE_WIRE_REFERENCE.md` §2.1/§3/§7.3 record the verified echo mechanics.
+
 ## [0.4.0] - 2026-08-06 (in development, feature branch)
 
 "Experience & Reach" — see `docs/IMPLEMENTATION_PLAN_3.md`.

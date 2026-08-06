@@ -1,22 +1,31 @@
 # Gemini Live Voice Transcription Engine
 
 This document describes the **Gemini Live dictation engine** as it exists at
-`0.3.1`: how it was built, what is sent and read on the wire, the exact prompt,
+`0.4.1`: how it was built, what is sent and read on the wire, the exact prompt,
 how the modules connect, the session/settlement state machines, and the
 failsafes. It is the authoritative reference for the current voice-to-text
-pipeline; companion docs are `docs/ON_DEVICE_TEST_PROTOCOL.md` (how to verify on
-a phone) and `docs/TRANSCRIPTION_REMEDIATION_PLAN.md` (the original plan this
-was built from).
+pipeline; the exhaustive wire minutia is in `docs/GEMINI_LIVE_WIRE_REFERENCE.md`.
 
-> **0.4.0 updates** — for the exhaustive wire minutia of the 0.4.0 wire (setup
-> fields, realtime activity boundaries, parse rules), see
-> `docs/GEMINI_LIVE_WIRE_REFERENCE.md`. In brief: **Output polish** maps
-> None/Low/Medium/High (default Medium) to a `systemInstruction` sent in setup —
-> higher levels ask for cleaner filler/disfluency handling; None sends no polish
-> instruction. **Auto-stop** adds a silence threshold plus a hard session cap,
-> both governed by the Auto-stop timeout setting (15/30/60/120/300 s, default 60).
-> The per-session `SESSION DONE` line keeps the shape documented in §11 with the
-> optional `reject=<rule>` / `lenient=true` fields.
+> **0.4.0 updates** — see `docs/GEMINI_LIVE_WIRE_REFERENCE.md` for the wire
+> minutia. **Output polish** maps None/Low/Medium/High (default Medium) to a
+> `systemInstruction`; **auto-stop** adds a silence threshold plus a hard session
+> cap (15/30/60/120/300 s, default 60); `SESSION DONE` keeps the documented shape
+> with optional `reject=<rule>` / `lenient=true`.
+
+> **0.4.1 — the echo discovery (verified by host probes against
+> `gemini-3.1-flash-live-preview`):** `inputTranscription` is pure ASR and is
+> **not** influenced by the `systemInstruction`. The model's *spoken reply*
+> (`outputTranscription`) IS controlled by the instruction, so the engine now
+> instructs the model to **repeat the user's speech back verbatim** (a styled
+> echo: per-level polish, and Hinglish forced to Roman/Latin script) and reads
+> `outputTranscription` as the **primary dictation source**. `inputTranscription`
+> is the fast raw fallback. Verified facts: `outputTranscription` works *with* a
+> `systemInstruction` (the old "suppression" finding was model-version-specific);
+> the echo latency is ~0.6 s (sentence), ~3 s (30 words), ~8 s (100 words);
+> Devanagari text echoes back in Latin; HIGH polish removes um/uh/like and adds
+> punctuation. Native audio Live models are **AUDIO-output only** (TEXT modality
+> is not available), and `AudioTranscriptionConfig` has **no fields** (no
+> `languageCode` exists). See §9.
 
 ---
 
@@ -24,16 +33,17 @@ was built from).
 
 WhisperType captures 16 kHz mono PCM16 from the microphone, streams it over one
 WebSocket to Google's **Gemini Live** API (`BidiGenerateContent`), and reads the
-server's transcription of the **user's speech** (`serverContent.inputTranscription`).
-The app is **push-to-talk**: it manually delimits each utterance with
-`realtimeInput.activityStart` / `realtimeInput.activityEnd` (automatic VAD is
-disabled). The only dictation source is `inputTranscription`; the model's own
-spoken output (`outputTranscription`) and `modelTurn` text are parsed for
-diagnostics but **never** used as dictation.
+**echo** — the model's instructed spoken reply (`serverContent.outputTranscription`)
+— as the dictation. The app is **push-to-talk**: it manually delimits each
+utterance with `realtimeInput.activityStart` / `realtimeInput.activityEnd`
+(automatic VAD is disabled). The `systemInstruction` tells the model to repeat
+the user's speech verbatim with the selected polish level (and, for Hinglish, in
+Roman/Latin script). `inputTranscription` (raw ASR) is the fast fallback when no
+echo arrives; `modelTurn` text is never used (native audio models emit none).
 
-Device-verified behavior (Samsung S25, 0.3.1): `inputTranscription` arrives in
-essentially every session; short openers, long English sentences, and Hinglish
-(inserted in **Latin script**) all work.
+Device-verified behavior (Samsung S25): `inputTranscription` arrives in
+essentially every session; Hinglish is inserted in **Latin script**; polish
+levels clean filler words and punctuation; short dictations settle in ~1–3 s.
 
 ---
 
@@ -318,28 +328,77 @@ Key seams/interfaces:
 
 ## 8. Transcript settlement
 
-1. Every `inputTranscription` emission is fed to the session-local
-   `TranscriptAccumulator`, which keeps **one cumulative value** (merges
-   extensions, ignores duplicates, protects word boundaries).
-2. On STOP the coordinator starts finalization: **one absolute 3 s monotonic
-   deadline** plus a **250 ms settle debounce**. Each new transcript revision
-   resets the debounce; the deadline is never extended.
-3. At settlement the single accumulated value becomes a `ResultCandidate` and is
+1. The echo (`outputTranscription`) is accumulated in one session-local
+   `TranscriptAccumulator`; the raw `inputTranscription` is accumulated in a
+   second one. Each keeps **one cumulative value** (merges extensions, ignores
+   duplicates, protects word boundaries).
+2. On STOP the coordinator starts finalization. **Only echo revisions reset the
+   250 ms settle debounce** (the raw input is the fallback and never cuts a
+   pending echo short). The absolute deadline is **20 s** (the polished echo for
+   long dictations can take several seconds). Settlement happens on: the echo
+   debounce, `turnComplete` (model finished speaking), or the 20 s deadline.
+3. **Echo absent fast fallback:** if no echo chunk arrives within **2 s** of STOP
+   and a raw `inputTranscription` exists, the session settles on the raw text
+   instead of waiting the full 20 s.
+4. Settlement prefers the **echo**; only when the echo is empty does it fall back
+   to the raw input. The single settled value becomes a `ResultCandidate` and is
    run through `TranscriptSelector`:
    - Rejects only: blank, punctuation-only, garbled (control/replacement chars),
      Devanagari in **English** mode.
    - Accepts normal user speech including natural openers, long sentences,
      repetition, and (in Hinglish mode) Devanagari.
    - `diagnose()` reports the first rejection rule (never the text).
-4. If strict selection rejects the value, the **lenient fallback** still inserts
+5. If strict selection rejects the value, the **lenient fallback** still inserts
    it unless it is blank, garbled, or a clearly provisional fragment at the hard
-   deadline — the user's own speech is preferred over an error.
-5. At the hard deadline with no usable value, the session fails with
+   deadline.
+6. At the hard deadline with no usable value, the session fails with
    `gemini_no_transcript` (retryable) and shows a **Retry** button.
 
 ---
 
-## 9. Session state machine (transport)
+## 9. The echo architecture (0.4.1) — verified
+
+### 9.1 Why the echo
+`inputTranscription` is produced by the server's ASR and is **not** influenced by
+the `systemInstruction` — that is why script (Latin) and polish controls never
+worked on it. The `systemInstruction` only shapes the model's *generated* reply.
+Native audio Live models output **AUDIO only** (TEXT modality is unavailable),
+and `AudioTranscriptionConfig` (the type of both `inputAudioTranscription` and
+`outputAudioTranscription`) is an **empty message** — there is no `languageCode`
+field. The only model-text channel is `outputTranscription`: the transcription of
+the model's spoken reply.
+
+### 9.2 The verified mechanism (host probes, gemini-3.1-flash-live-preview)
+- **The instruction registers and controls the model's spoken output.** With a
+  verbatim-echo instruction the model repeated the input exactly
+  (`the quick brown fox jumps over the lazy dog`); without one it greeted
+  ("That's a classic pangram!…").
+- **`outputTranscription` works even WITH a systemInstruction** — the old
+  "systemInstruction suppresses output transcription" finding (Release-B era,
+  2026-08-05) is invalid for this model.
+- **Hinglish → Latin:** Devanagari input `मैं ठीक हूँ और कल office जाऊँगा` came
+  back as `Main theek hoon aur kal office jaoonga` (the instruction forces
+  Roman/Latin script in the model's output).
+- **Polish levels work:** `um like i mean we should so uh meet on thursday for
+  the project review` → HIGH echo = `We should meet on Thursday for the project
+  review.`
+- **Latency:** ~0.6 s (sentence), ~3 s (30 words), ~8 s (100 words) — the echo
+  transcription streams as the model generates, not at 1× real time.
+
+### 9.3 How the app uses it
+1. Setup keeps `responseModalities: ["AUDIO"]`, adds `outputAudioTranscription: {}`
+   (default true), keeps `inputAudioTranscription: {}` and manual activity
+   signaling, and sends the per-polish-level `systemInstruction` (with the
+   Hinglish Latin rule).
+2. The session emits `outputTranscription` as **ECHO** candidates and
+   `inputTranscription` as **INPUT** candidates.
+3. The coordinator accumulates both; settlement **prefers the echo** (always
+   waits for it when it is streaming), falls back to the raw input only when no
+   echo arrives (2 s watchdog) or at the 20 s deadline.
+
+---
+
+## 10. Session state machine (transport)
 
 ```
 Connecting -> Ready -> ActivityStarted -> ActivityEnded -> Closed
@@ -352,7 +411,7 @@ Connecting -> Ready -> ActivityStarted -> ActivityEnded -> Closed
 
 ---
 
-## 10. Warm sessions (Release F)
+## 11. Warm sessions (Release F)
 
 `WarmLiveSessionManager` preconnects one Live session while eligible (focused
 non-secure editor, keyboard visible, mic + key configured, no active dictation):
@@ -364,7 +423,7 @@ non-secure editor, keyboard visible, mic + key configured, no active dictation):
 
 ---
 
-## 11. Metrics & diagnostics
+## 12. Metrics & diagnostics
 
 Every session logs one line at its terminal state:
 ```
@@ -382,7 +441,7 @@ overflow=false [reject=DEVANAGARI] [lenient=true]
 
 ---
 
-## 12. Key source files
+## 13. Key source files
 
 | File | Role |
 | --- | --- |
@@ -402,7 +461,7 @@ overflow=false [reject=DEVANAGARI] [lenient=true]
 
 ---
 
-## 13. Verification
+## 14. Verification
 
 - JVM unit tests + lint + assemble: `./gradlew :app:testDebugUnitTest
   :app:lintDebug :app:assembleDebug`.

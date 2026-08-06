@@ -173,7 +173,7 @@ adb -s <SERIAL> logcat --pid=<PID>
 - **Device:** Samsung Galaxy S25 (`SM-S921B`), Android 16 (SDK 36), 1080x2340 @ 480dpi
 - **Tailscale IP:** `100.127.110.79`
 - **ADB connect port:** `46487` — re-verified for the Release A-F (0.2.17) push; the previous `33395` was refused after the phone rebooted (may change again after another reboot — re-read from Wireless debugging)
-- **Package:** `com.whispertype.android` (currently `versionName 0.4.0`, `versionCode 23`)
+- **Package:** `com.whispertype.android` (currently `versionName 0.4.1`, `versionCode 24`)
 - **Branch:** `main`
 - **APK:** `app/build/outputs/apk/debug/app-debug.apk`
 
