@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -16,6 +17,7 @@ import android.os.Looper
 import android.os.Message
 import android.os.Messenger
 import android.os.RemoteException
+import android.provider.Settings
 import android.util.Log
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleRegistry
@@ -56,9 +58,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -159,6 +164,10 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     @Volatile
     private var cachedAppEnabled: Boolean = true
 
+    /** 0.5.2: true while the accessibility-drop notification is showing. */
+    @Volatile
+    private var a11yDropNotified: Boolean = false
+
     private val incomingHandler = object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(msg: Message) {
             when (msg.what) {
@@ -169,7 +178,15 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                 RuntimeIpc.MSG_ELIGIBILITY -> {
                     val b = msg.data
                     if (b != null) {
-                        _eligibility.value = RuntimeIpc.unpackEligibility(b)
+                        val e = RuntimeIpc.unpackEligibility(b)
+                        _eligibility.value = e
+                        // 0.5.2: mirror for the app UI's bubble-hidden diagnostics,
+                        // and remember that the service once connected so the
+                        // watchdog only nags after a real drop, not on fresh install.
+                        currentEligibility = e
+                        if (e.serviceConnected) {
+                            scope.launch { settings.setA11yHasConnectedOnce(true) }
+                        }
                         refreshWarmEligibility()
                     }
                 }
@@ -193,6 +210,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         super.onCreate()
         isRunning = true
         createNotificationChannel()
+        createA11yWatchdogChannel()
         // Start as a special-use FGS (no runtime permission required) so the
         // overlay service can run before RECORD_AUDIO is granted. On API 33 the
         // specialUse bit is inert but accepted (manifest-declared); the service
@@ -212,6 +230,9 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         // 0.4.2 kill switch: cache the app-enabled setting in this (main)
         // process so the overlay can hide the bubble immediately and reliably.
         scope.launch { settings.appEnabled.collect { cachedAppEnabled = it } }
+        // 0.5.2: surface a silent accessibility-service drop instead of an
+        // unexplained missing bubble.
+        scope.launch { runA11yWatchdog() }
         Log.i(TAG, "FlowRuntimeService started (main process)")
     }
 
@@ -527,10 +548,85 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             .build()
     }
 
+    // ------------------------------------------------------------------
+    // Accessibility watchdog (0.5.2)
+    // ------------------------------------------------------------------
+
+    /**
+     * 0.5.2: Android silently clears an app's accessibility service when the app
+     * is force-stopped, which makes the bubble vanish with no in-app signal. This
+     * loop posts a low-importance notification (tap -> accessibility settings)
+     * whenever the service was once connected but is no longer reporting, and
+     * dismisses it as soon as the service reconnects.
+     */
+    private suspend fun CoroutineScope.runA11yWatchdog() {
+        delay(A11Y_WATCHDOG_START_DELAY_MS)
+        while (isActive) {
+            val e = currentEligibility
+            val connected = e.serviceConnected
+            if (settings.a11yHasConnectedOnce.first() && !connected) {
+                postA11yDropNotification()
+            } else {
+                dismissA11yDropNotification()
+            }
+            delay(A11Y_WATCHDOG_INTERVAL_MS)
+        }
+    }
+
+    private fun createA11yWatchdogChannel() {
+        val manager = getSystemService(NotificationManager::class.java)
+        val channel = NotificationChannel(
+            A11Y_WATCHDOG_CHANNEL_ID,
+            getString(R.string.a11y_watchdog_channel),
+            NotificationManager.IMPORTANCE_LOW,
+        )
+        manager.createNotificationChannel(channel)
+    }
+
+    private fun postA11yDropNotification() {
+        if (a11yDropNotified) return
+        a11yDropNotified = true
+        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+        val contentIntent = PendingIntent.getActivity(
+            this,
+            A11Y_WATCHDOG_REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = Notification.Builder(this, A11Y_WATCHDOG_CHANNEL_ID)
+            .setContentTitle(getString(R.string.a11y_watchdog_title))
+            .setContentText(getString(R.string.a11y_watchdog_text))
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentIntent(contentIntent)
+            .setAutoCancel(true)
+            .build()
+        getSystemService(NotificationManager::class.java).notify(A11Y_WATCHDOG_NOTIFICATION_ID, notification)
+    }
+
+    private fun dismissA11yDropNotification() {
+        if (!a11yDropNotified) return
+        a11yDropNotified = false
+        getSystemService(NotificationManager::class.java).cancel(A11Y_WATCHDOG_NOTIFICATION_ID)
+    }
+
     companion object {
         const val TAG = "FlowRuntimeService"
         const val NOTIFICATION_ID = 1001
         const val NOTIFICATION_CHANNEL_ID = "whispertype_runtime"
+
+        /** 0.5.2: low-importance channel/id for the accessibility-drop watchdog. */
+        const val A11Y_WATCHDOG_CHANNEL_ID = "whispertype_a11y_watchdog"
+        const val A11Y_WATCHDOG_NOTIFICATION_ID = 1002
+        private const val A11Y_WATCHDOG_REQUEST_CODE = 0
+        private const val A11Y_WATCHDOG_START_DELAY_MS = 30_000L
+        private const val A11Y_WATCHDOG_INTERVAL_MS = 60_000L
+
+        /**
+         * 0.5.2: eligibility mirror for the app UI's bubble-hidden diagnostics.
+         * Companion-level so the activity can read it without IPC.
+         */
+        @Volatile
+        var currentEligibility: TargetEligibility = TargetEligibility.Ineligible
 
         /** Process-local service-liveness flag for the app UI (set in onCreate/onDestroy). */
         @Volatile

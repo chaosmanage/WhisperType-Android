@@ -31,4 +31,11 @@ interface SettingsProvider {
 
     /** 0.4.2: seconds of idle before the bubble auto-minimizes to the mini dot. */
     val miniDotDelaySeconds: Flow<Int>
+
+    /**
+     * 0.5.2: records that the accessibility service has connected at least once.
+     * Internal watchdog gate so the "service dropped" notification is never shown
+     * to a fresh install that simply never enabled the service.
+     */
+    val a11yHasConnectedOnce: Flow<Boolean>
 }

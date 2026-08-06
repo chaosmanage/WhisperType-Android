@@ -14,6 +14,38 @@ Check:
 
 The service cancels the active session when it disconnects; re-enabling restores normal behavior. The Home tab shows an "Accessibility service" status tile — if it reads Off, tap it to jump to the system Accessibility settings.
 
+## The accessibility service keeps getting turned off
+
+Since 0.5.2, WhisperType self-diagnoses this instead of failing silently.
+
+Android clears an app's accessibility services whenever the app is **force-stopped**
+(killing it from the app switcher, from `Settings -> Apps -> Force stop`, or via an
+aggressive battery manager that puts the app "to sleep"). The OS then writes the
+`enabled_accessibility_services` setting to empty, so the bubble stops appearing even
+though every in-app permission is still granted. The toggle in Settings will show as
+Off again, or may revert shortly after you turn it on.
+
+WhisperType's in-app signals for this case:
+
+- The Home tab shows a **"Why is the bubble not showing?"** card listing
+  "Accessibility service is off" with a one-tap button that jumps straight to the
+  accessibility settings — no adb or logcat needed.
+- The runtime posts a low-importance notification ("WhisperType accessibility
+  service is off — tap to re-enable it") whenever the service was once connected
+  and then stops reporting. It disappears automatically once the service reconnects.
+
+To keep the service enabled:
+
+1. Re-enable it: `Settings -> Accessibility -> Installed/Downloaded apps ->
+   WhisperType`, and confirm the disclosure dialog.
+2. Never force-stop WhisperType — do not swipe it away from the app switcher
+   ("Close all"), do not tap "Force stop" in `Settings -> Apps`, and lock it in the
+   recents list if your launcher supports it.
+3. Samsung: `Settings -> Battery -> Background usage limits -> Never sleeping apps`
+   -> add WhisperType, and set the app's battery to the least restrictive option
+   (`Settings -> Apps -> WhisperType -> Battery`). This prevents the battery manager
+   from putting WhisperType to sleep (force-stopping it).
+
 ## The bubble does not appear
 
 The bubble requires all of the following at once:
@@ -29,6 +61,12 @@ The bubble requires all of the following at once:
 9. The screen is unlocked.
 
 If the keyboard was just shown, the bubble may take up to ~300 ms to appear while IME bounds settle. Re-focus the field if needed.
+
+Since 0.5.2, the Home tab shows a **"Why is the bubble not showing?"** card whenever
+the bubble is hidden: it names the exact blocking condition (accessibility service
+off, no focused field, secure field, keyboard hidden, mic off, no API key, or the
+App-enabled kill switch) and offers a one-tap fix where one exists. Use it before
+turning to logs.
 
 ## Mini-dot / bubble
 

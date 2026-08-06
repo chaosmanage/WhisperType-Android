@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,6 +37,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -48,6 +50,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -73,6 +76,7 @@ import com.whispertype.android.data.secrets.JavaxAesGcmCipher
 import com.whispertype.android.data.secrets.KeystoreKeyProvider
 import com.whispertype.android.data.secrets.KeyProvider
 import com.whispertype.android.data.settings.SettingsRepository
+import com.whispertype.android.platform.accessibility.EligibilityExplanation
 import com.whispertype.android.platform.accessibility.WhisperTypeAccessibilityService
 import com.whispertype.android.platform.runtime.FlowRuntimeService
 import com.whispertype.android.ui.dictionary.DictionaryScreen
@@ -81,6 +85,7 @@ import com.whispertype.android.ui.onboarding.OnboardingScreen
 import com.whispertype.android.ui.settings.SettingsScreen
 import com.whispertype.android.ui.theme.WhisperTypeTheme
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -232,6 +237,29 @@ class MainActivity : ComponentActivity() {
         var neededPermissions by remember { mutableStateOf(runtimePermissionsNeeded()) }
         val historyEntries by historyRepository.events().collectAsState(initial = emptyList())
         val historyEnabled by settings.historyEnabled.collectAsState(initial = false)
+        val appEnabled by settings.appEnabled.collectAsState(initial = true)
+        // 0.5.2: live eligibility mirror so the "why is the bubble hidden" card
+        // stays current while the user sits on Home (the runtime updates it via
+        // IPC from the accessibility process).
+        val eligibility by produceState(initialValue = FlowRuntimeService.currentEligibility) {
+            while (true) {
+                value = FlowRuntimeService.currentEligibility
+                delay(1000)
+            }
+        }
+        val blockingReasons = remember(eligibility, appEnabled) {
+            buildList {
+                addAll(EligibilityExplanation.blockingReasons(eligibility))
+                // A live dictation intentionally hides the idle bubble; it is
+                // not a fault worth showing on Home.
+                remove(EligibilityExplanation.REASON_SESSION_ACTIVE)
+                // Surface the kill switch even when the accessibility process is
+                // down (its eligibility push would not be reaching us).
+                if (!appEnabled && !contains(EligibilityExplanation.REASON_APP_DISABLED)) {
+                    add(EligibilityExplanation.REASON_APP_DISABLED)
+                }
+            }
+        }
         val permissionLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions(),
         ) {
@@ -321,7 +349,8 @@ class MainActivity : ComponentActivity() {
                                     ) {
                                         StatusTile(
                                             label = stringResource(R.string.home_status_overlay),
-                                            on = true,
+                                            on = canDrawOverlays(),
+                                            onFix = { requestOverlayPermission() },
                                             modifier = Modifier.weight(1f),
                                         )
                                         StatusTile(
@@ -377,6 +406,15 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                 }
+                            }
+                            if (blockingReasons.isNotEmpty()) {
+                                Spacer(Modifier.height(12.dp))
+                                BubbleHiddenCard(
+                                    reasons = blockingReasons,
+                                    onOpenAccessibility = {
+                                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                    },
+                                )
                             }
                             if (neededPermissions.isNotEmpty()) {
                                 Spacer(Modifier.height(12.dp))
@@ -496,6 +534,70 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /** 0.5.2: explains exactly which conditions are currently hiding the bubble,
+     *  so a silent drop (e.g. Android clearing the accessibility service after a
+     *  force-stop) is diagnosable and recoverable from the app itself. */
+    @Composable
+    private fun BubbleHiddenCard(reasons: List<String>, onOpenAccessibility: () -> Unit) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
+            ),
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = stringResource(R.string.diag_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.height(8.dp))
+                reasons.forEach { code ->
+                    val res = reasonRes(code)
+                    if (res != 0) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "•",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = stringResource(res),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                    }
+                }
+                if (reasons.contains(EligibilityExplanation.REASON_SERVICE_NOT_CONNECTED)) {
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = onOpenAccessibility,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.diag_open_accessibility))
+                    }
+                }
+            }
+        }
+    }
+
+    /** Maps an [EligibilityExplanation] reason code to its user-facing string. */
+    private fun reasonRes(code: String): Int = when (code) {
+        EligibilityExplanation.REASON_SERVICE_NOT_CONNECTED -> R.string.diag_reason_service
+        EligibilityExplanation.REASON_NO_EDITOR_FOCUS -> R.string.diag_reason_focus
+        EligibilityExplanation.REASON_SECURE_FIELD -> R.string.diag_reason_secure
+        EligibilityExplanation.REASON_UNCERTAIN_FIELD -> R.string.diag_reason_uncertain
+        EligibilityExplanation.REASON_KEYBOARD_HIDDEN -> R.string.diag_reason_keyboard
+        EligibilityExplanation.REASON_MICROPHONE_NOT_GRANTED -> R.string.diag_reason_mic
+        EligibilityExplanation.REASON_API_KEY_MISSING -> R.string.diag_reason_key
+        EligibilityExplanation.REASON_APP_DISABLED -> R.string.diag_reason_app_disabled
+        EligibilityExplanation.REASON_SESSION_ACTIVE -> R.string.diag_reason_session
+        else -> 0
     }
 
     /** 0.4.2 colorful dictation stats grid (sessions, words, today, week, WPM,

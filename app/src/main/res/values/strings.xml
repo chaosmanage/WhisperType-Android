@@ -14,6 +14,11 @@
     <string name="notification_action_cancel" tools:ignore="UnusedResources">Cancel</string>
     <string name="notification_action_open" tools:ignore="UnusedResources">Open WhisperType</string>
 
+    <!-- 0.5.2: accessibility-service-drop watchdog notification -->
+    <string name="a11y_watchdog_channel" tools:ignore="UnusedResources">Accessibility service</string>
+    <string name="a11y_watchdog_title" tools:ignore="UnusedResources">WhisperType accessibility service is off</string>
+    <string name="a11y_watchdog_text" tools:ignore="UnusedResources">Tap to re-enable it so the bubble can appear.</string>
+
     <string name="dictation_start">Start dictation</string>
     <string name="dictation_finalizing">Finalizing</string>
     <string name="dictation_inserting">Inserting</string>
@@ -71,6 +76,19 @@
     <string name="home_status_notifications">Notifications</string>
     <string name="home_grant_permissions">Grant microphone &amp; notifications</string>
     <string name="home_grant_overlay" tools:ignore="UnusedResources">Grant overlay permission</string>
+
+    <!-- 0.5.2: bubble-hidden diagnostics on Home -->
+    <string name="diag_title">Why is the bubble not showing?</string>
+    <string name="diag_reason_service">Accessibility service is off — tap below to turn it back on.</string>
+    <string name="diag_reason_focus">No text field is focused.</string>
+    <string name="diag_reason_secure">The focused field is a password or secure field.</string>
+    <string name="diag_reason_uncertain">The focused field could not be classified.</string>
+    <string name="diag_reason_keyboard">The keyboard is hidden or floating.</string>
+    <string name="diag_reason_mic">Microphone permission is off.</string>
+    <string name="diag_reason_key">No Gemini API key is set.</string>
+    <string name="diag_reason_app_disabled">App enabled is off in Settings.</string>
+    <string name="diag_reason_session">A dictation is already active.</string>
+    <string name="diag_open_accessibility">Open accessibility settings</string>
     <string name="nav_home">Home</string>
     <string name="nav_history">History</string>
     <string name="nav_dictionary">Dictionary</string>

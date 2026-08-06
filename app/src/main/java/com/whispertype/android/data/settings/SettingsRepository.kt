@@ -48,6 +48,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         val bubbleOpacityPercent = intPreferencesKey("bubble_opacity_percent")
         val miniDotEnabled = booleanPreferencesKey("mini_dot_enabled")
         val miniDotDelaySeconds = intPreferencesKey("mini_dot_delay_seconds")
+        val a11yHasConnectedOnce = booleanPreferencesKey("a11y_has_connected_once")
         val darkMode = booleanPreferencesKey("dark_mode")
     }
 
@@ -101,6 +102,13 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     override val darkMode: Flow<Boolean> =
         dataStore.data.map { it[Keys.darkMode] ?: false }
+
+    override val a11yHasConnectedOnce: Flow<Boolean> =
+        dataStore.data.map { it[Keys.a11yHasConnectedOnce] ?: false }
+
+    suspend fun setA11yHasConnectedOnce(connected: Boolean) {
+        dataStore.edit { it[Keys.a11yHasConnectedOnce] = connected }
+    }
 
     suspend fun setSpeechMode(mode: LanguageMode) {
         dataStore.edit { it[Keys.speechMode] = mode.name }

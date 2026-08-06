@@ -254,4 +254,16 @@ class SettingsRepositoryTest {
         repo.setDarkMode(false)
         assertFalse(repo.darkMode.first())
     }
+
+    @Test
+    fun `a11y has connected once defaults false and round-trips`() = runTest {
+        val repo = newRepository()
+        assertFalse(repo.a11yHasConnectedOnce.first())
+
+        repo.setA11yHasConnectedOnce(true)
+        assertTrue(repo.a11yHasConnectedOnce.first())
+
+        repo.setA11yHasConnectedOnce(false)
+        assertFalse(repo.a11yHasConnectedOnce.first())
+    }
 }

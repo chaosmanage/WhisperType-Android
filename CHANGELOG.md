@@ -4,6 +4,27 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-08-06
+
+Self-mitigating "bubble missing" diagnostics.
+
+- **Home "Why is the bubble not showing?" card** — the Home tab now explains
+  exactly which conditions are hiding the bubble (accessibility service off,
+  no focused field, secure field, keyboard hidden, mic off, no API key, app
+  disabled), with a one-tap "Open accessibility settings" button when the
+  accessibility service is the blocker. The same diagnostic that was previously
+  logcat-only is now visible in-app.
+- **Accessibility watchdog** — if the accessibility service was once connected
+  and Android silently clears it (which happens when an app is force-stopped,
+  and which made the bubble vanish with no signal), the runtime posts a
+  low-importance notification that deep-links to accessibility settings and
+  dismisses itself when the service reconnects.
+- **Overlay status tile truth** — the Home "Overlay permission" tile now reads
+  the real system setting instead of always showing green.
+- **Docs** — troubleshooting guidance for why the accessibility service gets
+  cleared (never force-stop the app; Samsung "Never sleeping apps") and how the
+  new Home card + watchdog surface the fix.
+
 ## [0.5.1] - 2026-08-06
 
 Follow-up to 0.5.0.

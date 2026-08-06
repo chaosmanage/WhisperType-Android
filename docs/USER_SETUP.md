@@ -295,6 +295,10 @@ Check:
 8. The keyboard is a supported docked keyboard.
 9. Android has not stopped the Accessibility Service.
 
+Since 0.5.2, the Home tab shows a **"Why is the bubble not showing?"** card that names
+the exact blocking condition (for example, "Accessibility service is off") and, where
+a fix exists, jumps you straight to it.
+
 Reopen:
 
 `Settings → Accessibility → Installed/Downloaded apps → WhisperType`
@@ -343,6 +347,16 @@ If the device has aggressive battery management, open:
 `Settings → Apps → WhisperType → Battery`
 
 Use the least restrictive setting that Samsung provides for the installed version. Do not disable battery protections unless WhisperType documentation specifically identifies the device as requiring it.
+
+Android clears an app's accessibility service whenever the app is force-stopped
+(swiped from the recents list, "Force stop" in `Settings → Apps`, or a battery
+manager putting the app "to sleep"). To avoid the bubble disappearing:
+
+- Do not force-stop WhisperType; lock it in the recents list so "Close all" skips it.
+- Add WhisperType to `Settings → Battery → Background usage limits → Never sleeping apps`.
+- If it already disappeared, turn the service back on under Accessibility, and confirm
+  the disclosure dialog. WhisperType's Home card ("Why is the bubble not showing?") and
+  its low-importance watchdog notification both point you here in one tap.
 
 ### Gemini connection fails
 
