@@ -172,9 +172,9 @@ adb -s <SERIAL> logcat --pid=<PID>
 
 - **Device:** Samsung Galaxy S25 (`SM-S921B`), Android 16 (SDK 36), 1080x2340 @ 480dpi
 - **Tailscale IP:** `100.127.110.79`
-- **ADB connect port:** `45479` — current for the 0.4.1 push; the port rotates after each phone reboot (re-read from Wireless debugging)
-- **Package:** `com.whispertype.android` (currently `versionName 0.4.1`, `versionCode 24`)
-- **Branch:** `main`
+- **ADB connect port:** `39163` — current for the 0.4.2 push; the port rotates after each phone reboot (re-read from Wireless debugging)
+- **Package:** `com.whispertype.android` (currently `versionName 0.4.2`, `versionCode 25`)
+- **Branch:** `feature`
 - **APK:** `app/build/outputs/apk/debug/app-debug.apk`
 
 > **Release F prewarm gate (billing):** `WarmLiveSessionManager` keeps one
