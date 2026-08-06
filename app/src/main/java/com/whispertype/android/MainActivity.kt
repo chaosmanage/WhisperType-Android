@@ -28,9 +28,13 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -245,49 +249,65 @@ class MainActivity : ComponentActivity() {
                     HomeHeader()
                     Spacer(Modifier.height(24.dp))
                     Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            StatusRow(
-                                label = stringResource(R.string.home_status_overlay),
-                                on = true,
-                            )
-                            HorizontalDivider()
-                            StatusRow(
-                                label = stringResource(R.string.home_status_runtime),
-                                on = FlowRuntimeService.isRunning,
-                                onFix = { startRuntime() },
-                            )
-                            HorizontalDivider()
-                            StatusRow(
-                                label = stringResource(R.string.home_status_accessibility),
-                                on = isAccessibilityEnabled(),
-                                onFix = {
-                                    startActivity(
-                                        Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
-                                    )
-                                },
-                            )
-                            HorizontalDivider()
-                            StatusRow(
-                                label = stringResource(R.string.home_status_key),
-                                on = keyProvider.hasKey(),
-                                onFix = { showSettings = true },
-                            )
-                            HorizontalDivider()
-                            StatusRow(
-                                label = stringResource(R.string.home_status_mic),
-                                on = hasMicPermission(),
-                                onFix = {
-                                    permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
-                                },
-                            )
-                            HorizontalDivider()
-                            StatusRow(
-                                label = stringResource(R.string.home_status_notifications),
-                                on = hasNotificationPermission(),
-                                onFix = {
-                                    permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
-                                },
-                            )
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                StatusTile(
+                                    label = stringResource(R.string.home_status_overlay),
+                                    on = true,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                StatusTile(
+                                    label = stringResource(R.string.home_status_runtime),
+                                    on = FlowRuntimeService.isRunning,
+                                    onFix = { startRuntime() },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                StatusTile(
+                                    label = stringResource(R.string.home_status_accessibility),
+                                    on = isAccessibilityEnabled(),
+                                    onFix = {
+                                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                )
+                                StatusTile(
+                                    label = stringResource(R.string.home_status_key),
+                                    on = keyProvider.hasKey(),
+                                    onFix = { showSettings = true },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                StatusTile(
+                                    label = stringResource(R.string.home_status_mic),
+                                    on = hasMicPermission(),
+                                    onFix = {
+                                        permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                )
+                                StatusTile(
+                                    label = stringResource(R.string.home_status_notifications),
+                                    on = hasNotificationPermission(),
+                                    onFix = {
+                                        permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
                         }
                     }
                     if (neededPermissions.isNotEmpty()) {
@@ -305,18 +325,24 @@ class MainActivity : ComponentActivity() {
                         entries = historyEntries,
                     )
                     Spacer(Modifier.height(24.dp))
-                    Button(
-                        onClick = { showSettings = true },
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Text(stringResource(R.string.home_open_settings))
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Button(
-                        onClick = { showHistory = true },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(R.string.home_open_history))
+                        ActionCard(
+                            icon = Icons.Filled.Settings,
+                            label = stringResource(R.string.home_open_settings),
+                            tint = Color(0xFF0E9B8A),
+                            onClick = { showSettings = true },
+                            modifier = Modifier.weight(1f),
+                        )
+                        ActionCard(
+                            icon = Icons.Filled.History,
+                            label = stringResource(R.string.home_open_history),
+                            tint = Color(0xFF3B82F6),
+                            onClick = { showHistory = true },
+                            modifier = Modifier.weight(1f),
+                        )
                     }
                     Spacer(Modifier.height(24.dp))
                     Text(
@@ -365,39 +391,98 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** A status row. When the status is off and [onFix] is provided, tapping the
-     *  row runs the fix (grant the permission / open the relevant settings). */
+    /** A compact status tile for the 2-column permissions grid. When off and
+     *  [onFix] is provided, tapping the tile runs the fix. */
     @Composable
-    private fun StatusRow(
+    private fun StatusTile(
         label: String,
         on: Boolean,
+        modifier: Modifier = Modifier,
         onFix: (() -> Unit)? = null,
     ) {
         val fixable = !on && onFix != null
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(if (fixable) Modifier.clickable { onFix() } else Modifier)
-                .padding(vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+        Surface(
+            modifier = modifier.then(if (fixable) Modifier.clickable { onFix() } else Modifier),
+            shape = RoundedCornerShape(12.dp),
+            color = when {
+                on -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                else -> MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
+            },
         ) {
-            Text(text = label, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                text = stringResource(
-                    when {
-                        on -> R.string.status_on
-                        fixable -> R.string.status_fix
-                        else -> R.string.status_off
-                    },
-                ),
-                style = MaterialTheme.typography.bodyLarge,
-                color = when {
-                    on -> MaterialTheme.colorScheme.primary
-                    fixable -> MaterialTheme.colorScheme.error
-                    else -> MaterialTheme.colorScheme.error
-                },
-            )
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = stringResource(
+                            when {
+                                on -> R.string.status_on
+                                fixable -> R.string.status_fix
+                                else -> R.string.status_off
+                            },
+                        ),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (on) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
+                    )
+                }
+                if (fixable) {
+                    Icon(
+                        Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        }
+    }
+
+    /** A prominent icon action card (Settings / History). */
+    @Composable
+    private fun ActionCard(
+        icon: androidx.compose.ui.graphics.vector.ImageVector,
+        label: String,
+        tint: Color,
+        onClick: () -> Unit,
+        modifier: Modifier = Modifier,
+    ) {
+        Surface(
+            onClick = onClick,
+            modifier = modifier.height(88.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = tint.copy(alpha = 0.14f),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(30.dp),
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
     }
 

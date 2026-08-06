@@ -174,6 +174,9 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     @Volatile
     private var cachedBubbleY: Float? = null
 
+    @Volatile
+    private var cachedAppEnabled: Boolean = true
+
     private val incomingHandler = object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(msg: Message) {
             when (msg.what) {
@@ -225,6 +228,9 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         scope.launch { settings.dictionary.collect { cachedDictionary = it } }
         scope.launch { settings.bubbleX.collect { cachedBubbleX = it } }
         scope.launch { settings.bubbleY.collect { cachedBubbleY = it } }
+        // 0.4.2 kill switch: cache the app-enabled setting in this (main)
+        // process so the overlay can hide the bubble immediately and reliably.
+        scope.launch { settings.appEnabled.collect { cachedAppEnabled = it } }
         Log.i(TAG, "FlowRuntimeService started (main process)")
     }
 
@@ -238,6 +244,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             bubbleOpacityPercent = settings.bubbleOpacityPercent,
             miniDotEnabled = settings.miniDotEnabled,
             miniDotDelaySeconds = settings.miniDotDelaySeconds,
+            appEnabled = settings.appEnabled,
             onBubblePositionChange = { x, y ->
                 scope.launch { settings.setBubblePosition(x, y) }
             },
@@ -354,7 +361,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     private fun computeWarmEligibility(): Boolean {
         val e = _eligibility.value
         return e.serviceConnected && e.editorFocused && !e.editorSecure && !e.editorUncertain &&
-            e.keyboardVisible && e.microphoneGranted && e.appEnabled &&
+            e.keyboardVisible && e.microphoneGranted && cachedAppEnabled &&
             keyProvider.hasKey() && !coordinator.isActive
     }
 

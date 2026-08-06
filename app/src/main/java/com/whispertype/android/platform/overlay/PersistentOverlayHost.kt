@@ -61,6 +61,8 @@ class PersistentOverlayHost(
     bubbleOpacityPercent: Flow<Int> = flowOf(100),
     miniDotEnabled: Flow<Boolean> = flowOf(true),
     miniDotDelaySeconds: Flow<Int> = flowOf(OverlayAppearance.DEFAULT_MINI_DOT_DELAY_SECONDS),
+    /** 0.4.2 kill switch: when false, the idle bubble is hidden until re-enabled. */
+    appEnabled: Flow<Boolean> = flowOf(true),
     private val placement: OverlayPlacement = OverlayPlacement(),
     private val maxRetries: Int = MAX_ATTACH_RETRIES,
     private val onBubblePositionChange: ((x: Float, y: Float) -> Unit)? = null,
@@ -71,6 +73,9 @@ class PersistentOverlayHost(
 
     private val _appearance = MutableStateFlow(OverlayAppearance())
     val appearance: StateFlow<OverlayAppearance> = _appearance
+
+    /** 0.4.2 kill switch state (reflects the app-enabled setting). */
+    private val _appEnabled = MutableStateFlow(true)
 
     private val _intents = MutableSharedFlow<OverlayIntent>(extraBufferCapacity = 4)
     override val intents: SharedFlow<OverlayIntent> = _intents
@@ -150,9 +155,15 @@ class PersistentOverlayHost(
                         if (machine.status is OverlayHostStatus.AttachFailed) attach()
                     }
                     wasEligible = eligible
+                    // 0.4.2 kill switch: with the app disabled, the idle bubble is
+                    // hidden entirely (active sessions are not interrupted).
+                    val appDisabled = !_appEnabled.value
                     val effective =
-                        if (dismissed && ui.state is DictationState.Idle) OverlayUiState.Hidden
-                        else ui
+                        if ((dismissed || appDisabled) && ui.state is DictationState.Idle) {
+                            OverlayUiState.Hidden
+                        } else {
+                            ui
+                        }
                     // 0.4.2: anchor the recording pill so its Done button lands on
                     // the bubble's center (the tap point); restore on return to idle.
                     val s = effective.state
@@ -183,6 +194,10 @@ class PersistentOverlayHost(
                 )
             }
                 .collect { _appearance.value = it }
+        }
+        // 0.4.2 kill switch.
+        scope.launch {
+            appEnabled.collect { _appEnabled.value = it }
         }
     }
 

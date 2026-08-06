@@ -48,7 +48,7 @@
 
     <!-- App home / status (module UI) -->
     <string name="home_title">WhisperType</string>
-    <string name="home_subtitle" tools:ignore="UnusedResources">Mic bubble dictation</string>
+    <string name="home_subtitle" tools:ignore="UnusedResources">AI Voice to Text</string>
     <string name="home_status_overlay">Overlay permission</string>
     <string name="home_status_runtime">Runtime service</string>
     <string name="home_status_accessibility">Accessibility service</string>
