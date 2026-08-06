@@ -31,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,8 +61,19 @@ fun SettingsScreen(
     settings: SettingsRepository,
     keyProvider: KeyProvider,
     onBack: () -> Unit,
+    scrollToGemini: Boolean = false,
+    onGeminiScrollDone: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
+    // 0.4.2: the Home "Gemini API key" status tile jumps straight to the Gemini
+    // account section (the last card) at the bottom of the screen.
+    LaunchedEffect(scrollToGemini) {
+        if (scrollToGemini) {
+            scrollState.animateScrollTo(scrollState.maxValue)
+            onGeminiScrollDone()
+        }
+    }
 
     val appEnabled by settings.appEnabled.collectAsStateWithLifecycle(initialValue = true)
     val speechMode by settings.speechMode.collectAsStateWithLifecycle(initialValue = LanguageMode.ENGLISH)
@@ -107,7 +119,7 @@ fun SettingsScreen(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {

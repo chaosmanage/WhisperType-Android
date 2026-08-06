@@ -44,6 +44,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,6 +60,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.whispertype.android.data.history.EncryptedHistoryRepository
 import com.whispertype.android.data.history.HistoryStats
@@ -72,6 +76,7 @@ import com.whispertype.android.platform.accessibility.WhisperTypeAccessibilitySe
 import com.whispertype.android.platform.runtime.FlowRuntimeService
 import com.whispertype.android.ui.dictionary.DictionaryScreen
 import com.whispertype.android.ui.history.HistoryScreen
+import com.whispertype.android.ui.onboarding.OnboardingScreen
 import com.whispertype.android.ui.settings.SettingsScreen
 import com.whispertype.android.ui.theme.WhisperTypeTheme
 import kotlin.math.roundToInt
@@ -105,14 +110,47 @@ class MainActivity : ComponentActivity() {
         setContent {
             val darkMode by settingsRepository.darkMode.collectAsState(initial = false)
             WhisperTypeTheme(darkTheme = darkMode) {
-                if (canDrawOverlays()) {
+                // Re-evaluate the overlay gate on every resume so returning from
+                // the overlay settings screen immediately shows Home (0.4.2).
+                var overlayGranted by remember { mutableStateOf(canDrawOverlays()) }
+                val lifecycleOwner = LocalLifecycleOwner.current
+                DisposableEffect(lifecycleOwner) {
+                    val observer = LifecycleEventObserver { _, event ->
+                        if (event == Lifecycle.Event.ON_RESUME) {
+                            overlayGranted = canDrawOverlays()
+                        }
+                    }
+                    lifecycleOwner.lifecycle.addObserver(observer)
+                    onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+                }
+                val permissionLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestMultiplePermissions(),
+                ) { /* result handled on the next ON_RESUME refresh */ }
+                if (overlayGranted) {
                     HomeScreen(
                         settings = settingsRepository,
                         keyProvider = keyProvider,
                         isAccessibilityEnabled = ::isAccessibilityEnabled,
                     )
                 } else {
-                    OverlayPermissionScreen(onRequest = ::requestOverlayPermission)
+                    OnboardingScreen(
+                        hasMic = ::hasMicPermission,
+                        hasNotifications = ::hasNotificationPermission,
+                        hasAccessibility = ::isAccessibilityEnabled,
+                        hasKey = { keyProvider.hasKey() },
+                        onRequestOverlay = ::requestOverlayPermission,
+                        onRequestMicNotifications = {
+                            permissionLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.RECORD_AUDIO,
+                                    Manifest.permission.POST_NOTIFICATIONS,
+                                ),
+                            )
+                        },
+                        onOpenAccessibility = {
+                            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        },
+                    )
                 }
             }
         }
@@ -176,40 +214,13 @@ class MainActivity : ComponentActivity() {
     // ------------------------------------------------------------------
 
     @Composable
-    private fun OverlayPermissionScreen(onRequest: () -> Unit) {
-        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp)
-                    .widthIn(max = 420.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text(
-                    text = stringResource(R.string.overlay_permission_title),
-                    style = MaterialTheme.typography.headlineSmall,
-                )
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = stringResource(R.string.overlay_permission_description),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Spacer(Modifier.height(24.dp))
-                Button(onClick = onRequest) {
-                    Text(stringResource(R.string.overlay_permission_button))
-                }
-            }
-        }
-    }
-
-    @Composable
     private fun HomeScreen(
         settings: SettingsRepository,
         keyProvider: KeyProvider,
         isAccessibilityEnabled: () -> Boolean,
     ) {
         var selectedTab by remember { mutableStateOf(0) }
+        var settingsScrollToGemini by remember { mutableStateOf(false) }
         var neededPermissions by remember { mutableStateOf(runtimePermissionsNeeded()) }
         val historyEntries by historyRepository.events().collectAsState(initial = emptyList())
         val historyEnabled by settings.historyEnabled.collectAsState(initial = false)
@@ -270,6 +281,8 @@ class MainActivity : ComponentActivity() {
                         settings = settings,
                         keyProvider = keyProvider,
                         onBack = { selectedTab = 0 },
+                        scrollToGemini = settingsScrollToGemini,
+                        onGeminiScrollDone = { settingsScrollToGemini = false },
                     )
 
                     else -> Surface(
@@ -326,7 +339,10 @@ class MainActivity : ComponentActivity() {
                                         StatusTile(
                                             label = stringResource(R.string.home_status_key),
                                             on = keyProvider.hasKey(),
-                                            onFix = { selectedTab = 3 },
+                                            onFix = {
+                                                settingsScrollToGemini = true
+                                                selectedTab = 3
+                                            },
                                             modifier = Modifier.weight(1f),
                                         )
                                     }

@@ -38,10 +38,25 @@
     <string name="test_tag_panel">wt_panel</string>
 
     <!-- Overlay-permission onboarding (Phase 1 gate) -->
-    <string name="overlay_permission_title" tools:ignore="UnusedResources">Allow microphone overlay</string>
-    <string name="overlay_permission_description" tools:ignore="UnusedResources">WhisperType shows a small microphone bubble over other apps so you can dictate into any text field. Grant overlay permission to continue.</string>
-    <string name="overlay_permission_button" tools:ignore="UnusedResources">Grant overlay permission</string>
-    <string name="overlay_permission_granted" tools:ignore="UnusedResources">Overlay permission granted. Runtime starting…</string>
+    <string name="onboarding_how_title">How it works</string>
+    <string name="onboarding_how_1">Tap the bubble (or the mini-dot) above your keyboard to start.</string>
+    <string name="onboarding_how_2">Speak naturally — the live waveform shows you are being heard.</string>
+    <string name="onboarding_how_3">Tap the green check to insert the text at your cursor.</string>
+    <string name="onboarding_setup_title">Set up in a few steps</string>
+    <string name="onboarding_overlay">Overlay permission</string>
+    <string name="onboarding_overlay_desc">Lets the bubble float above other apps.</string>
+    <string name="onboarding_mic">Microphone</string>
+    <string name="onboarding_mic_desc">Captures your speech while dictating.</string>
+    <string name="onboarding_notifications">Notifications</string>
+    <string name="onboarding_notifications_desc">Shows the recording indicator while you speak.</string>
+    <string name="onboarding_accessibility">Accessibility</string>
+    <string name="onboarding_accessibility_desc">Detects the focused text field and inserts your dictation.</string>
+    <string name="onboarding_key">Gemini API key</string>
+    <string name="onboarding_key_desc">Add it in Settings → Gemini account once you are in.</string>
+    <string name="onboarding_grant">Grant</string>
+    <string name="onboarding_open">Open</string>
+    <string name="onboarding_done">Done</string>
+    <string name="onboarding_footer">Everything is stored on your device and encrypted. Audio and transcripts are never logged.</string>
     <string name="runtime_started_toast" tools:ignore="UnusedResources">WhisperType runtime started</string>
 
     <!-- App home / status (module UI) -->
