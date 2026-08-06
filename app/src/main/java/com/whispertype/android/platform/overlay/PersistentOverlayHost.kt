@@ -124,7 +124,7 @@ class PersistentOverlayHost(
     /** True while a recording pill is shown; the window is anchored so the pill's
      *  Done button sits exactly where the bubble was when it was tapped. */
     @Volatile
-    private var pillAnchored = false
+    private var pillKind: PillKind? = null
 
     /** Bubble center (px) captured before the pill anchor, so the bubble is
      *  restored to the same spot when the session returns to idle. */
@@ -164,21 +164,40 @@ class PersistentOverlayHost(
                         } else {
                             ui
                         }
-                    // 0.4.2: anchor the recording pill so its Done button lands on
-                    // the bubble's center (the tap point); restore on return to idle.
+                    // 0.4.2: anchor the pill so it appears where the bubble was.
+                    // Interactive pills (Starting/Listening) keep their Done button
+                    // on the bubble's center (the tap point); status capsules
+                    // (Finalizing/Inserting/Recovering) re-center on the bubble so
+                    // they do not drift left of it. Restore on return to idle.
                     val s = effective.state
-                    val isPill = s is DictationState.Starting ||
-                        s is DictationState.Listening ||
-                        s is DictationState.Finalizing ||
-                        s is DictationState.Recovering ||
-                        s is DictationState.Inserting
-                    if (isPill && !pillAnchored) {
-                        pillAnchored = true
-                        storedBubbleCenter = bubbleCenter()
-                        positionPillAtBubble()
-                    } else if (!isPill && pillAnchored) {
-                        pillAnchored = false
-                        restoreBubblePosition()
+                    val kind = when (s) {
+                        is DictationState.Starting,
+                        is DictationState.Listening,
+                        -> PillKind.INTERACTIVE
+
+                        is DictationState.Finalizing,
+                        is DictationState.Recovering,
+                        is DictationState.Inserting,
+                        -> PillKind.STATUS
+
+                        else -> null
+                    }
+                    if (kind != pillKind) {
+                        when {
+                            kind == null -> {
+                                pillKind = null
+                                restoreBubblePosition()
+                            }
+                            pillKind == null -> {
+                                storedBubbleCenter = bubbleCenter()
+                                pillKind = kind
+                                schedulePillAnchor(kind)
+                            }
+                            else -> {
+                                pillKind = kind
+                                schedulePillAnchor(kind)
+                            }
+                        }
                     }
                     _uiState.value = effective
                 }
@@ -366,8 +385,10 @@ class PersistentOverlayHost(
     }
 
     // ------------------------------------------------------------------
-    // 0.4.2: recording-pill anchoring (Done sits where the bubble was)
+    // 0.4.2: recording-pill anchoring (Done / status text sits where the bubble was)
     // ------------------------------------------------------------------
+
+    private enum class PillKind { INTERACTIVE, STATUS }
 
     /** The visible bubble's size in px (48dp touch floor, user size above). */
     private fun bubbleSizePx(): Int = (maxOf(48f, _appearance.value.bubbleSizeDp.toFloat()) * density()).roundToInt()
@@ -379,14 +400,23 @@ class PersistentOverlayHost(
         return Pair(base.first + s / 2, base.second + s / 2)
     }
 
-    /** Moves the window so the pill's Done button center sits on the bubble's
-     *  center (the tap point): with the [X][wave][Done] pill, the Done center is
-     *  PILL_DONE_OFFSET_X_DP right and PILL_DONE_OFFSET_Y_DP down from the
-     *  window's top-left corner. The window is clamped to stay on-screen. */
-    private fun positionPillAtBubble() {
+    /** Anchors the window for the current pill kind. Interactive pills use fixed
+     *  offsets; status capsules center on the bubble's center after the content
+     *  re-layouts (their size is content-dependent). */
+    private fun schedulePillAnchor(kind: PillKind) {
+        val center = storedBubbleCenter ?: return
+        when (kind) {
+            PillKind.INTERACTIVE -> positionInteractivePill(center)
+            PillKind.STATUS -> positionStatusCapsule(center)
+        }
+    }
+
+    /** Anchors the interactive [X][wave][Done] pill so the Done button center sits
+     *  on the bubble's center (the tap point), using PILL_DONE_OFFSET_*_DP from the
+     *  window's top-left corner. Clamped to stay on-screen. */
+    private fun positionInteractivePill(center: Pair<Int, Int>) {
         val wm = windowManager ?: return
         val v = view ?: return
-        val center = storedBubbleCenter ?: bubbleCenter() ?: return
         val anchorX = (PILL_DONE_OFFSET_X_DP * density()).roundToInt()
         val anchorY = (PILL_DONE_OFFSET_Y_DP * density()).roundToInt()
         val w = v.width.takeIf { it > 0 } ?: 0
@@ -396,6 +426,28 @@ class PersistentOverlayHost(
         val y = (center.second - anchorY).coerceIn(0, maxOf(0, dh - h))
         wm.updateViewLayout(v, windowParams(x, y))
         currentPixel = x to y
+    }
+
+    /** Centers a status capsule (Finalizing/Inserting/Recovering) on the bubble's
+     *  center so the text appears exactly where the bubble/pill was. Because the
+     *  capsule's size depends on its text and re-layouts after the state change, the
+     *  reposition runs on the next global layout with the freshly measured size. */
+    private fun positionStatusCapsule(center: Pair<Int, Int>) {
+        val v = view ?: return
+        v.viewTreeObserver.addOnGlobalLayoutListener(object : android.view.ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                v.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                val w = v.width
+                val h = v.height
+                if (w <= 0 || h <= 0) return
+                val wm = windowManager ?: return
+                val (dw, dh) = displaySizePx()
+                val x = (center.first - w / 2).coerceIn(0, maxOf(0, dw - w))
+                val y = (center.second - h / 2).coerceIn(0, maxOf(0, dh - h))
+                wm.updateViewLayout(v, windowParams(x, y))
+                currentPixel = x to y
+            }
+        })
     }
 
     /** Restores the window to the bubble's top-left (the saved center minus half
