@@ -149,20 +149,20 @@ private fun IdleBubble(
                     .alpha(appearance.opacity)
                     .testTag(stringResource(R.string.test_tag_dot))
                     .semantics { contentDescription = startLabel },
-                shape = CircleShape,
+                shape = SquircleShape,
                 color = Color.Transparent,
                 interactionSource = interaction,
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Surface(
-                        shape = CircleShape,
+                        shape = SquircleShape,
                         color = com.whispertype.android.ui.theme.BrandColors.Teal,
                         modifier = Modifier.size(12.dp),
                     ) {}
                 }
             }
         } else {
-            // The bubble IS the app logo, round-clipped — no background circle.
+            // The bubble IS the app logo, squircle-clipped — no background circle.
             Surface(
                 onClick = { onIntent(OverlayIntent.START_DICTATION) },
                 modifier = Modifier
@@ -171,7 +171,7 @@ private fun IdleBubble(
                     .alpha(if (pressed) appearance.opacity * 0.75f else appearance.opacity)
                     .testTag(stringResource(R.string.test_tag_bubble))
                     .semantics { contentDescription = startLabel },
-                shape = CircleShape,
+                shape = SquircleShape,
                 color = Color.Transparent,
                 interactionSource = interaction,
             ) {
@@ -180,13 +180,16 @@ private fun IdleBubble(
                     contentDescription = null,
                     modifier = Modifier
                         .fillMaxSize()
-                        .clip(CircleShape),
+                        .clip(SquircleShape),
                     contentScale = ContentScale.Crop,
                 )
             }
         }
     }
 }
+
+/** Squircle (rounded square) shape used for the bubble and mini-dot. */
+private val SquircleShape = RoundedCornerShape(percent = 28)
 
 /** Shared panel chrome; every recording/result surface carries testTag "wt_panel". */
 @Composable
