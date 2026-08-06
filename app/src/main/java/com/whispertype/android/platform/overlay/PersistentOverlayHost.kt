@@ -179,7 +179,7 @@ class PersistentOverlayHost(
                     bubbleSizeDp = size.coerceIn(24, 72),
                     opacityPercent = opacity.coerceIn(10, 100),
                     miniDotEnabled = dot,
-                    miniDotAutoMinimizeMs = delay.coerceIn(1, 60) * 1000L,
+                    miniDotAutoMinimizeMs = delay.coerceIn(1, 15) * 1000L,
                 )
             }
                 .collect { _appearance.value = it }

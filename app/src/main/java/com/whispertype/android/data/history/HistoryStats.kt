@@ -21,6 +21,27 @@ object HistoryStats {
             .sumOf { contentWords(it.text).size }
     }
 
+    /** Content words recorded over the trailing 7 days. */
+    fun weekWords(entries: List<HistoryRepository.HistoryEntry>, nowMillis: Long): Int {
+        val cutoff = nowMillis - 7 * MILLIS_PER_DAY
+        return entries
+            .filter { it.timestampMillis >= cutoff }
+            .sumOf { contentWords(it.text).size }
+    }
+
+    /** Sessions recorded today (local wall clock). */
+    fun todaySessions(entries: List<HistoryRepository.HistoryEntry>, nowMillis: Long): Int {
+        val startOfToday = startOfTodayMillis(nowMillis)
+        return entries.count { it.timestampMillis >= startOfToday }
+    }
+
+    /** Average content words per session, rounded, or 0 when there is no history. */
+    fun wordsPerSession(entries: List<HistoryRepository.HistoryEntry>): Int {
+        val sessions = sessions(entries)
+        if (sessions == 0) return 0
+        return (totalWords(entries) + sessions / 2) / sessions
+    }
+
     /** Average speaking rate across entries with a recorded duration, or null
      *  when there is no duration evidence (older entries / empty history). */
     fun wordsPerMinute(entries: List<HistoryRepository.HistoryEntry>): Double? {
@@ -61,4 +82,6 @@ object HistoryStats {
         cal.set(java.util.Calendar.MILLISECOND, 0)
         return cal.timeInMillis
     }
+
+    private const val MILLIS_PER_DAY = 86_400_000L
 }

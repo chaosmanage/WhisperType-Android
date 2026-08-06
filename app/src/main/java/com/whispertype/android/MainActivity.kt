@@ -12,7 +12,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,7 +23,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
@@ -36,6 +43,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -225,15 +236,13 @@ class MainActivity : ComponentActivity() {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
                         .padding(24.dp)
                         .widthIn(max = 420.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Spacer(Modifier.height(24.dp))
-                    Text(
-                        text = stringResource(R.string.home_title),
-                        style = MaterialTheme.typography.headlineMedium,
-                    )
+                    Spacer(Modifier.height(8.dp))
+                    HomeHeader()
                     Spacer(Modifier.height(24.dp))
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(16.dp)) {
@@ -245,26 +254,39 @@ class MainActivity : ComponentActivity() {
                             StatusRow(
                                 label = stringResource(R.string.home_status_runtime),
                                 on = FlowRuntimeService.isRunning,
+                                onFix = { startRuntime() },
                             )
                             HorizontalDivider()
                             StatusRow(
                                 label = stringResource(R.string.home_status_accessibility),
                                 on = isAccessibilityEnabled(),
+                                onFix = {
+                                    startActivity(
+                                        Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
+                                    )
+                                },
                             )
                             HorizontalDivider()
                             StatusRow(
                                 label = stringResource(R.string.home_status_key),
                                 on = keyProvider.hasKey(),
+                                onFix = { showSettings = true },
                             )
                             HorizontalDivider()
                             StatusRow(
                                 label = stringResource(R.string.home_status_mic),
                                 on = hasMicPermission(),
+                                onFix = {
+                                    permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+                                },
                             )
                             HorizontalDivider()
                             StatusRow(
                                 label = stringResource(R.string.home_status_notifications),
                                 on = hasNotificationPermission(),
+                                onFix = {
+                                    permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+                                },
                             )
                         }
                     }
@@ -278,7 +300,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     Spacer(Modifier.height(24.dp))
-                    StatsCard(
+                    StatsSection(
                         historyEnabled = historyEnabled,
                         entries = historyEntries,
                     )
@@ -296,7 +318,7 @@ class MainActivity : ComponentActivity() {
                     ) {
                         Text(stringResource(R.string.home_open_history))
                     }
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(24.dp))
                     Text(
                         text = stringResource(
                             R.string.home_version,
@@ -307,37 +329,83 @@ class MainActivity : ComponentActivity() {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Spacer(Modifier.height(16.dp))
                 }
             }
         }
     }
 
+    /** 0.4.2 friendly home header: the app logo, title, and a one-line invite. */
     @Composable
-    private fun StatusRow(label: String, on: Boolean) {
+    private fun HomeHeader() {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Image(
+                painter = painterResource(R.drawable.ic_bubble_logo),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(16.dp)),
+                contentScale = ContentScale.Crop,
+            )
+            Column {
+                Text(
+                    text = stringResource(R.string.home_title),
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                Text(
+                    text = stringResource(R.string.home_subtitle),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+
+    /** A status row. When the status is off and [onFix] is provided, tapping the
+     *  row runs the fix (grant the permission / open the relevant settings). */
+    @Composable
+    private fun StatusRow(
+        label: String,
+        on: Boolean,
+        onFix: (() -> Unit)? = null,
+    ) {
+        val fixable = !on && onFix != null
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .then(if (fixable) Modifier.clickable { onFix() } else Modifier)
                 .padding(vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(text = label, style = MaterialTheme.typography.bodyLarge)
             Text(
-                text = stringResource(if (on) R.string.status_on else R.string.status_off),
+                text = stringResource(
+                    when {
+                        on -> R.string.status_on
+                        fixable -> R.string.status_fix
+                        else -> R.string.status_off
+                    },
+                ),
                 style = MaterialTheme.typography.bodyLarge,
-                color = if (on) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.error
+                color = when {
+                    on -> MaterialTheme.colorScheme.primary
+                    fixable -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.error
                 },
             )
         }
     }
 
-    /** 0.4.2 home stats card: sessions, words, today's words, and average WPM
-     *  derived from history entries (which carry recorded durations). Shows an
-     *  enable hint while history is off. */
+    /** 0.4.2 colorful dictation stats grid (sessions, words, today, week, WPM,
+     *  per-session) derived entirely from history entries — clearing history
+     *  resets every stat. Shows an enable hint while history is off. */
     @Composable
-    private fun StatsCard(
+    private fun StatsSection(
         historyEnabled: Boolean,
         entries: List<com.whispertype.android.data.history.HistoryRepository.HistoryEntry>,
     ) {
@@ -347,7 +415,7 @@ class MainActivity : ComponentActivity() {
                     text = stringResource(R.string.home_stats_title),
                     style = MaterialTheme.typography.titleMedium,
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
                 if (!historyEnabled) {
                     Text(
                         text = stringResource(R.string.home_stats_hint),
@@ -355,45 +423,87 @@ class MainActivity : ComponentActivity() {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    val wpm = HistoryStats.wordsPerMinute(entries)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        StatItem(label = stringResource(R.string.home_stats_sessions), value = HistoryStats.sessions(entries).toString())
-                        StatItem(
-                            label = stringResource(R.string.home_stats_words),
+                    val now = System.currentTimeMillis()
+                    val stats = listOf(
+                        StatTileData(
+                            value = HistoryStats.sessions(entries).toString(),
+                            label = stringResource(R.string.home_stats_sessions),
+                            color = Color(0xFF0E9B8A),
+                        ),
+                        StatTileData(
                             value = HistoryStats.totalWords(entries).toString(),
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        StatItem(
+                            label = stringResource(R.string.home_stats_words),
+                            color = Color(0xFF3B82F6),
+                        ),
+                        StatTileData(
+                            value = HistoryStats.todayWords(entries, now).toString(),
                             label = stringResource(R.string.home_stats_today),
-                            value = HistoryStats.todayWords(entries, System.currentTimeMillis()).toString(),
-                        )
-                        StatItem(
+                            color = Color(0xFFF59E0B),
+                        ),
+                        StatTileData(
+                            value = HistoryStats.weekWords(entries, now).toString(),
+                            label = stringResource(R.string.home_stats_week),
+                            color = Color(0xFF8B5CF6),
+                        ),
+                        StatTileData(
+                            value = HistoryStats.wordsPerMinute(entries)?.roundToInt()?.toString() ?: "—",
                             label = stringResource(R.string.home_stats_wpm),
-                            value = wpm?.roundToInt()?.toString() ?: "—",
-                        )
+                            color = Color(0xFFF43F5E),
+                        ),
+                        StatTileData(
+                            value = HistoryStats.wordsPerSession(entries).toString(),
+                            label = stringResource(R.string.home_stats_per_session),
+                            color = Color(0xFF22C55E),
+                        ),
+                    )
+                    stats.chunked(2).forEach { row ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            row.forEach { tile ->
+                                StatTile(
+                                    data = tile,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            if (row.size == 1) {
+                                Spacer(Modifier.weight(1f))
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
                     }
                 }
             }
         }
     }
 
+    private data class StatTileData(val value: String, val label: String, val color: Color)
+
     @Composable
-    private fun StatItem(label: String, value: String) {
-        Column {
-            Text(text = value, style = MaterialTheme.typography.titleLarge)
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+    private fun StatTile(data: StatTileData, modifier: Modifier = Modifier) {
+        Surface(
+            modifier = modifier.height(72.dp),
+            shape = RoundedCornerShape(12.dp),
+            color = data.color.copy(alpha = 0.12f),
+        ) {
+            Box(
+                modifier = Modifier.padding(horizontal = 12.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Column {
+                    Text(
+                        text = data.value,
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = data.color,
+                    )
+                    Text(
+                        text = data.label,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 }

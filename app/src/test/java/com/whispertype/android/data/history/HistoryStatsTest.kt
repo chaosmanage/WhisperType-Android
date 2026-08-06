@@ -69,4 +69,31 @@ class HistoryStatsTest {
         cal.timeInMillis = start
         assertEquals(dayOfYear, cal.get(java.util.Calendar.DAY_OF_YEAR))
     }
+
+    @Test
+    fun `week words only counts entries from the trailing seven days`() {
+        val now = System.currentTimeMillis()
+        val recent = entry("recent words here", now, 0L)
+        val old = entry("ancient words that are too old", now - 8L * 86_400_000L, 0L)
+        assertEquals(3, HistoryStats.weekWords(listOf(recent, old), now))
+    }
+
+    @Test
+    fun `today sessions counts entries after the local start of today`() {
+        val now = System.currentTimeMillis()
+        val startOfToday = HistoryStats.startOfTodayMillis(now)
+        val today = listOf(entry("a", now, 0L), entry("b", now - 1000L, 0L))
+        val yesterday = entry("c", startOfToday - 60_000L, 0L)
+        assertEquals(2, HistoryStats.todaySessions(today + yesterday, now))
+    }
+
+    @Test
+    fun `words per session averages and rounds`() {
+        assertEquals(0, HistoryStats.wordsPerSession(emptyList()))
+        val entries = listOf(
+            entry("one two three four", 0L, 0L), // 4 words
+            entry("one two", 1L, 0L), // 2 words
+        )
+        assertEquals(3, HistoryStats.wordsPerSession(entries))
+    }
 }

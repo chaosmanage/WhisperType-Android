@@ -213,7 +213,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         const val MAX_BUBBLE_OPACITY_PERCENT = 100
         const val DEFAULT_MINI_DOT_DELAY_SECONDS = 3
         const val MIN_MINI_DOT_DELAY_SECONDS = 1
-        const val MAX_MINI_DOT_DELAY_SECONDS = 60
+        const val MAX_MINI_DOT_DELAY_SECONDS = 15
         val DEFAULT_POLISH_LEVEL = TranscriptionStyle.MEDIUM
     }
 }

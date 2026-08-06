@@ -22,8 +22,8 @@ object WhisperTypeColors {
     val OnSurface = Color(0xFFF5F3F0)
     val RecordingAccent = Color(0xFFE8593C)
     val IdleAccent = Color(0xFFF5F3F0)
-    val ErrorAccent = Color(0xFFE8593C)
-    val SuccessAccent = Color(0xFF4CAF77)
+    val ErrorAccent = Color(0xFFFF6B5E)
+    val SuccessAccent = Color(0xFF5BE39A)
 }
 
 /** Light emerald-teal scheme shared by every app screen (Settings / History /

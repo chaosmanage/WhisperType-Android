@@ -375,7 +375,9 @@ private fun ErrorPanel(state: DictationState.Error, onIntent: (OverlayIntent) ->
     }
 }
 
-/** A compact circular icon action inside the recording pill (>=48dp touch). */
+/** A bold circular icon action inside the recording pill (>=48dp touch): the
+ *  accent color fills a soft circle behind the icon for a strong, readable
+ *  Done / Cancel affordance. */
 @Composable
 private fun PillAction(
     tag: String,
@@ -391,14 +393,14 @@ private fun PillAction(
             .sizeIn(minWidth = minSize, minHeight = minSize)
             .testTag(tag),
         shape = CircleShape,
-        color = Color.Transparent,
+        color = tint.copy(alpha = 0.20f),
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = icon,
                 contentDescription = label,
                 tint = tint,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(22.dp),
             )
         }
     }

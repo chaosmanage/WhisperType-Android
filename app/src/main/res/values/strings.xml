@@ -63,10 +63,13 @@
     <string name="home_stats_sessions">Sessions</string>
     <string name="home_stats_words">Words</string>
     <string name="home_stats_today">Today</string>
+    <string name="home_stats_week">This week</string>
     <string name="home_stats_wpm">WPM</string>
+    <string name="home_stats_per_session">Per session</string>
     <string name="home_stats_hint">Enable History in Settings to see your dictation stats.</string>
     <string name="status_on">On</string>
     <string name="status_off">Off</string>
+    <string name="status_fix">Fix</string>
     <string name="status_configured" tools:ignore="UnusedResources">Configured</string>
     <string name="status_not_configured" tools:ignore="UnusedResources">Not configured</string>
 
