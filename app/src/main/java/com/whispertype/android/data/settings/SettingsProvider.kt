@@ -22,6 +22,9 @@ interface SettingsProvider {
     val bubbleX: Flow<Float?>
     val bubbleY: Flow<Float?>
 
+    /** 0.4.2 dark mode for the app screens. */
+    val darkMode: Flow<Boolean>
+
     /** 0.4.2 bubble visual settings (Wispr-style). */
     val bubbleSizeDp: Flow<Int>
     val bubbleOpacityPercent: Flow<Int>

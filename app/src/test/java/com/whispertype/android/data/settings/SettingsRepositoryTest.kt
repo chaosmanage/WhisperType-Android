@@ -266,17 +266,14 @@ class SettingsRepositoryTest {
     }
 
     @Test
-    fun `mini dot delay defaults and round-trips within bounds`() = runTest {
+    fun `dark mode defaults off and round-trips`() = runTest {
         val repo = newRepository()
-        assertEquals(SettingsRepository.DEFAULT_MINI_DOT_DELAY_SECONDS, repo.miniDotDelaySeconds.first())
+        assertFalse(repo.darkMode.first())
 
-        repo.setMiniDotDelaySeconds(15)
-        assertEquals(15, repo.miniDotDelaySeconds.first())
+        repo.setDarkMode(true)
+        assertTrue(repo.darkMode.first())
 
-        repo.setMiniDotDelaySeconds(0) // coerced to the min
-        assertEquals(SettingsRepository.MIN_MINI_DOT_DELAY_SECONDS, repo.miniDotDelaySeconds.first())
-
-        repo.setMiniDotDelaySeconds(999) // coerced to the max
-        assertEquals(SettingsRepository.MAX_MINI_DOT_DELAY_SECONDS, repo.miniDotDelaySeconds.first())
+        repo.setDarkMode(false)
+        assertFalse(repo.darkMode.first())
     }
 }

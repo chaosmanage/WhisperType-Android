@@ -97,7 +97,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            WhisperTypeTheme {
+            val darkMode by settingsRepository.darkMode.collectAsState(initial = false)
+            WhisperTypeTheme(darkTheme = darkMode) {
                 if (canDrawOverlays()) {
                     HomeScreen(
                         settings = settingsRepository,

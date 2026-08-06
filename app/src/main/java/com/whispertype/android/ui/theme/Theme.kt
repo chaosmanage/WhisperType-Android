@@ -1,6 +1,7 @@
 package com.whispertype.android.ui.theme
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
@@ -15,7 +16,7 @@ object BrandColors {
 }
 
 /** Colors used directly by the dark persistent overlay (independent of the
- *  light app-screen scheme). */
+ *  light/dark app-screen scheme). */
 object WhisperTypeColors {
     val Surface = Color(0xFF141414)
     val SurfaceRaised = Color(0xFF1E1E1E)
@@ -26,8 +27,7 @@ object WhisperTypeColors {
     val SuccessAccent = Color(0xFF5BE39A)
 }
 
-/** Light emerald-teal scheme shared by every app screen (Settings / History /
- *  Home). One brand identity instead of the Material purple default. */
+/** Light emerald-teal scheme (default). */
 private val WhisperTypeColorScheme = lightColorScheme(
     primary = BrandColors.Teal,
     onPrimary = Color(0xFFFFFFFF),
@@ -45,10 +45,31 @@ private val WhisperTypeColorScheme = lightColorScheme(
     error = Color(0xFFBA1A1A),
 )
 
+/** 0.4.2 dark emerald-teal scheme. */
+private val WhisperTypeDarkColorScheme = darkColorScheme(
+    primary = Color(0xFF5EE0C4),
+    onPrimary = Color(0xFF003731),
+    primaryContainer = Color(0xFF005047),
+    onPrimaryContainer = Color(0xFFA7F0E2),
+    secondary = Color(0xFFB2CCC5),
+    onSecondary = Color(0xFF1D352F),
+    background = Color(0xFF0F1413),
+    onBackground = Color(0xFFDDE4E1),
+    surface = Color(0xFF0F1413),
+    onSurface = Color(0xFFDDE4E1),
+    surfaceVariant = Color(0xFF3F4948),
+    onSurfaceVariant = Color(0xFFBEC9C6),
+    outline = Color(0xFF899390),
+    error = Color(0xFFFFB4AB),
+)
+
 @Composable
-fun WhisperTypeTheme(content: @Composable () -> Unit) {
+fun WhisperTypeTheme(
+    darkTheme: Boolean = false,
+    content: @Composable () -> Unit,
+) {
     MaterialTheme(
-        colorScheme = WhisperTypeColorScheme,
+        colorScheme = if (darkTheme) WhisperTypeDarkColorScheme else WhisperTypeColorScheme,
         content = content,
     )
 }

@@ -4,6 +4,7 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -81,6 +83,7 @@ fun SettingsScreen(
     val miniDotEnabled by settings.miniDotEnabled.collectAsStateWithLifecycle(initialValue = true)
     val miniDotDelay by settings.miniDotDelaySeconds
         .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_MINI_DOT_DELAY_SECONDS)
+    val darkMode by settings.darkMode.collectAsStateWithLifecycle(initialValue = false)
 
     var hasKey by remember { mutableStateOf(keyProvider.hasKey()) }
     var keyInput by remember { mutableStateOf("") }
@@ -116,231 +119,243 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            SettingRow(
-                title = stringResource(R.string.settings_app_enabled),
-                description = stringResource(R.string.settings_app_enabled_desc),
-            ) {
-                Switch(
-                    checked = appEnabled,
-                    onCheckedChange = { scope.launch { settings.setAppEnabled(it) } },
-                )
+            SettingsSection(stringResource(R.string.settings_section_general)) {
+                SettingRow(
+                    title = stringResource(R.string.settings_app_enabled),
+                    description = stringResource(R.string.settings_app_enabled_desc),
+                ) {
+                    Switch(
+                        checked = appEnabled,
+                        onCheckedChange = { scope.launch { settings.setAppEnabled(it) } },
+                    )
+                }
+
+                SettingRow(
+                    title = stringResource(R.string.settings_dark_mode),
+                    description = stringResource(R.string.settings_dark_mode_desc),
+                ) {
+                    Switch(
+                        checked = darkMode,
+                        onCheckedChange = { scope.launch { settings.setDarkMode(it) } },
+                    )
+                }
             }
 
             // ------------------------------------------------------------------
             // Recording
             // ------------------------------------------------------------------
-            SectionHeader(stringResource(R.string.settings_section_recording))
-
-            Text(
-                text = stringResource(R.string.settings_speech_mode),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = speechMode == LanguageMode.ENGLISH,
-                    onClick = { scope.launch { settings.setSpeechMode(LanguageMode.ENGLISH) } },
-                    label = { Text(stringResource(R.string.language_english)) },
+            SettingsSection(stringResource(R.string.settings_section_recording)) {
+                Text(
+                    text = stringResource(R.string.settings_speech_mode),
+                    style = MaterialTheme.typography.titleMedium,
                 )
-                FilterChip(
-                    selected = speechMode == LanguageMode.HINGLISH,
-                    onClick = { scope.launch { settings.setSpeechMode(LanguageMode.HINGLISH) } },
-                    label = { Text(stringResource(R.string.language_hinglish)) },
-                )
-            }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = speechMode == LanguageMode.ENGLISH,
+                        onClick = { scope.launch { settings.setSpeechMode(LanguageMode.ENGLISH) } },
+                        label = { Text(stringResource(R.string.language_english)) },
+                    )
+                    FilterChip(
+                        selected = speechMode == LanguageMode.HINGLISH,
+                        onClick = { scope.launch { settings.setSpeechMode(LanguageMode.HINGLISH) } },
+                        label = { Text(stringResource(R.string.language_hinglish)) },
+                    )
+                }
 
-            SettingRow(
-                title = stringResource(R.string.settings_auto_stop),
-                description = stringResource(R.string.settings_auto_stop_desc),
-            ) {
-                var menuOpen by remember { mutableStateOf(false) }
-                Box {
-                    OutlinedButton(onClick = { menuOpen = true }) {
-                        Text(stringResource(autoStopSecondsLabelRes(autoStopSeconds)))
-                    }
-                    DropdownMenu(
-                        expanded = menuOpen,
-                        onDismissRequest = { menuOpen = false },
-                    ) {
-                        AUTO_STOP_OPTIONS.forEach { seconds ->
-                            DropdownMenuItem(
-                                text = { Text(stringResource(autoStopSecondsLabelRes(seconds))) },
-                                onClick = {
-                                    menuOpen = false
-                                    scope.launch { settings.setAutoStopSeconds(seconds) }
-                                },
-                            )
+                SettingRow(
+                    title = stringResource(R.string.settings_auto_stop),
+                    description = stringResource(R.string.settings_auto_stop_desc),
+                ) {
+                    var menuOpen by remember { mutableStateOf(false) }
+                    Box {
+                        OutlinedButton(onClick = { menuOpen = true }) {
+                            Text(stringResource(autoStopSecondsLabelRes(autoStopSeconds)))
+                        }
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false },
+                        ) {
+                            AUTO_STOP_OPTIONS.forEach { seconds ->
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(autoStopSecondsLabelRes(seconds))) },
+                                    onClick = {
+                                        menuOpen = false
+                                        scope.launch { settings.setAutoStopSeconds(seconds) }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            SettingRow(
-                title = stringResource(R.string.settings_polish),
-                description = stringResource(R.string.settings_polish_desc),
-            ) {
-                var menuOpen by remember { mutableStateOf(false) }
-                Box {
-                    OutlinedButton(onClick = { menuOpen = true }) {
-                        Text(stringResource(polishLevelLabelRes(polishLevel)))
-                    }
-                    DropdownMenu(
-                        expanded = menuOpen,
-                        onDismissRequest = { menuOpen = false },
-                    ) {
-                        TranscriptionStyle.entries.forEach { style ->
-                            DropdownMenuItem(
-                                text = { Text(stringResource(polishLevelLabelRes(style))) },
-                                onClick = {
-                                    menuOpen = false
-                                    scope.launch { settings.setPolishLevel(style) }
-                                },
-                            )
+                SettingRow(
+                    title = stringResource(R.string.settings_polish),
+                    description = stringResource(R.string.settings_polish_desc),
+                ) {
+                    var menuOpen by remember { mutableStateOf(false) }
+                    Box {
+                        OutlinedButton(onClick = { menuOpen = true }) {
+                            Text(stringResource(polishLevelLabelRes(polishLevel)))
+                        }
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false },
+                        ) {
+                            TranscriptionStyle.entries.forEach { style ->
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(polishLevelLabelRes(style))) },
+                                    onClick = {
+                                        menuOpen = false
+                                        scope.launch { settings.setPolishLevel(style) }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            SettingRow(
-                title = stringResource(R.string.settings_model),
-                description = stringResource(R.string.settings_model_desc),
-            ) {}
-            OutlinedTextField(
-                value = modelInput,
-                onValueChange = { modelInput = it },
-                label = { Text(stringResource(R.string.settings_model_hint)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedButton(
-                onClick = { scope.launch { settings.setModelOverride(modelInput) } },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.settings_model_save))
+                SettingRow(
+                    title = stringResource(R.string.settings_model),
+                    description = stringResource(R.string.settings_model_desc),
+                ) {}
+                OutlinedTextField(
+                    value = modelInput,
+                    onValueChange = { modelInput = it },
+                    label = { Text(stringResource(R.string.settings_model_hint)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedButton(
+                    onClick = { scope.launch { settings.setModelOverride(modelInput) } },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.settings_model_save))
+                }
             }
 
             // ------------------------------------------------------------------
             // Bubble
             // ------------------------------------------------------------------
-            SectionHeader(stringResource(R.string.settings_section_bubble))
-
-            SettingSlider(
-                title = stringResource(R.string.settings_bubble_size),
-                description = stringResource(R.string.settings_bubble_size_value, bubbleSizeDp),
-                value = bubbleSizeDp.toFloat(),
-                range = BUBBLE_SIZE_RANGE_DP_F,
-                onValueChange = { scope.launch { settings.setBubbleSizeDp(it.roundToInt()) } },
-            )
-
-            SettingSlider(
-                title = stringResource(R.string.settings_bubble_opacity),
-                description = stringResource(R.string.settings_bubble_opacity_value, bubbleOpacity),
-                value = bubbleOpacity.toFloat(),
-                range = BUBBLE_OPACITY_RANGE_PERCENT_F,
-                onValueChange = { scope.launch { settings.setBubbleOpacityPercent(it.roundToInt()) } },
-            )
-
-            SettingRow(
-                title = stringResource(R.string.settings_mini_dot),
-                description = stringResource(R.string.settings_mini_dot_desc),
-            ) {
-                Switch(
-                    checked = miniDotEnabled,
-                    onCheckedChange = { scope.launch { settings.setMiniDotEnabled(it) } },
+            SettingsSection(stringResource(R.string.settings_section_bubble)) {
+                SettingSlider(
+                    title = stringResource(R.string.settings_bubble_size),
+                    description = stringResource(R.string.settings_bubble_size_value, bubbleSizeDp),
+                    value = bubbleSizeDp.toFloat(),
+                    range = BUBBLE_SIZE_RANGE_DP_F,
+                    onValueChange = { scope.launch { settings.setBubbleSizeDp(it.roundToInt()) } },
                 )
-            }
 
-            SettingSlider(
-                title = stringResource(R.string.settings_mini_dot_delay),
-                description = stringResource(R.string.settings_mini_dot_delay_value, miniDotDelay),
-                value = miniDotDelay.toFloat(),
-                range = MINI_DOT_DELAY_RANGE_SECONDS_F,
-                onValueChange = { scope.launch { settings.setMiniDotDelaySeconds(it.roundToInt()) } },
-            )
+                SettingSlider(
+                    title = stringResource(R.string.settings_bubble_opacity),
+                    description = stringResource(R.string.settings_bubble_opacity_value, bubbleOpacity),
+                    value = bubbleOpacity.toFloat(),
+                    range = BUBBLE_OPACITY_RANGE_PERCENT_F,
+                    onValueChange = { scope.launch { settings.setBubbleOpacityPercent(it.roundToInt()) } },
+                )
 
-            SettingRow(
-                title = stringResource(R.string.settings_bubble_reset),
-                description = stringResource(R.string.settings_bubble_reset_desc),
-            ) {
-                TextButton(
-                    onClick = { scope.launch { settings.resetBubblePosition() } },
+                SettingRow(
+                    title = stringResource(R.string.settings_mini_dot),
+                    description = stringResource(R.string.settings_mini_dot_desc),
                 ) {
-                    Text(stringResource(R.string.settings_bubble_reset))
+                    Switch(
+                        checked = miniDotEnabled,
+                        onCheckedChange = { scope.launch { settings.setMiniDotEnabled(it) } },
+                    )
+                }
+
+                SettingSlider(
+                    title = stringResource(R.string.settings_mini_dot_delay),
+                    description = stringResource(R.string.settings_mini_dot_delay_value, miniDotDelay),
+                    value = miniDotDelay.toFloat(),
+                    range = MINI_DOT_DELAY_RANGE_SECONDS_F,
+                    onValueChange = { scope.launch { settings.setMiniDotDelaySeconds(it.roundToInt()) } },
+                )
+
+                SettingRow(
+                    title = stringResource(R.string.settings_bubble_reset),
+                    description = stringResource(R.string.settings_bubble_reset_desc),
+                ) {
+                    TextButton(
+                        onClick = { scope.launch { settings.resetBubblePosition() } },
+                    ) {
+                        Text(stringResource(R.string.settings_bubble_reset))
+                    }
                 }
             }
 
             // ------------------------------------------------------------------
             // Dictionary
             // ------------------------------------------------------------------
-            SectionHeader(stringResource(R.string.settings_section_dictionary))
-
-            SettingRow(
-                title = stringResource(R.string.settings_dictionary),
-                description = stringResource(R.string.settings_dictionary_desc),
-            ) {}
-            Column {
-                if (dictionary.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.settings_dictionary_empty),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                } else {
-                    dictionary.forEach { entry ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = if (entry.replace.isBlank()) {
-                                    entry.match
-                                } else {
-                                    "${entry.match} → ${entry.replace}"
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f),
-                            )
-                            TextButton(
-                                onClick = { scope.launch { settings.removeDictionaryEntry(entry.match) } },
+            SettingsSection(stringResource(R.string.settings_section_dictionary)) {
+                SettingRow(
+                    title = stringResource(R.string.settings_dictionary),
+                    description = stringResource(R.string.settings_dictionary_desc),
+                ) {}
+                Column {
+                    if (dictionary.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.settings_dictionary_empty),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    } else {
+                        dictionary.forEach { entry ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(stringResource(R.string.history_delete))
+                                Text(
+                                    text = if (entry.replace.isBlank()) {
+                                        entry.match
+                                    } else {
+                                        "${entry.match} → ${entry.replace}"
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(
+                                    onClick = { scope.launch { settings.removeDictionaryEntry(entry.match) } },
+                                ) {
+                                    Text(stringResource(R.string.history_delete))
+                                }
                             }
                         }
                     }
-                }
-                OutlinedTextField(
-                    value = dictionaryWord,
-                    onValueChange = { dictionaryWord = it },
-                    label = { Text(stringResource(R.string.settings_dictionary_word_hint)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = dictionaryReplacement,
-                    onValueChange = { dictionaryReplacement = it },
-                    label = { Text(stringResource(R.string.settings_dictionary_replacement_hint)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = {
-                            val word = dictionaryWord.trim()
-                            if (word.isNotEmpty()) {
-                                scope.launch {
-                                    settings.addDictionaryEntry(
-                                        DictionaryEntry(word, dictionaryReplacement.trim()),
-                                    )
+                    OutlinedTextField(
+                        value = dictionaryWord,
+                        onValueChange = { dictionaryWord = it },
+                        label = { Text(stringResource(R.string.settings_dictionary_word_hint)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = dictionaryReplacement,
+                        onValueChange = { dictionaryReplacement = it },
+                        label = { Text(stringResource(R.string.settings_dictionary_replacement_hint)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                val word = dictionaryWord.trim()
+                                if (word.isNotEmpty()) {
+                                    scope.launch {
+                                        settings.addDictionaryEntry(
+                                            DictionaryEntry(word, dictionaryReplacement.trim()),
+                                        )
+                                    }
+                                    dictionaryWord = ""
+                                    dictionaryReplacement = ""
                                 }
-                                dictionaryWord = ""
-                                dictionaryReplacement = ""
-                            }
-                        },
-                    ) {
-                        Text(stringResource(R.string.settings_dictionary_add))
-                    }
-                    TextButton(
-                        onClick = { scope.launch { settings.clearDictionary() } },
-                    ) {
-                        Text(stringResource(R.string.settings_dictionary_clear))
+                            },
+                        ) {
+                            Text(stringResource(R.string.settings_dictionary_add))
+                        }
+                        TextButton(
+                            onClick = { scope.launch { settings.clearDictionary() } },
+                        ) {
+                            Text(stringResource(R.string.settings_dictionary_clear))
+                        }
                     }
                 }
             }
@@ -348,120 +363,131 @@ fun SettingsScreen(
             // ------------------------------------------------------------------
             // History
             // ------------------------------------------------------------------
-            SectionHeader(stringResource(R.string.settings_section_history))
-
-            SettingRow(
-                title = stringResource(R.string.settings_history),
-                description = stringResource(R.string.settings_history_desc),
-            ) {
-                Switch(
-                    checked = historyEnabled,
-                    onCheckedChange = { scope.launch { settings.setHistoryEnabled(it) } },
-                )
-            }
-            if (historyEnabled) {
-                Column {
-                    Text(
-                        text = stringResource(R.string.settings_history_retention),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        text = "$retentionDays ${stringResource(R.string.days_unit)}",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Slider(
-                        value = retentionDays.toFloat(),
-                        onValueChangeFinished = { /* commit on release only */ },
-                        onValueChange = { scope.launch { settings.setHistoryRetentionDays(it.roundToInt()) } },
-                        valueRange = RETENTION_RANGE_DAYS_F,
+            SettingsSection(stringResource(R.string.settings_section_history)) {
+                SettingRow(
+                    title = stringResource(R.string.settings_history),
+                    description = stringResource(R.string.settings_history_desc),
+                ) {
+                    Switch(
+                        checked = historyEnabled,
+                        onCheckedChange = { scope.launch { settings.setHistoryEnabled(it) } },
                     )
                 }
-            }
-            SettingRow(
-                title = stringResource(R.string.settings_history_view),
-                description = "",
-            ) {
-                OutlinedButton(onClick = onOpenHistory) {
-                    Text(">")
+                if (historyEnabled) {
+                    Column {
+                        Text(
+                            text = stringResource(R.string.settings_history_retention),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = "$retentionDays ${stringResource(R.string.days_unit)}",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Slider(
+                            value = retentionDays.toFloat(),
+                            onValueChangeFinished = { /* commit on release only */ },
+                            onValueChange = { scope.launch { settings.setHistoryRetentionDays(it.roundToInt()) } },
+                            valueRange = RETENTION_RANGE_DAYS_F,
+                        )
+                    }
+                }
+                SettingRow(
+                    title = stringResource(R.string.settings_history_view),
+                    description = "",
+                ) {
+                    OutlinedButton(onClick = onOpenHistory) {
+                        Text(">")
+                    }
                 }
             }
 
             // ------------------------------------------------------------------
             // Gemini account
             // ------------------------------------------------------------------
-            SectionHeader(stringResource(R.string.settings_section_gemini))
-
-            Text(
-                text = stringResource(R.string.settings_gemini_key),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = stringResource(
-                    if (hasKey) R.string.settings_key_configured else R.string.settings_key_missing,
-                ),
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (hasKey) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.error
-                },
-            )
-            OutlinedTextField(
-                value = keyInput,
-                onValueChange = { keyInput = it },
-                label = { Text(stringResource(R.string.settings_key_hint)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = {
-                        scope.launch {
-                            val saved = keyProvider.storeKey(keyInput.trim())
-                            keyFeedback = if (saved) {
-                                hasKey = true
-                                keyInput = ""
-                                keySavedMessage
-                            } else {
-                                keySaveFailedMessage
-                            }
-                        }
-                    },
-                ) {
-                    Text(stringResource(R.string.settings_key_save))
-                }
-                OutlinedButton(
-                    onClick = {
-                        scope.launch {
-                            keyProvider.deleteKey()
-                            hasKey = false
-                            keyFeedback = keyClearedMessage
-                        }
-                    },
-                ) {
-                    Text(stringResource(R.string.settings_key_clear))
-                }
-            }
-            keyFeedback?.let {
+            SettingsSection(stringResource(R.string.settings_section_gemini)) {
                 Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    text = stringResource(R.string.settings_gemini_key),
+                    style = MaterialTheme.typography.titleMedium,
                 )
+                Text(
+                    text = stringResource(
+                        if (hasKey) R.string.settings_key_configured else R.string.settings_key_missing,
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (hasKey) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+                OutlinedTextField(
+                    value = keyInput,
+                    onValueChange = { keyInput = it },
+                    label = { Text(stringResource(R.string.settings_key_hint)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val saved = keyProvider.storeKey(keyInput.trim())
+                                keyFeedback = if (saved) {
+                                    hasKey = true
+                                    keyInput = ""
+                                    keySavedMessage
+                                } else {
+                                    keySaveFailedMessage
+                                }
+                            }
+                        },
+                    ) {
+                        Text(stringResource(R.string.settings_key_save))
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                keyProvider.deleteKey()
+                                hasKey = false
+                                keyFeedback = keyClearedMessage
+                            }
+                        },
+                    ) {
+                        Text(stringResource(R.string.settings_key_clear))
+                    }
+                }
+                keyFeedback?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
         }
     }
 }
 
-/** 0.4.2 labeled settings section divider. */
+/** 0.4.2 card-wrapped settings section: a titled card grouping related
+ *  controls, matching the home screen's card style. */
 @Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
-    )
+private fun SettingsSection(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            content()
+        }
+    }
 }
 
 /** 0.4.2 slider row: the label/value on its own line and the full-width slider

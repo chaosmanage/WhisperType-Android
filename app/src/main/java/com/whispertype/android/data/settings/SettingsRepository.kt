@@ -49,6 +49,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         val bubbleOpacityPercent = intPreferencesKey("bubble_opacity_percent")
         val miniDotEnabled = booleanPreferencesKey("mini_dot_enabled")
         val miniDotDelaySeconds = intPreferencesKey("mini_dot_delay_seconds")
+        val darkMode = booleanPreferencesKey("dark_mode")
     }
 
     override val speechMode: Flow<LanguageMode> =
@@ -101,6 +102,9 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     override val miniDotDelaySeconds: Flow<Int> =
         dataStore.data.map { (it[Keys.miniDotDelaySeconds] ?: DEFAULT_MINI_DOT_DELAY_SECONDS).coerceIn(MIN_MINI_DOT_DELAY_SECONDS, MAX_MINI_DOT_DELAY_SECONDS) }
+
+    override val darkMode: Flow<Boolean> =
+        dataStore.data.map { it[Keys.darkMode] ?: false }
 
     suspend fun setSpeechMode(mode: LanguageMode) {
         dataStore.edit { it[Keys.speechMode] = mode.name }
@@ -182,6 +186,10 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     suspend fun setMiniDotDelaySeconds(seconds: Int) {
         dataStore.edit { it[Keys.miniDotDelaySeconds] = seconds.coerceIn(MIN_MINI_DOT_DELAY_SECONDS, MAX_MINI_DOT_DELAY_SECONDS) }
+    }
+
+    suspend fun setDarkMode(enabled: Boolean) {
+        dataStore.edit { it[Keys.darkMode] = enabled }
     }
 
     /** Decodes the stored dictionary JSON; malformed or unset input yields an empty list. */

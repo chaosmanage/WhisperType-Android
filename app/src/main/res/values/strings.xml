@@ -78,6 +78,8 @@
     <string name="settings_back">Back</string>
     <string name="settings_app_enabled">App enabled</string>
     <string name="settings_app_enabled_desc">Allow dictation while the runtime is active.</string>
+    <string name="settings_dark_mode">Dark mode</string>
+    <string name="settings_dark_mode_desc">Use a dark theme for the app screens.</string>
     <string name="settings_speech_mode">Speech mode</string>
     <string name="language_english">English</string>
     <string name="language_hinglish">Hinglish</string>
@@ -123,6 +125,7 @@
     <string name="settings_history_view">View history</string>
     <string name="settings_bubble_reset">Reset bubble position</string>
     <string name="settings_bubble_reset_desc">Return the mic bubble to its default position.</string>
+    <string name="settings_section_general">General</string>
     <string name="settings_section_recording">Recording</string>
     <string name="settings_section_bubble">Bubble</string>
     <string name="settings_section_dictionary">Dictionary</string>
