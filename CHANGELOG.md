@@ -4,6 +4,28 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-06
+
+First tagged release. Includes the 0.4.2 reliability + Wispr-style UI work (see the
+0.4.2 section below for the full "never lose a dictation" details) plus:
+
+- **First-run onboarding** — a guided setup screen replaces the plain overlay
+  screen: "How it works" steps, a live permission checklist (overlay,
+  microphone, notifications, accessibility), and an inline **Gemini API key**
+  entry; it waits for an explicit "Get started" and re-reads every permission
+  on resume.
+- **Bottom navigation** — Home / History / Dictionary / Settings tabs.
+- **Dark mode** toggle; **card-grouped Settings**; history settings moved onto
+  the History page; Dictionary spun out into its own page.
+- **Status-pill anchoring** — Finalizing/Inserting/Recovering pills now center
+  on the bubble instead of drifting off to the left.
+- **New default settings** — history on (30-day retention), Hinglish speech
+  mode, bubble opacity 80%, mini-dot after 5 s, bubble size 38 dp.
+- **Docs consolidation** — 19 markdown files reduced to a README hub + docs/;
+  stale planning/failure-report docs deleted.
+- **Release build signing** configured (keystore lives outside the repository);
+  the signed release APK is tracked and the debug APK is no longer tracked.
+
 ## [0.4.2] - 2026-08-06 (in development, feature branch)
 
 "Reliability first" — fixes the lost-transcription bug (first-few-words / 1-2 word summary / last-word-only) plus the Wispr-style UI round. Calibration evidence and the full reliability write-up are in `docs/GEMINI_LIVE.md` §15.
