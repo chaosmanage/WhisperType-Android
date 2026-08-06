@@ -4,6 +4,25 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-08-06
+
+Follow-up to 0.5.0.
+
+- **Live-model-only enforcement** — the app now uses only `gemini-3.1-flash-live-preview`.
+  The REST `:generateContent` audio-recovery failsafe (which used `gemini-3.6-flash`)
+  and the user-facing "Gemini model" override were removed. Reliability is now the
+  echo completeness gate + raw ASR salvage (no recording re-transcription backstop).
+- **Hinglish output is always Latin** — Hinglish settles echo-only (the raw ASR is
+  never used for Hindi since it transcribes in Devanagari); when the Latin echo is
+  missing or partial, the Devanagari text is transliterated to Latin server-side via
+  the live model's text channel. Verified by probes: raw ASR = Devanagari, hardened
+  echo = Latin for short and long dictations.
+- **Polish prompts** — MEDIUM may rephrase/reorder; HIGH may fully rewrite, reorder,
+  and add structure (bullets/paragraphs) while preserving every point; NONE/LOW stay
+  verbatim.
+- **Logo** — `app-logo.png` (blue-to-teal gradient) is the logo everywhere; the idle
+  bubble and mini-dot are squircle-shaped instead of circles.
+
 ## [0.5.0] - 2026-08-06
 
 First tagged release. Includes the 0.4.2 reliability + Wispr-style UI work (see the
