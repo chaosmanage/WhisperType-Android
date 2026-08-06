@@ -204,9 +204,9 @@ private fun PanelSurface(content: @Composable () -> Unit) {
     }
 }
 
-/** 0.4.2 recording pill: a thin translucent capsule with Done (green, at the
- *  bubble anchor/left), the live waveform in the center, and Cancel (red).
- *  Done commits the dictation; Cancel discards it. */
+/** 0.4.2 recording pill: a thin translucent capsule with Cancel (red X) at the
+ *  bubble anchor/left, the live waveform in the center, and Done (green check)
+ *  on the right. Done commits the dictation; Cancel discards it. */
 @Composable
 private fun ListeningCapsule(
     amplitude: Float?,
@@ -223,29 +223,28 @@ private fun ListeningCapsule(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             PillAction(
-                tag = stringResource(R.string.test_tag_stop),
-                label = stringResource(R.string.dictation_done),
-                icon = Icons.Filled.Check,
-                tint = WhisperTypeColors.SuccessAccent,
-                onClick = { onIntent(OverlayIntent.STOP) },
-            )
-            RealTimeWaveform(
-                amplitude = amplitude ?: 0f,
-                size = 36.dp,
-                modifier = Modifier.size(width = 56.dp, height = 36.dp),
-            )
-            PillAction(
                 tag = stringResource(R.string.test_tag_cancel),
                 label = stringResource(R.string.dictation_cancel),
                 icon = Icons.Filled.Close,
                 tint = WhisperTypeColors.ErrorAccent,
                 onClick = { onIntent(OverlayIntent.CANCEL) },
             )
+            RealTimeWaveform(
+                amplitude = amplitude ?: 0f,
+                modifier = Modifier.size(width = 72.dp, height = 48.dp),
+            )
+            PillAction(
+                tag = stringResource(R.string.test_tag_stop),
+                label = stringResource(R.string.dictation_done),
+                icon = Icons.Filled.Check,
+                tint = WhisperTypeColors.SuccessAccent,
+                onClick = { onIntent(OverlayIntent.STOP) },
+            )
         }
     }
 }
 
-/** Compact starting pill: the live waveform plus a Cancel button. */
+/** Compact starting pill: Cancel at the bubble anchor plus the live waveform. */
 @Composable
 private fun StartingCapsule(onIntent: (OverlayIntent) -> Unit) {
     Surface(
@@ -258,17 +257,16 @@ private fun StartingCapsule(onIntent: (OverlayIntent) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            RealTimeWaveform(
-                amplitude = 0f,
-                size = 36.dp,
-                modifier = Modifier.size(width = 56.dp, height = 36.dp),
-            )
             PillAction(
                 tag = stringResource(R.string.test_tag_cancel),
                 label = stringResource(R.string.dictation_cancel),
                 icon = Icons.Filled.Close,
                 tint = WhisperTypeColors.ErrorAccent,
                 onClick = { onIntent(OverlayIntent.CANCEL) },
+            )
+            RealTimeWaveform(
+                amplitude = 0f,
+                modifier = Modifier.size(width = 72.dp, height = 48.dp),
             )
         }
     }

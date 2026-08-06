@@ -14,14 +14,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.sin
 
 /**
  * 0.4.2 real-time waveform for the recording pill: a flat baseline on silence
  * that livens into a dancing skyline of peaks and crests as the user speaks.
- * [amplitude] is the smoothed mic level in [0, 1].
+ * [amplitude] is the smoothed mic level in [0, 1]. The drawing fills the
+ * modifier's size.
  *
  * Stateless and side-effect free: each bar's height is a deterministic function
  * of the rolling [phase] (an infinite transition) and its position, scaled by
@@ -32,7 +32,6 @@ import kotlin.math.sin
 fun RealTimeWaveform(
     amplitude: Float,
     modifier: Modifier = Modifier,
-    size: Dp = 40.dp,
     lineColor: Color = Color.White.copy(alpha = 0.9f),
 ) {
     val animated by animateFloatAsState(
@@ -52,8 +51,8 @@ fun RealTimeWaveform(
     )
 
     Canvas(modifier = modifier) {
-        val w = size.toPx()
-        val h = size.toPx()
+        val w = this.size.width
+        val h = this.size.height
         val baselineY = h * 0.86f
         val fade = Color(0xFF4A5A57)
 
