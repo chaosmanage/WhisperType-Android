@@ -366,18 +366,19 @@ class PersistentOverlayHost(
 
     /** Moves the window so the pill's Done button center sits on the bubble's
      *  center (the tap point): with the [X][wave][Done] pill, the Done center is
-     *  PILL_DONE_OFFSET_DP from the window's top-left corner. The window is
-     *  clamped to stay on-screen. */
+     *  PILL_DONE_OFFSET_X_DP right and PILL_DONE_OFFSET_Y_DP down from the
+     *  window's top-left corner. The window is clamped to stay on-screen. */
     private fun positionPillAtBubble() {
         val wm = windowManager ?: return
         val v = view ?: return
         val center = storedBubbleCenter ?: bubbleCenter() ?: return
-        val anchorPx = (PILL_DONE_OFFSET_DP * density()).roundToInt()
+        val anchorX = (PILL_DONE_OFFSET_X_DP * density()).roundToInt()
+        val anchorY = (PILL_DONE_OFFSET_Y_DP * density()).roundToInt()
         val w = v.width.takeIf { it > 0 } ?: 0
         val h = v.height.takeIf { it > 0 } ?: 0
         val (dw, dh) = displaySizePx()
-        val x = (center.first - anchorPx).coerceIn(0, maxOf(0, dw - w))
-        val y = (center.second - anchorPx).coerceIn(0, maxOf(0, dh - h))
+        val x = (center.first - anchorX).coerceIn(0, maxOf(0, dw - w))
+        val y = (center.second - anchorY).coerceIn(0, maxOf(0, dh - h))
         wm.updateViewLayout(v, windowParams(x, y))
         currentPixel = x to y
     }
@@ -488,10 +489,12 @@ class PersistentOverlayHost(
         const val DROP_TARGET_MARGIN_DP = 24f
 
         /** Distance from the pill window's top-left corner to the Done button
-         *  center, for the [X][wave 72dp][Done] pill layout:
-         *  6 dp padding + 48 dp Cancel + 4 dp gap + 72 dp wave + 4 dp gap +
-         *  24 dp half of the 48 dp Done button. Keep in sync with
-         *  [WhisperTypeOverlayContent.ListeningCapsule]. */
-        const val PILL_DONE_OFFSET_DP = 158f
+         *  center for the [X][wave 72dp][Done] pill layout:
+         *  horizontally 6 dp padding + 48 dp Cancel + 4 dp gap + 72 dp wave +
+         *  4 dp gap + 24 dp half of the 48 dp Done button; vertically 6 dp
+         *  padding + half the 52 dp wave (the button is vertically centered).
+         *  Keep in sync with [WhisperTypeOverlayContent.ListeningCapsule]. */
+        const val PILL_DONE_OFFSET_X_DP = 158f
+        const val PILL_DONE_OFFSET_Y_DP = 32f
     }
 }

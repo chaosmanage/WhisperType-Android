@@ -231,7 +231,7 @@ private fun ListeningCapsule(
             )
             RealTimeWaveform(
                 amplitude = amplitude ?: 0f,
-                modifier = Modifier.size(width = 72.dp, height = 48.dp),
+                modifier = Modifier.size(width = 72.dp, height = 52.dp),
             )
             PillAction(
                 tag = stringResource(R.string.test_tag_stop),
@@ -266,7 +266,7 @@ private fun StartingCapsule(onIntent: (OverlayIntent) -> Unit) {
             )
             RealTimeWaveform(
                 amplitude = 0f,
-                modifier = Modifier.size(width = 72.dp, height = 48.dp),
+                modifier = Modifier.size(width = 72.dp, height = 52.dp),
             )
         }
     }

@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.dp
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * 0.4.2 real-time waveform for the recording pill: a flat baseline on silence
@@ -23,10 +24,13 @@ import kotlin.math.sin
  * [amplitude] is the smoothed mic level in [0, 1]. The drawing fills the
  * modifier's size.
  *
+ * Sensitivity: the amplitude is boosted through a sqrt curve (low sounds still
+ * jump — 0.1 -> ~0.32 of full scale), and bars reach nearly the full canvas
+ * height, so speech is unmistakable even at a quiet voice.
+ *
  * Stateless and side-effect free: each bar's height is a deterministic function
  * of the rolling [phase] (an infinite transition) and its position, scaled by
- * the animated amplitude — so silence reads as a flat line and speech as a
- * visibly animated, multi-peaked wave.
+ * the boosted amplitude.
  */
 @Composable
 fun RealTimeWaveform(
@@ -44,7 +48,7 @@ fun RealTimeWaveform(
         initialValue = 0f,
         targetValue = (Math.PI * 2).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 650, easing = LinearEasing),
+            animation = tween(durationMillis = 550, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "wavePhase",
@@ -53,7 +57,7 @@ fun RealTimeWaveform(
     Canvas(modifier = modifier) {
         val w = this.size.width
         val h = this.size.height
-        val baselineY = h * 0.86f
+        val baselineY = h * 0.94f
         val fade = Color(0xFF4A5A57)
 
         // Faint baseline so the bar skyline has an origin.
@@ -65,13 +69,16 @@ fun RealTimeWaveform(
             cap = StrokeCap.Round,
         )
 
-        if (animated <= 0.01f) return@Canvas
+        if (animated <= 0.005f) return@Canvas
 
-        // Bar skyline: two overlapping sine components per bar for organic,
-        // non-uniform peaks and crests; height scales with the mic amplitude.
-        val peak = h * 0.68f * animated.coerceIn(0f, 1f)
-        val barCount = 15
-        val barWidth = (w / barCount) * 0.62f
+        // Sqrt boost: quiet speech still produces a lively, full-height skyline.
+        val level = sqrt(animated.coerceIn(0f, 1f))
+        val peak = (baselineY - h * 0.06f) * level
+
+        // Bar skyline: three overlapping sine components per bar for organic,
+        // non-uniform peaks and crests; height scales with the boosted level.
+        val barCount = 16
+        val barWidth = (w / barCount) * 0.7f
         val step = w / barCount
         for (i in 0 until barCount) {
             val x = step * (i + 0.5f)
@@ -81,7 +88,7 @@ fun RealTimeWaveform(
             // Normalize the three-component mix to ~[0, 1] so bars reach near the
             // peak but keep individual variety.
             val mix = (v1 + v2 + v3 + 3f) / 6f
-            val barH = (0.15f + 0.85f * mix.coerceIn(0f, 1f)) * peak
+            val barH = (0.12f + 0.88f * mix.coerceIn(0f, 1f)) * peak
             drawLine(
                 color = lineColor,
                 start = Offset(x, baselineY),
