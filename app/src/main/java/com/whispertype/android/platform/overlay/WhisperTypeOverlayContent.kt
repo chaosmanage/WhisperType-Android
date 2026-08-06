@@ -1,5 +1,7 @@
 package com.whispertype.android.platform.overlay
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -12,28 +14,34 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -44,19 +52,19 @@ import com.whispertype.android.core.model.OverlayIntent
 import com.whispertype.android.core.model.OverlayUiState
 import com.whispertype.android.ui.theme.WhisperTypeColors
 import com.whispertype.android.ui.theme.WhisperTypeTheme
-import com.whispertype.android.ui.waveform.CircularWaveform
+import com.whispertype.android.ui.waveform.RealTimeWaveform
+import kotlinx.coroutines.delay
 
 /**
  * Renders the persistent overlay surface for [uiState] and forwards user
  * actions via [onIntent]. The visible surface is derived with [visibilityOf]
- * (PRD §17.2); [OverlayVisibility.Hidden] renders nothing.
- *
- * This composable stays in the platform-overlay package and is importable by
- * the host. No preview annotations are required (AOT-safe).
+ * (PRD §17.2); [OverlayVisibility.Hidden] renders nothing. [appearance] carries
+ * the 0.4.2 bubble size / opacity / mini-dot settings.
  */
 @Composable
 fun WhisperTypeOverlayContent(
     uiState: OverlayUiState,
+    appearance: OverlayAppearance = OverlayAppearance(),
     onIntent: (OverlayIntent) -> Unit,
     onDragStart: (() -> Unit)? = null,
     onDragBubble: ((dx: Float, dy: Float) -> Unit)? = null,
@@ -66,6 +74,7 @@ fun WhisperTypeOverlayContent(
         when (visibilityOf(uiState)) {
             OverlayVisibility.Hidden -> Unit
             OverlayVisibility.IdleBubble -> IdleBubble(
+                appearance = appearance,
                 onIntent = onIntent,
                 onDragStart = onDragStart,
                 onDragBubble = onDragBubble,
@@ -89,19 +98,33 @@ fun WhisperTypeOverlayContent(
     }
 }
 
-/** The idle mic bubble: a small rounded target with a >= 48dp touch area. A drag
- *  moves the bubble (see [onDragBubble]); a tap without movement starts dictation. */
+/** The idle mic bubble (Wispr-style). While idle and [OverlayAppearance
+ *  .miniDotEnabled], it auto-minimizes to a tiny dot after a few seconds unless
+ *  tapped. A drag moves the bubble; a tap starts dictation. The 0.4.2 bubble
+ *  uses the app logo, user-configured size, and opacity. */
 @Composable
 private fun IdleBubble(
+    appearance: OverlayAppearance,
     onIntent: (OverlayIntent) -> Unit,
     onDragStart: (() -> Unit)?,
     onDragBubble: ((dx: Float, dy: Float) -> Unit)?,
     onDragEnd: (() -> Unit)?,
 ) {
-    val minSize = with(LocalDensity.current) { 48.dp }
+    var minimized by remember { mutableStateOf(false) }
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val startLabel = stringResource(R.string.dictation_start)
+    // 0.4.2 mini-dot: minimize after a quiet idle interval; a new Idle resets.
+    LaunchedEffect(Unit) {
+        minimized = false
+        if (appearance.miniDotEnabled) {
+            delay(appearance.miniDotAutoMinimizeMs)
+            minimized = true
+        }
+    }
+    val touchMin = with(LocalDensity.current) { 48.dp }
+    val bubbleSize = with(LocalDensity.current) { appearance.bubbleSizeDp.dp }
+
     Box(
         modifier = Modifier.pointerInput(onDragBubble) {
             detectDragGestures(
@@ -116,27 +139,53 @@ private fun IdleBubble(
         },
         contentAlignment = Alignment.Center,
     ) {
-        Surface(
-            onClick = { onIntent(OverlayIntent.START_DICTATION) },
-            modifier = Modifier
-                .sizeIn(minWidth = minSize, minHeight = minSize)
-                .testTag(stringResource(R.string.test_tag_bubble))
-                .semantics { contentDescription = startLabel },
-            shape = RoundedCornerShape(50),
-            color = if (pressed) {
-                WhisperTypeColors.IdleAccent.copy(alpha = 0.75f)
-            } else {
-                WhisperTypeColors.IdleAccent
-            },
-            interactionSource = interaction,
-        ) {
-            Box(Modifier.padding(12.dp), contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = Icons.Filled.Mic,
-                    contentDescription = null,
-                    tint = WhisperTypeColors.Surface,
-                    modifier = Modifier.size(24.dp),
-                )
+        if (minimized) {
+            // Mini dot: tiny visual (10% of the bubble) with a >=48dp touch target.
+            Surface(
+                onClick = { onIntent(OverlayIntent.START_DICTATION) },
+                modifier = Modifier
+                    .sizeIn(minWidth = touchMin, minHeight = touchMin)
+                    .size(bubbleSize)
+                    .alpha(appearance.opacity)
+                    .testTag(stringResource(R.string.test_tag_dot))
+                    .semantics { contentDescription = startLabel },
+                shape = CircleShape,
+                color = Color.Transparent,
+                interactionSource = interaction,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Surface(
+                        shape = CircleShape,
+                        color = com.whispertype.android.ui.theme.BrandColors.Teal,
+                        modifier = Modifier.size(12.dp),
+                    ) {}
+                }
+            }
+        } else {
+            Surface(
+                onClick = { onIntent(OverlayIntent.START_DICTATION) },
+                modifier = Modifier
+                    .sizeIn(minWidth = touchMin, minHeight = touchMin)
+                    .size(bubbleSize)
+                    .alpha(appearance.opacity)
+                    .testTag(stringResource(R.string.test_tag_bubble))
+                    .semantics { contentDescription = startLabel },
+                shape = RoundedCornerShape(50),
+                color = if (pressed) {
+                    WhisperTypeColors.IdleAccent.copy(alpha = 0.75f * appearance.opacity)
+                } else {
+                    WhisperTypeColors.IdleAccent.copy(alpha = appearance.opacity)
+                },
+                interactionSource = interaction,
+            ) {
+                Box(Modifier.padding(12.dp), contentAlignment = Alignment.Center) {
+                    Image(
+                        painter = painterResource(R.drawable.ic_bubble_logo),
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        contentScale = ContentScale.Fit,
+                    )
+                }
             }
         }
     }
@@ -157,7 +206,9 @@ private fun PanelSurface(content: @Composable () -> Unit) {
     }
 }
 
-/** Compact recording pill: live waveform plus Stop (primary accent) and Cancel. */
+/** 0.4.2 recording pill: a thin translucent capsule with Done (green, at the
+ *  bubble anchor/left), the live waveform in the center, and Cancel (red).
+ *  Done commits the dictation; Cancel discards it. */
 @Composable
 private fun ListeningCapsule(
     amplitude: Float?,
@@ -166,51 +217,59 @@ private fun ListeningCapsule(
     Surface(
         modifier = Modifier.testTag(stringResource(R.string.test_tag_panel)),
         shape = RoundedCornerShape(50),
-        color = WhisperTypeColors.SurfaceRaised,
-        tonalElevation = 4.dp,
+        color = WhisperTypeColors.SurfaceRaised.copy(alpha = 0.85f),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            CircularWaveform(amplitude = amplitude ?: 0f, size = 36.dp)
-            ActionButton(
+            PillAction(
                 tag = stringResource(R.string.test_tag_stop),
-                label = stringResource(R.string.dictation_stop),
-                icon = Icons.Filled.Stop,
-                iconTint = WhisperTypeColors.RecordingAccent,
+                label = stringResource(R.string.dictation_done),
+                icon = Icons.Filled.Check,
+                tint = WhisperTypeColors.SuccessAccent,
                 onClick = { onIntent(OverlayIntent.STOP) },
             )
-            ActionButton(
+            RealTimeWaveform(
+                amplitude = amplitude ?: 0f,
+                size = 36.dp,
+                modifier = Modifier.size(width = 56.dp, height = 36.dp),
+            )
+            PillAction(
                 tag = stringResource(R.string.test_tag_cancel),
                 label = stringResource(R.string.dictation_cancel),
                 icon = Icons.Filled.Close,
+                tint = WhisperTypeColors.ErrorAccent,
                 onClick = { onIntent(OverlayIntent.CANCEL) },
             )
         }
     }
 }
 
-/** Compact starting pill: a static waveform plus a Cancel button. */
+/** Compact starting pill: the live waveform plus a Cancel button. */
 @Composable
 private fun StartingCapsule(onIntent: (OverlayIntent) -> Unit) {
     Surface(
         modifier = Modifier.testTag(stringResource(R.string.test_tag_panel)),
         shape = RoundedCornerShape(50),
-        color = WhisperTypeColors.SurfaceRaised,
-        tonalElevation = 4.dp,
+        color = WhisperTypeColors.SurfaceRaised.copy(alpha = 0.85f),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            CircularWaveform(amplitude = 0f, size = 36.dp)
-            ActionButton(
+            RealTimeWaveform(
+                amplitude = 0f,
+                size = 36.dp,
+                modifier = Modifier.size(width = 56.dp, height = 36.dp),
+            )
+            PillAction(
                 tag = stringResource(R.string.test_tag_cancel),
                 label = stringResource(R.string.dictation_cancel),
                 icon = Icons.Filled.Close,
+                tint = WhisperTypeColors.ErrorAccent,
                 onClick = { onIntent(OverlayIntent.CANCEL) },
             )
         }
@@ -223,8 +282,7 @@ private fun StatusCapsule(text: String) {
     Surface(
         modifier = Modifier.testTag(stringResource(R.string.test_tag_panel)),
         shape = RoundedCornerShape(50),
-        color = WhisperTypeColors.SurfaceRaised,
-        tonalElevation = 4.dp,
+        color = WhisperTypeColors.SurfaceRaised.copy(alpha = 0.85f),
     ) {
         Text(
             text = text,
@@ -290,6 +348,35 @@ private fun ErrorPanel(state: DictationState.Error, onIntent: (OverlayIntent) ->
     }
 }
 
+/** A compact circular icon action inside the recording pill (>=48dp touch). */
+@Composable
+private fun PillAction(
+    tag: String,
+    label: String,
+    icon: ImageVector,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    val minSize = with(LocalDensity.current) { 48.dp }
+    Surface(
+        onClick = onClick,
+        modifier = Modifier
+            .sizeIn(minWidth = minSize, minHeight = minSize)
+            .testTag(tag),
+        shape = CircleShape,
+        color = Color.Transparent,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = tint,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
 @Composable
 private fun ActionButton(
     tag: String,
@@ -315,4 +402,3 @@ private fun ActionButton(
         Text(text = label)
     }
 }
-

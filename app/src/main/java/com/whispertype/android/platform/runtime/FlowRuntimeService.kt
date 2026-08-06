@@ -234,6 +234,9 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             owners = this,
             sessionState = sessionState,
             eligibility = eligibility,
+            bubbleSizeDp = settings.bubbleSizeDp,
+            bubbleOpacityPercent = settings.bubbleOpacityPercent,
+            miniDotEnabled = settings.miniDotEnabled,
             onBubblePositionChange = { x, y ->
                 scope.launch { settings.setBubblePosition(x, y) }
             },

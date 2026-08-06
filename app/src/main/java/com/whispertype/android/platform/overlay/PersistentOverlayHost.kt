@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -56,6 +57,9 @@ class PersistentOverlayHost(
     private val owners: OverlayOwners,
     sessionState: Flow<DictationState>,
     eligibility: Flow<TargetEligibility>,
+    bubbleSizeDp: Flow<Int> = flowOf(OverlayAppearance.DEFAULT_BUBBLE_SIZE_DP),
+    bubbleOpacityPercent: Flow<Int> = flowOf(100),
+    miniDotEnabled: Flow<Boolean> = flowOf(true),
     private val placement: OverlayPlacement = OverlayPlacement(),
     private val maxRetries: Int = MAX_ATTACH_RETRIES,
     private val onBubblePositionChange: ((x: Float, y: Float) -> Unit)? = null,
@@ -63,6 +67,9 @@ class PersistentOverlayHost(
 
     private val _uiState = MutableStateFlow(OverlayUiState.Hidden)
     override val uiState: StateFlow<OverlayUiState> = _uiState
+
+    private val _appearance = MutableStateFlow(OverlayAppearance())
+    val appearance: StateFlow<OverlayAppearance> = _appearance
 
     private val _intents = MutableSharedFlow<OverlayIntent>(extraBufferCapacity = 4)
     override val intents: SharedFlow<OverlayIntent> = _intents
@@ -138,6 +145,17 @@ class PersistentOverlayHost(
                     _uiState.value = effective
                 }
         }
+        // 0.4.2: combine the user-configurable bubble appearance settings.
+        scope.launch {
+            combine(bubbleSizeDp, bubbleOpacityPercent, miniDotEnabled) { size, opacity, dot ->
+                OverlayAppearance(
+                    bubbleSizeDp = size.coerceIn(24, 72),
+                    opacityPercent = opacity.coerceIn(10, 100),
+                    miniDotEnabled = dot,
+                )
+            }
+                .collect { _appearance.value = it }
+        }
     }
 
     /** Remembers the saved bubble top-left position (dp), or clears it when either axis is null. */
@@ -162,12 +180,16 @@ class PersistentOverlayHost(
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
                 setContent {
                     val current by uiState.collectAsState()
+                    val currentAppearance by appearance.collectAsState()
                     WhisperTypeOverlayContent(
                         uiState = current,
+                        appearance = currentAppearance,
                         onIntent = { _intents.tryEmit(it) },
                         onDragStart = { showDropTarget() },
                         onDragBubble = { dx, dy -> moveBy(dx, dy) },
-                        onDragEnd = { hideDropTarget(); checkDropDismiss() },
+                        // 0.4.2: check the drop BEFORE hiding the target, because
+                        // checkDropDismiss() reads dropTargetBounds.
+                        onDragEnd = { checkDropDismiss(); hideDropTarget() },
                     )
                 }
             }
