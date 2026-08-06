@@ -25,29 +25,30 @@ class LanguageModeTest {
     }
 
     @Test
-    fun `English Medium lightly polishes and removes frequent fillers`() {
+    fun `English Medium polishes into clean natural written text`() {
         val instruction = LanguageMode.ENGLISH.liveInstruction(TranscriptionStyle.MEDIUM)
         assertNotNull(instruction)
-        assertTrue(instruction.contains("lightly polish"))
-        assertTrue(instruction.contains("frequent fillers"))
+        assertTrue(instruction.contains("polish it into clean, natural written text"))
+        assertTrue(instruction.contains("remove fillers"))
         assertTrue(instruction.contains("grammar"))
+        assertTrue(instruction.contains("preserve every idea and every point"))
     }
 
     @Test
-    fun `English High fully polishes and removes all fillers`() {
+    fun `English High fully refines into polished prose`() {
         val instruction = LanguageMode.ENGLISH.liveInstruction(TranscriptionStyle.HIGH)
         assertNotNull(instruction)
-        assertTrue(instruction.contains("fully polish"))
-        assertTrue(instruction.contains("filler"))
+        assertTrue(instruction.contains("fully refine it into polished, well-structured prose"))
         assertTrue(instruction.contains("well-formed sentences"))
+        assertTrue(instruction.contains("preserve every idea and every point"))
     }
 
     @Test
     fun `Hinglish None keeps Latin-script rule`() {
         val instruction = LanguageMode.HINGLISH.liveInstruction(TranscriptionStyle.NONE)
         assertNotNull(instruction)
-        assertTrue(instruction.contains("never in Devanagari"))
-        assertTrue(instruction.contains("Roman (Latin) script"))
+        assertTrue(instruction.contains("never output a single Devanagari"))
+        assertTrue(instruction.contains("Latin (Roman) script"))
         assertTrue(instruction.contains("exactly as spoken"))
     }
 
@@ -55,7 +56,7 @@ class LanguageModeTest {
     fun `Hinglish Low keeps Latin-script rule`() {
         val instruction = LanguageMode.HINGLISH.liveInstruction(TranscriptionStyle.LOW)
         assertNotNull(instruction)
-        assertTrue(instruction.contains("never in Devanagari"))
+        assertTrue(instruction.contains("never output a single Devanagari"))
         assertTrue(instruction.contains("basic sentence punctuation"))
     }
 
@@ -63,16 +64,16 @@ class LanguageModeTest {
     fun `Hinglish Medium keeps Latin-script rule`() {
         val instruction = LanguageMode.HINGLISH.liveInstruction(TranscriptionStyle.MEDIUM)
         assertNotNull(instruction)
-        assertTrue(instruction.contains("never in Devanagari"))
-        assertTrue(instruction.contains("lightly polish"))
+        assertTrue(instruction.contains("never output a single Devanagari"))
+        assertTrue(instruction.contains("polish it into clean, natural written text"))
     }
 
     @Test
     fun `Hinglish High keeps Latin-script rule`() {
         val instruction = LanguageMode.HINGLISH.liveInstruction(TranscriptionStyle.HIGH)
         assertNotNull(instruction)
-        assertTrue(instruction.contains("never in Devanagari"))
-        assertTrue(instruction.contains("fully polish"))
+        assertTrue(instruction.contains("never output a single Devanagari"))
+        assertTrue(instruction.contains("fully refine it into polished, well-structured prose"))
     }
 
     @Test
@@ -84,13 +85,22 @@ class LanguageModeTest {
     }
 
     @Test
-    fun `every style carries the 0_4_2 never summarize clause`() {
+    fun `every style carries the appropriate verbatim or content clause`() {
         for (mode in LanguageMode.entries) {
             for (style in TranscriptionStyle.entries) {
                 val instruction = mode.liveInstruction(style)
-                assertTrue(instruction.contains("NEVER summarize"), "$mode $style")
-                assertTrue(instruction.contains("every single word"), "$mode $style")
-                assertTrue(instruction.contains("NEVER omit the end"), "$mode $style")
+                val strict = style == TranscriptionStyle.NONE || style == TranscriptionStyle.LOW
+                if (strict) {
+                    assertTrue(instruction.contains("every single word"), "$mode $style")
+                    assertTrue(instruction.contains("NEVER summarize"), "$mode $style")
+                } else {
+                    assertTrue(instruction.contains("preserve every idea and every point"), "$mode $style")
+                    assertTrue(instruction.contains("never omit"), "$mode $style")
+                }
+                assertTrue(instruction.contains("Output ONLY the repeated text"), "$mode $style")
+                if (mode == LanguageMode.HINGLISH) {
+                    assertTrue(instruction.contains("never output a single Devanagari"), "$mode $style")
+                }
             }
         }
     }

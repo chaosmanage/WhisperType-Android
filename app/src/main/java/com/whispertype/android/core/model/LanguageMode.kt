@@ -30,15 +30,19 @@ enum class LanguageMode {
                 "Repeat the user's speech back and add basic sentence punctuation and " +
                     "capitalization. Keep the exact words and the natural spoken phrasing."
             TranscriptionStyle.MEDIUM ->
-                "Repeat the user's speech back and lightly polish it: add proper " +
-                    "punctuation and capitalization, remove frequent fillers (um, uh, ah), " +
-                    "and fix obvious grammar while keeping the user's words and meaning."
+                "Repeat the user's speech back and polish it into clean, natural written " +
+                    "text: add proper punctuation and capitalization, remove fillers (um, uh, ah), " +
+                    "fix grammar and awkward phrasing, and make it read well. You may rephrase " +
+                    "and lightly reorder to improve clarity, as long as you keep the user's " +
+                    "meaning and every point they made."
             TranscriptionStyle.HIGH ->
-                "Repeat the user's speech back and fully polish it: remove all filler " +
-                    "words (um, uh, ah, you know, like, i mean), correct grammar, add proper " +
-                    "punctuation and capitalization, and structure it into clear, " +
-                    "well-formed sentences. Keep the user's meaning and as many of their " +
-                    "words as possible."
+                "Repeat the user's speech back and fully refine it into polished, " +
+                    "well-structured prose. You are free to completely rewrite, reorder sentences " +
+                    "and lines, and choose different words as needed - carry the user's message " +
+                    "across and preserve every point they made. Add structure where it helps: " +
+                    "bullet points, numbered items, or clear paragraphs, and write complete, " +
+                    "well-formed sentences. The final output should read like carefully edited, " +
+                    "professional writing."
         }
         val base =
             "Output ONLY the repeated text and nothing else - no greetings, no " +
@@ -51,12 +55,23 @@ enum class LanguageMode {
                 "first to the last. NEVER summarize, NEVER shorten, NEVER omit the end of " +
                 "what the user said, NEVER stop early, even when the user speaks for a " +
                 "very long time. Your output must contain every word the user said."
+        val content =
+            "CRITICAL: preserve every idea and every point from the user's speech - " +
+                "never omit, drop, or summarize away any part of the message, even for long " +
+                "dictations - but you are free to rephrase, reorder, and restructure the text " +
+                "as needed for polish."
+        val tail = if (style == TranscriptionStyle.NONE || style == TranscriptionStyle.LOW) verbatim else content
         return when (this) {
-            ENGLISH -> "$styleText $base $verbatim"
+            ENGLISH -> "$styleText $base $tail"
             HINGLISH -> {
                 val hinglishRule =
-                    "Write Hindi words in Roman (Latin) script only, never in Devanagari."
-                "$styleText $hinglishRule $base $verbatim"
+                    "CRITICAL SCRIPT RULE: the output MUST be entirely in Latin (Roman) script. " +
+                        "Never use Devanagari (Hindi) script - never output a single Devanagari " +
+                        "character. Even though the user is speaking in Hindi, render every Hindi " +
+                        "word in Latin letters as it sounds, exactly as if the user were speaking " +
+                        "in Latin script (for example write 'main theek hoon', never 'मैं ठीक हूँ'). " +
+                        "This applies to the whole output with no exceptions."
+                "$styleText $hinglishRule $base $tail"
             }
         }
     }
