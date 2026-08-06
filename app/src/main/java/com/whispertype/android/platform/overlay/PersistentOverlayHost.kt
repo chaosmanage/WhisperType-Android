@@ -115,6 +115,16 @@ class PersistentOverlayHost(
     @Volatile
     private var dropTargetBounds: Rect? = null
 
+    /** True while a recording pill is shown; the window is anchored so the pill's
+     *  Done button sits exactly where the bubble was when it was tapped. */
+    @Volatile
+    private var pillAnchored = false
+
+    /** Bubble center (px) captured before the pill anchor, so the bubble is
+     *  restored to the same spot when the session returns to idle. */
+    @Volatile
+    private var storedBubbleCenter: Pair<Int, Int>? = null
+
     private var positionChangeDebounce: Runnable? = null
 
     private var retryCount = 0
@@ -142,6 +152,22 @@ class PersistentOverlayHost(
                     val effective =
                         if (dismissed && ui.state is DictationState.Idle) OverlayUiState.Hidden
                         else ui
+                    // 0.4.2: anchor the recording pill so its Done button lands on
+                    // the bubble's center (the tap point); restore on return to idle.
+                    val s = effective.state
+                    val isPill = s is DictationState.Starting ||
+                        s is DictationState.Listening ||
+                        s is DictationState.Finalizing ||
+                        s is DictationState.Recovering ||
+                        s is DictationState.Inserting
+                    if (isPill && !pillAnchored) {
+                        pillAnchored = true
+                        storedBubbleCenter = bubbleCenter()
+                        positionPillAtBubble()
+                    } else if (!isPill && pillAnchored) {
+                        pillAnchored = false
+                        restoreBubblePosition()
+                    }
                     _uiState.value = effective
                 }
         }
@@ -323,6 +349,59 @@ class PersistentOverlayHost(
     }
 
     // ------------------------------------------------------------------
+    // 0.4.2: recording-pill anchoring (Done sits where the bubble was)
+    // ------------------------------------------------------------------
+
+    /** The visible bubble's size in px (48dp touch floor, user size above). */
+    private fun bubbleSizePx(): Int = (maxOf(48f, _appearance.value.bubbleSizeDp.toFloat()) * density()).roundToInt()
+
+    /** The bubble's center (px) — the point the user tapped to start. */
+    private fun bubbleCenter(): Pair<Int, Int>? {
+        val base = currentPixel ?: return null
+        val s = bubbleSizePx()
+        return Pair(base.first + s / 2, base.second + s / 2)
+    }
+
+    /** Moves the window so the pill's Done button center sits on the bubble's
+     *  center (the tap point): the pill's Done center is PILL_DONE_OFFSET_DP
+     *  from the window's top-left corner. Keeps the window vertically on-screen;
+     *  horizontal position is exact (the pill may extend past the right edge). */
+    private fun positionPillAtBubble() {
+        val wm = windowManager ?: return
+        val v = view ?: return
+        val center = storedBubbleCenter ?: bubbleCenter() ?: return
+        val anchorPx = (PILL_DONE_OFFSET_DP * density()).roundToInt()
+        val w = v.width.takeIf { it > 0 } ?: 0
+        val h = v.height.takeIf { it > 0 } ?: 0
+        val (_, dh) = displaySizePx()
+        val x = center.first - anchorPx
+        val y = (center.second - anchorPx).coerceIn(0, maxOf(0, dh - h))
+        wm.updateViewLayout(v, windowParams(x, y))
+        currentPixel = x to y
+    }
+
+    /** Restores the window to the bubble's top-left (the saved center minus half
+     *  the bubble size), keeping it on-screen. */
+    private fun restoreBubblePosition() {
+        val wm = windowManager ?: return
+        val v = view ?: return
+        val center = storedBubbleCenter ?: return
+        storedBubbleCenter = null
+        val s = bubbleSizePx()
+        val (dw, dh) = displaySizePx()
+        val target = BubblePlacement.clamp(
+            center.first - s / 2,
+            center.second - s / 2,
+            s,
+            s,
+            dw,
+            dh,
+        )
+        wm.updateViewLayout(v, windowParams(target.first, target.second))
+        currentPixel = target
+    }
+
+    // ------------------------------------------------------------------
     // Drag drop-target ("X")
     // ------------------------------------------------------------------
 
@@ -405,5 +484,9 @@ class PersistentOverlayHost(
         const val DRAG_SETTLE_DEBOUNCE_MS = 150L
         const val DROP_TARGET_DP = 56f
         const val DROP_TARGET_MARGIN_DP = 24f
+
+        /** Distance from the pill window's top-left to the Done button center
+         *  (6 dp horizontal padding + 24 dp half of the 48 dp button). */
+        const val PILL_DONE_OFFSET_DP = 30f
     }
 }

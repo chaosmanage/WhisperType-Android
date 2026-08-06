@@ -221,33 +221,21 @@ fun SettingsScreen(
             // ------------------------------------------------------------------
             SectionHeader(stringResource(R.string.settings_section_bubble))
 
-            SettingRow(
+            SettingSlider(
                 title = stringResource(R.string.settings_bubble_size),
                 description = stringResource(R.string.settings_bubble_size_value, bubbleSizeDp),
-            ) {
-                Slider(
-                    value = bubbleSizeDp.toFloat(),
-                    onValueChangeFinished = { /* commit on release only */ },
-                    onValueChange = {
-                        scope.launch { settings.setBubbleSizeDp(it.roundToInt()) }
-                    },
-                    valueRange = BUBBLE_SIZE_RANGE_DP_F,
-                )
-            }
+                value = bubbleSizeDp.toFloat(),
+                range = BUBBLE_SIZE_RANGE_DP_F,
+                onValueChange = { scope.launch { settings.setBubbleSizeDp(it.roundToInt()) } },
+            )
 
-            SettingRow(
+            SettingSlider(
                 title = stringResource(R.string.settings_bubble_opacity),
                 description = stringResource(R.string.settings_bubble_opacity_value, bubbleOpacity),
-            ) {
-                Slider(
-                    value = bubbleOpacity.toFloat(),
-                    onValueChangeFinished = { /* commit on release only */ },
-                    onValueChange = {
-                        scope.launch { settings.setBubbleOpacityPercent(it.roundToInt()) }
-                    },
-                    valueRange = BUBBLE_OPACITY_RANGE_PERCENT_F,
-                )
-            }
+                value = bubbleOpacity.toFloat(),
+                range = BUBBLE_OPACITY_RANGE_PERCENT_F,
+                onValueChange = { scope.launch { settings.setBubbleOpacityPercent(it.roundToInt()) } },
+            )
 
             SettingRow(
                 title = stringResource(R.string.settings_mini_dot),
@@ -464,6 +452,37 @@ private fun SectionHeader(text: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
     )
+}
+
+/** 0.4.2 slider row: the label/value on its own line and the full-width slider
+ *  beneath it (a slider squeezed into a [SettingRow] truncates the text). */
+@Composable
+private fun SettingSlider(
+    title: String,
+    description: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    onValueChange: (Float) -> Unit,
+) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = title, style = MaterialTheme.typography.titleMedium)
+                Text(text = description, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Slider(
+            value = value,
+            onValueChangeFinished = { /* commit on release only */ },
+            onValueChange = onValueChange,
+            valueRange = range,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 @Composable

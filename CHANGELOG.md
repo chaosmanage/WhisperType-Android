@@ -22,7 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Recording pill** — thin translucent capsule: Done (green check) at the bubble anchor, live waveform center, Cancel (red X).
 - **Real-time waveform** — flat on silence, rolling wave while speaking (replaces the circular pulse).
 - **Mini-dot bubble** — the idle bubble auto-minimizes to a small dot (~3 s, 12 dp visual / 48 dp touch) and the dot starts dictation; toggleable in Settings.
-- **Bubble appearance** — size (24-72 dp), opacity (10-100%), and the app-logo icon; brand emerald-teal theme shared by every screen; new launcher icon from `app-logo.png`.
+- **Bubble appearance** — size (24-72 dp), opacity (10-100%); the bubble IS the app logo (`newapplogo.png`), round-clipped with no background circle; emerald-teal theme shared by every screen; launcher icon from `newapplogo.png`.
 - **Settings sections** — labeled Recording / Bubble / Dictionary / History / Gemini account sections.
 - **Home stats** — sessions, words, today's words, and WPM from history (with an enable hint when history is off); back returns Home from Settings/History.
 - **X drop-target fix** — drop is checked before the target is hidden.

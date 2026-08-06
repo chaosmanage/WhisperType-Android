@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
@@ -35,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -87,8 +89,7 @@ fun WhisperTypeOverlayContent(
             )
             OverlayVisibility.Finalizing ->
                 StatusCapsule(stringResource(R.string.dictation_finalizing))
-            OverlayVisibility.Recovering ->
-                StatusCapsule(stringResource(R.string.dictation_recovering))
+            OverlayVisibility.Recovering -> RecoveringCapsule(onIntent = onIntent)
             OverlayVisibility.Inserting ->
                 StatusCapsule(stringResource(R.string.dictation_inserting))
             OverlayVisibility.Success -> Unit
@@ -162,30 +163,27 @@ private fun IdleBubble(
                 }
             }
         } else {
+            // The bubble IS the app logo, round-clipped — no background circle.
             Surface(
                 onClick = { onIntent(OverlayIntent.START_DICTATION) },
                 modifier = Modifier
                     .sizeIn(minWidth = touchMin, minHeight = touchMin)
                     .size(bubbleSize)
-                    .alpha(appearance.opacity)
+                    .alpha(if (pressed) appearance.opacity * 0.75f else appearance.opacity)
                     .testTag(stringResource(R.string.test_tag_bubble))
                     .semantics { contentDescription = startLabel },
-                shape = RoundedCornerShape(50),
-                color = if (pressed) {
-                    WhisperTypeColors.IdleAccent.copy(alpha = 0.75f * appearance.opacity)
-                } else {
-                    WhisperTypeColors.IdleAccent.copy(alpha = appearance.opacity)
-                },
+                shape = CircleShape,
+                color = Color.Transparent,
                 interactionSource = interaction,
             ) {
-                Box(Modifier.padding(12.dp), contentAlignment = Alignment.Center) {
-                    Image(
-                        painter = painterResource(R.drawable.ic_bubble_logo),
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp),
-                        contentScale = ContentScale.Fit,
-                    )
-                }
+                Image(
+                    painter = painterResource(R.drawable.ic_bubble_logo),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop,
+                )
             }
         }
     }
@@ -290,6 +288,37 @@ private fun StatusCapsule(text: String) {
             style = MaterialTheme.typography.labelLarge,
             color = WhisperTypeColors.OnSurface,
         )
+    }
+}
+
+/** 0.4.2 recovering pill: a status message plus a Cancel so the user can always
+ *  bail out while the audio-recovery failsafe re-transcribes. */
+@Composable
+private fun RecoveringCapsule(onIntent: (OverlayIntent) -> Unit) {
+    Surface(
+        modifier = Modifier.testTag(stringResource(R.string.test_tag_panel)),
+        shape = RoundedCornerShape(50),
+        color = WhisperTypeColors.SurfaceRaised.copy(alpha = 0.85f),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.dictation_recovering),
+                style = MaterialTheme.typography.labelLarge,
+                color = WhisperTypeColors.OnSurface,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+            PillAction(
+                tag = stringResource(R.string.test_tag_cancel),
+                label = stringResource(R.string.dictation_cancel),
+                icon = Icons.Filled.Close,
+                tint = WhisperTypeColors.ErrorAccent,
+                onClick = { onIntent(OverlayIntent.CANCEL) },
+            )
+        }
     }
 }
 

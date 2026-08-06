@@ -32,6 +32,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeout
 
 /**
  * Host services the [DictationCoordinator] needs. Implemented by
@@ -114,6 +115,7 @@ private class ActiveLiveSession(
     var settleJob: Job? = null
     var deadlineJob: Job? = null
     var echoFallbackJob: Job? = null
+    var recoveryJob: Job? = null
     var inserted: Boolean = false
 
     /** The settled dictation text when one existed (opt-in history hook). */
@@ -173,6 +175,10 @@ class DictationCoordinator(
         /** 0.4.2: when the settled text covers less than this fraction of the
          *  duration-derived expected words, the recording is re-transcribed. */
         val minExpectedFraction: Double = 0.6,
+        /** 0.4.2: hard cap on the audio-recovery REST call so the session can
+         *  never stall in the Recovering state; on timeout the best available
+         *  live text is inserted instead. */
+        val recoveryTimeoutMs: Long = 45_000,
         /** 0.4.2: recording cap for the audio-recovery failsafe. */
         val recordingMaxBytes: Int = SessionRecording.DEFAULT_MAX_BYTES,
         val returnToIdleMs: Long = 1_200,
@@ -634,7 +640,7 @@ class DictationCoordinator(
         }
     }
 
-    private suspend fun settle(holder: ActiveLiveSession) {
+    private fun settle(holder: ActiveLiveSession) {
         if (active !== holder) return
         holder.settleJob?.cancel()
         holder.deadlineJob?.cancel()
@@ -657,9 +663,9 @@ class DictationCoordinator(
                 holder.metrics.lastRejection = diagnosis?.rule?.name
                 if (candidate != null && lenientAccept(holder, candidate, diagnosis)) {
                     holder.metrics.usedLenientFallback = true
-                    val finalText = maybeRecover(holder, candidate.raw)
-                    holder.settledText = finalText
-                    insertSettled(holder, finalText)
+                    if (startRecovery(holder, candidate.raw)) return
+                    holder.settledText = candidate.raw
+                    insertSettled(holder, candidate.raw)
                 } else {
                     failNoTranscript(holder)
                 }
@@ -671,9 +677,9 @@ class DictationCoordinator(
                     failNoTranscript(holder)
                     return
                 }
-                val finalText = maybeRecover(holder, selection.text)
-                holder.settledText = finalText
-                insertSettled(holder, finalText)
+                if (startRecovery(holder, selection.text)) return
+                holder.settledText = selection.text
+                insertSettled(holder, selection.text)
             }
         }
     }
@@ -681,31 +687,51 @@ class DictationCoordinator(
     /**
      * 0.4.2 audio-recovery gate. When the chosen text plausibly misses most of
      * the recorded speech (duration-derived expected words), the full recording
-     * is re-transcribed via [DictationHost.recoverTranscript] and that text is
-     * returned instead — the user's words are recovered even when BOTH the echo
-     * and the raw ASR failed. Never throws and never returns null: on any
-     * failure the best available live text is kept so nothing is ever lost.
+     * is re-transcribed via [DictationHost.recoverTranscript] and the recovered
+     * text is inserted instead — the user's words are recovered even when BOTH
+     * the echo and the raw ASR failed.
+     *
+     * The recovery runs on its OWN coroutine (never the settle job), so a settle
+     * debounce restart or session teardown can never abandon the session in the
+     * Recovering state (0.4.2 bug: stuck on "Recovering full text…"). A hard
+     * timeout guarantees it can never hang: on timeout or failure the best
+     * available live text is inserted, so nothing is ever lost and the UI never
+     * stalls.
+     *
+     * Returns true when recovery took over (the caller must NOT insert); false
+     * when the chosen text is used directly.
      */
-    private suspend fun maybeRecover(holder: ActiveLiveSession, text: String): String {
+    private fun startRecovery(holder: ActiveLiveSession, text: String): Boolean {
         val durationMs = holder.metrics.capturedFrames * CHUNK_DURATION_MS
         val expected = TranscriptCompleteness.expectedWords(durationMs, config.expectedWordsPerSecond)
         val settledWords = TranscriptCompleteness.contentWords(text).size
         holder.metrics.expectedWords = expected
         holder.metrics.settledWords = settledWords
-        if (expected <= 0 || settledWords >= expected * config.minExpectedFraction) return text
-        val wav = holder.recording.toWav() ?: return text
+        if (expected <= 0 || settledWords >= expected * config.minExpectedFraction) return false
+        if (holder.recording.toWav() == null) return false
         publish(DictationState.Recovering(holder.sessionId))
-        val recovered = try {
-            host.recoverTranscript(holder.sessionId, wav)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            null
+        holder.recoveryJob?.cancel()
+        holder.recoveryJob = scope.launch {
+            val wav = holder.recording.toWav() ?: return@launch
+            val recovered = try {
+                withTimeout(config.recoveryTimeoutMs) {
+                    host.recoverTranscript(holder.sessionId, wav)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            if (active !== holder) return@launch
+            val finalText = if (recovered.isNullOrBlank()) text else recovered
+            if (recovered != null && recovered.isNotBlank()) {
+                holder.metrics.usedAudioRecovery = true
+                holder.metrics.recoveredWords = TranscriptCompleteness.contentWords(recovered).size
+            }
+            holder.settledText = finalText
+            insertSettled(holder, finalText)
         }
-        if (recovered.isNullOrBlank()) return text
-        holder.metrics.usedAudioRecovery = true
-        holder.metrics.recoveredWords = TranscriptCompleteness.contentWords(recovered).size
-        return recovered
+        return true
     }
 
     /** Lenient failsafe acceptance for user speech rejected by strict validation. */
@@ -799,6 +825,7 @@ class DictationCoordinator(
         holder.autoStopJob?.cancel()
         holder.captureFailureJob?.cancel()
         holder.eventJob?.cancel()
+        holder.recoveryJob?.cancel()
         holder.capture?.let { capture ->
             scope.launch {
                 capture.requestStop()
