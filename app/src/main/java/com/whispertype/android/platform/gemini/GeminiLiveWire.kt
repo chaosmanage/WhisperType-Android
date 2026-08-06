@@ -116,6 +116,13 @@ object GeminiLiveWire {
             )
         }.toString()
 
+    /** 0.5.0 Hinglish: sends a realtime text input (used to transliterate
+     *  Devanagari to Latin via the live model's spoken reply). */
+    fun buildRealtimeText(text: String): String =
+        buildJsonObject {
+            put("realtimeInput", buildJsonObject { put("text", text) })
+        }.toString()
+
     /** Client signals the end of its turn and that generation may begin. */
     fun buildTurnComplete(): String =
         buildJsonObject {

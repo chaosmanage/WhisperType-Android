@@ -41,6 +41,14 @@ interface GeminiLiveSession {
     /** Server events (transcripts, turn complete, failures). */
     fun events(): Flow<GeminiEvent>
 
+    /**
+     * 0.5.0 Hinglish: sends [text] as a realtime text input and asks the model
+     * to speak it (used to transliterate Devanagari to Latin server-side). Returns
+     * the accumulated `outputTranscription` echo, or null on failure/timeout.
+     * Must be called after [awaitReady] on a fresh, dedicated session.
+     */
+    suspend fun requestEchoFor(text: String): String? = null
+
     /** Idempotent close of the WebSocket and all session resources. */
     suspend fun close()
 }

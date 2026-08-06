@@ -7,6 +7,7 @@ import com.whispertype.android.core.model.GeminiEvent
 import com.whispertype.android.core.model.MutableSessionMetrics
 import com.whispertype.android.core.model.ResultCandidate
 import com.whispertype.android.core.model.SendResult
+import com.whispertype.android.core.transcript.TranscriptAccumulator
 import java.util.Base64
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -16,8 +17,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -169,6 +172,37 @@ class OkHttpGeminiLiveSession(
 
     override fun events(): Flow<GeminiEvent> = _events.receiveAsFlow()
 
+    /**
+     * 0.5.0 Hinglish: sends [text] over the realtime text channel and collects the
+     * model's spoken reply via `outputTranscription` (delta-accumulated), returning
+     * the transliterated Latin text or null. Used on a fresh, dedicated session.
+     */
+    override suspend fun requestEchoFor(text: String): String? {
+        if (state.get() != State.Ready) return null
+        val ws = socket ?: return null
+        if (!ws.send(GeminiLiveWire.buildRealtimeText(text))) return null
+        if (!ws.send(GeminiLiveWire.buildTurnComplete())) return null
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        var done = false
+        var failed = false
+        withTimeoutOrNull(ECHO_TIMEOUT_MS) {
+            events()
+                .takeWhile { !done && !failed }
+                .collect { event ->
+                    when (event) {
+                        is GeminiEvent.TranscriptCandidates ->
+                            if (event.source == GeminiEvent.TranscriptSource.ECHO) {
+                                event.candidates.forEach { accumulator.accept(it.raw) }
+                            }
+                        GeminiEvent.TurnComplete -> done = true
+                        is GeminiEvent.Failed -> failed = true
+                        else -> Unit
+                    }
+                }
+        }
+        return if (failed) null else accumulator.settledText()
+    }
+
     override suspend fun close() {
         if (closed.compareAndSet(false, true)) {
             state.set(State.Closed)
@@ -319,6 +353,7 @@ class OkHttpGeminiLiveSession(
     private companion object {
         const val TAG = "OkHttpGeminiLiveSession"
         const val READY_TIMEOUT_MS = 15_000L
+        const val ECHO_TIMEOUT_MS = 15_000L
         const val NORMAL_CLOSE_CODE = 1000
         const val REASON_NOT_READY = "session_not_ready"
         const val REASON_CLOSED = "socket_closed"

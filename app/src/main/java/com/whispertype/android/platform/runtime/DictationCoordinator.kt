@@ -52,6 +52,13 @@ interface DictationHost {
     fun sendInsertion(sessionId: SessionId, text: String): Boolean
 
     /**
+     * 0.5.0 Hinglish: transliterates [text] (Hindi in Devanagari) to Latin script
+     * server-side by having the live model speak it back and reading the
+     * `outputTranscription` echo. Returns the Latin text, or null on failure.
+     */
+    suspend fun transliterateToLatin(sessionId: SessionId, text: String): String?
+
+    /**
      * Per-session aggregate diagnostics at terminal state. Must never contain
      * audio, keys, or full server frames. [transcript] is the settled dictation
      * text when one existed (used for opt-in history), or null otherwise.
@@ -104,6 +111,7 @@ private class ActiveLiveSession(
     var settleJob: Job? = null
     var deadlineJob: Job? = null
     var echoFallbackJob: Job? = null
+    var transliterationJob: Job? = null
     var inserted: Boolean = false
 
     /** The settled dictation text when one existed (opt-in history hook). */
@@ -596,6 +604,12 @@ class DictationCoordinator(
     private fun selectSettledText(holder: ActiveLiveSession): Pair<String, SettlePath>? {
         val echo = holder.echoAccumulator.settledText()?.takeIf { it.isNotBlank() }
         val raw = holder.accumulator.settledText()?.takeIf { it.isNotBlank() }
+        // 0.5.0 Hinglish: the raw ASR for Hindi is always Devanagari (never
+        // instruction-influenced), so it is never a dictation source; only the
+        // instructed Latin echo is usable.
+        if (holder.language == LanguageMode.HINGLISH) {
+            return echo?.let { it to SettlePath.ECHO_ONLY }
+        }
         return when {
             echo != null && raw != null &&
                 TranscriptCompleteness.covers(echo, raw, config.minEchoRatio) ->
@@ -617,6 +631,10 @@ class DictationCoordinator(
         holder.deadlineJob?.cancel()
         holder.echoFallbackJob?.cancel()
         holder.metrics.mark(MutableSessionMetrics.Event.TranscriptSettled)
+        if (holder.language == LanguageMode.HINGLISH) {
+            settleHinglish(holder)
+            return
+        }
         val selected = selectSettledText(holder)
         holder.metrics.settlePath = selected?.second ?: SettlePath.NONE
         val raw = selected?.first
@@ -650,6 +668,55 @@ class DictationCoordinator(
                 holder.settledText = selection.text
                 insertSettled(holder, selection.text)
             }
+        }
+    }
+
+    /**
+     * 0.5.0 Hinglish settlement — output is ALWAYS Latin:
+     *  - a complete instructed echo (Latin) is inserted as-is;
+     *  - when the echo is missing or partial, the raw ASR (Devanagari) is
+     *    transliterated to Latin server-side via the live model and inserted;
+     *  - a Latin echo is never replaced, and Devanagari is never inserted.
+     */
+    private fun settleHinglish(holder: ActiveLiveSession) {
+        val echo = holder.echoAccumulator.settledText()?.takeIf { it.isNotBlank() }
+        val raw = holder.accumulator.settledText()?.takeIf { it.isNotBlank() }
+        val echoComplete = echo != null &&
+            (raw == null || TranscriptCompleteness.covers(echo, raw, config.minEchoRatio))
+        when {
+            echoComplete -> {
+                holder.metrics.settlePath =
+                    if (raw != null) SettlePath.ECHO_COMPLETE else SettlePath.ECHO_ONLY
+                holder.settledText = echo
+                insertSettled(holder, echo)
+            }
+            raw != null -> {
+                holder.metrics.settlePath = SettlePath.ECHO_PARTIAL_RAW
+                holder.transliterationJob?.cancel()
+                holder.transliterationJob = scope.launch {
+                    val latin = try {
+                        host.transliterateToLatin(holder.sessionId, raw)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (active !== holder) return@launch
+                    val final = latin?.takeIf { it.isNotBlank() } ?: echo
+                    if (final == null) {
+                        failNoTranscript(holder)
+                    } else {
+                        holder.settledText = final
+                        insertSettled(holder, final)
+                    }
+                }
+            }
+            echo != null -> {
+                holder.metrics.settlePath = SettlePath.ECHO_ONLY
+                holder.settledText = echo
+                insertSettled(holder, echo)
+            }
+            else -> failNoTranscript(holder)
         }
     }
 
@@ -744,6 +811,7 @@ class DictationCoordinator(
         holder.autoStopJob?.cancel()
         holder.captureFailureJob?.cancel()
         holder.eventJob?.cancel()
+        holder.transliterationJob?.cancel()
         holder.capture?.let { capture ->
             scope.launch {
                 capture.requestStop()

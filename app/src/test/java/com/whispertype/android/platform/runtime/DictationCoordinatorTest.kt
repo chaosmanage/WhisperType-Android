@@ -122,6 +122,8 @@ class DictationCoordinatorTest {
         var resolveResult: SessionResolve = SessionResolve.Ok(SessionResolution(session, LanguageMode.ENGLISH))
         var captureStart: CaptureStart = CaptureStart.Started(capture)
         var insertionAccepted = true
+        var transliterateResult: String? = null
+        val transliterateCalls = mutableListOf<String>()
 
         override fun publish(state: DictationState) {
             published += state
@@ -134,6 +136,11 @@ class DictationCoordinatorTest {
         override fun sendInsertion(sessionId: SessionId, text: String): Boolean {
             insertions += sessionId to text
             return insertionAccepted
+        }
+
+        override suspend fun transliterateToLatin(sessionId: SessionId, text: String): String? {
+            transliterateCalls += text
+            return transliterateResult
         }
 
         override fun onSessionFinished(state: DictationState, metrics: MutableSessionMetrics, transcript: String?) {
@@ -901,6 +908,121 @@ class DictationCoordinatorTest {
         advanceTimeBy(700)
         assertEquals(1, host.insertions.size)
         assertEquals("The quick brown fox jumps over the lazy dog", host.insertions[0].second)
+        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    // ------------------------------------------------------------------
+    // 0.5.0 Hinglish: echo-only settlement, Latin output, live transliteration
+    // ------------------------------------------------------------------
+
+    private fun hinglishCoordinator(
+        scope: kotlinx.coroutines.test.TestScope,
+        host: FakeHost,
+    ): DictationCoordinator {
+        host.resolveResult = SessionResolve.Ok(SessionResolution(host.session, LanguageMode.HINGLISH))
+        return coordinator(scope, host)
+    }
+
+    @Test
+    fun `Hinglish with a complete Latin echo inserts the echo without transliterating`() = runTest {
+        val host = FakeHost()
+        val coordinator = hinglishCoordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "आज का मौसम बहुत अच्छा है") // raw ASR is Devanagari
+        sendEcho(host, "Aaj ka mausam bahut achcha hai.") // instructed Latin echo covers it
+        advanceUntilIdle()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("Aaj ka mausam bahut achcha hai.", host.insertions[0].second)
+        assertTrue(host.transliterateCalls.isEmpty(), "a complete echo must not transliterate")
+        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `Hinglish with no echo transliterates the Devanagari raw to Latin`() = runTest {
+        val host = FakeHost()
+        host.transliterateResult = "Aaj ka mausam bahut achcha hai aur ham picnic par jaa sakte hain"
+        val coordinator = hinglishCoordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "आज का मौसम बहुत अच्छा है और हम पिकनिक पर जा सकते हैं")
+        advanceUntilIdle()
+
+        assertEquals(1, host.transliterateCalls.size)
+        assertEquals(1, host.insertions.size)
+        assertEquals("Aaj ka mausam bahut achcha hai aur ham picnic par jaa sakte hain", host.insertions[0].second)
+        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `Hinglish with a partial echo transliterates the complete raw to Latin`() = runTest {
+        val host = FakeHost()
+        host.transliterateResult = "Aaj ka mausam bahut achcha hai aur ham picnic par jaa sakte hain"
+        val coordinator = hinglishCoordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        runCurrent()
+
+        sendEcho(host, "Aaj ka") // truncated echo
+        sendTranscript(host, "आज का मौसम बहुत अच्छा है और हम पिकनिक पर जा सकते हैं")
+        advanceUntilIdle()
+
+        assertEquals(1, host.transliterateCalls.size)
+        assertEquals(1, host.insertions.size)
+        assertEquals("Aaj ka mausam bahut achcha hai aur ham picnic par jaa sakte hain", host.insertions[0].second)
+        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `Hinglish never inserts the raw Devanagari text`() = runTest {
+        val host = FakeHost()
+        host.transliterateResult = null // transliteration unavailable
+        val coordinator = hinglishCoordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "आज का मौसम बहुत अच्छा है")
+        advanceUntilIdle()
+
+        assertTrue(host.insertions.isEmpty(), "Devanagari raw must never be inserted")
+        val error = states(host).first { it is DictationState.Error }
+        assertEquals("gemini_no_transcript", (error as DictationState.Error).failure.code)
+    }
+
+    @Test
+    fun `Hinglish transliteration failure falls back to a partial Latin echo`() = runTest {
+        val host = FakeHost()
+        host.transliterateResult = null
+        val coordinator = hinglishCoordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        runCurrent()
+
+        sendEcho(host, "Aaj ka mausam") // partial Latin echo
+        sendTranscript(host, "आज का मौसम बहुत अच्छा है और हम पिकनिक पर जा सकते हैं")
+        advanceUntilIdle()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("Aaj ka mausam", host.insertions[0].second, "best available Latin text is kept")
         coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
         advanceUntilIdle()
     }

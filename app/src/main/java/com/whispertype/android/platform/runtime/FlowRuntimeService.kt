@@ -388,6 +388,37 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         return sendInsert(sessionId, corrected, reply)
     }
 
+    /**
+     * 0.5.0 Hinglish: transliterates Devanagari to Latin by opening a dedicated
+     * LIVE session, feeding the text over the realtime text channel, and reading
+     * the model's spoken reply (`outputTranscription`) — the same model, never a
+     * non-live endpoint. Returns null on any failure.
+     */
+    override suspend fun transliterateToLatin(sessionId: SessionId, text: String): String? {
+        val key = keyProvider.provideKey() ?: return null
+        val session = GeminiSessionFactory.create(
+            apiKey = key,
+            config = GeminiSessionConfig(
+                model = GeminiSessionFactory.DEFAULT_MODEL,
+                language = cachedSpeechMode,
+                systemInstruction = TRANSLITERATION_INSTRUCTION,
+            ),
+            client = sharedOkHttpClient,
+        )
+        return try {
+            session.awaitReady()
+            session.requestEchoFor(text)
+        } catch (e: Exception) {
+            Log.w(TAG, "Hinglish transliteration failed: ${e.message}")
+            null
+        } finally {
+            try {
+                session.close()
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
     override fun onSessionFinished(state: DictationState, metrics: MutableSessionMetrics, transcript: String?) {
         // Aggregate per-session outcome + stage latencies. Never transcript or audio.
         Log.i(TAG, "SESSION DONE outcome=${state::class.simpleName} ${metrics.summary()}")
@@ -504,5 +535,11 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         /** Process-local service-liveness flag for the app UI (set in onCreate/onDestroy). */
         @Volatile
         var isRunning: Boolean = false
+
+        /** 0.5.0 Hinglish: dedicated instruction for the live transliteration turn. */
+        const val TRANSLITERATION_INSTRUCTION =
+            "You transliterate Hindi text to Roman (Latin) script (Hinglish). " +
+                "Always speak the transliteration in Roman/Latin script only, never in " +
+                "Devanagari. Output only the transliterated text."
     }
 }
