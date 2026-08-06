@@ -66,9 +66,14 @@ The Gemini API key is the only secret the app stores.
 - Transcripts are never logged.
 - Transcripts are never written to disk unless the user has enabled optional local history.
 
-## Audio-recovery failsafe
+## Audio is never stored
 
-If both the live echo and the raw ASR fail, the failsafe re-transcribes the in-memory session recording via a non-live `generateContent` call. During recovery a temporary WAV is written to the app cache directory (`wt_recovery_<session>.wav`); it is app-private, deleted in all paths, and never logged or uploaded. No transcript or audio content is ever logged.
+Audio exists only in memory for the duration of a live session and is never
+retained or stored. The former audio-recovery failsafe — which wrote a temporary
+WAV to the app cache directory (`wt_recovery_<session>.wav`) while
+re-transcribing a retained recording — was removed: the app uses only the
+`gemini-3.1-flash-live-preview` live model, so no recording is ever kept for
+re-transcription. No transcript or audio content is ever logged.
 
 ## Optional history
 

@@ -204,12 +204,17 @@ per `TranscriptionStyle`:
   sentence punctuation and capitalization, but keep the exact words and natural
   spoken phrasing."
 - **MEDIUM** — "Transcribe the user's speech into clean written text: proper
-  punctuation, capitalization, and standard grammar, while keeping the user's
-  words and meaning."
+  punctuation, capitalization, and standard grammar. You may rephrase or
+  reorder the wording for readability, as long as every point the user made is
+  preserved."
 - **HIGH** — "Transcribe the user's speech into polished, well-structured
   written text: correct grammar, proper punctuation and capitalization, clear
   sentence structure, and logical organization, with paragraphs and lists where
-  appropriate. Keep the user's meaning and words wherever possible."
+  appropriate. You may rephrase, reorder, and restructure the text — even add
+  bullet points — as long as every point the user made is preserved."
+
+NONE and LOW are strict verbatim; only MEDIUM and HIGH may rephrase, reorder,
+or restructure (even add bullet points), and only while preserving every point.
 
 Per `LanguageMode`:
 
@@ -221,17 +226,24 @@ Per `LanguageMode`:
 
 The Hinglish rule appended for every style:
 
-> "Write Hindi words in Latin script (romanized Hindi / Hinglish), never in
-> Devanagari script. Keep English words and phrases exactly as spoken."
+> "CRITICAL SCRIPT RULE: the output MUST be entirely in Latin (Roman) script.
+> Never use Devanagari (Hindi) script - never output a single Devanagari
+> character. Even though the user is speaking in Hindi, render every Hindi word
+> in Latin letters as it sounds, exactly as if the user were speaking in Latin
+> script (for example write 'main theek hoon', never 'मैं ठीक हूँ'). This
+> applies to the whole output with no exceptions."
 
 So English + `NONE` yields no instruction key; **Hinglish always carries the
 Latin-script rule** regardless of style. For Hinglish with a NONE-style base the
 composed instruction reads:
 
-> "Transcribe the user's speech exactly as spoken. Write Hindi words in Latin
-> script (romanized Hindi / Hinglish), never in Devanagari script. Keep English
-> words and phrases exactly as spoken. Output only the transcription, nothing
-> else."
+> "Transcribe the user's speech exactly as spoken. CRITICAL SCRIPT RULE: the
+> output MUST be entirely in Latin (Roman) script. Never use Devanagari (Hindi)
+> script - never output a single Devanagari character. Even though the user is
+> speaking in Hindi, render every Hindi word in Latin letters as it sounds,
+> exactly as if the user were speaking in Latin script (for example write 'main
+> theek hoon', never 'मैं ठीक हूँ'). This applies to the whole output with no
+> exceptions. Output only the transcription, nothing else."
 
 This biases the Live transcription to produce **Latin-script romanized Hinglish**
 for mixed Hindi+English speech.
@@ -358,7 +370,8 @@ punctuation, and code-switching survive because only the four rules above fire.
 #### 7.3 Settlement timing and failsafes (`DictationCoordinator`)
 
 - **Echo is the primary source.** Settlement prefers the echo; only when it is
-  empty does it fall back to the raw input.
+  empty does it fall back to the raw input — except in Hinglish, which settles
+  **echo-only** (see §9.2).
 - **20 s absolute hard deadline** (`Config.hardDeadlineMs`) — a single monotonic
   timer from STOP (`deadlineJob`); at fire, if still `Finalizing`, sets
   `metrics.usedHardDeadline = true` and settles. **It is never extended.**
@@ -454,9 +467,12 @@ The three failure modes users hit map directly to these findings:
    is inserted only when its content-word ratio covers the raw ASR
    (`TranscriptCompleteness`), otherwise the complete raw is salvaged.
 3. **"Everything is lost"** — on very long turns neither source is delivered.
-   Fixed by the audio-recovery failsafe: the session recording is re-transcribed
-   via REST (`gemini-3.6-flash`, verified verbatim for 118-word input) whenever
-   the settled text is far below the duration-derived expected words.
+   Mitigated by the completeness gate (a partial echo never discards the raw
+   ASR) and settlement falling back to the raw ASR. The recording
+   re-transcription backstop that once covered this case was removed: the app
+   now uses only the `gemini-3.1-flash-live-preview` live model, so there is no
+   second transcription endpoint to fall back on, and a truncated echo never
+   triggers a retry.
 
 #### 9.2 Settlement policy (0.4.2) — never lose the user's words
 
@@ -468,11 +484,20 @@ At settle time (`DictationCoordinator.selectSettledText`):
 | Echo absent | raw ASR (`RAW_ONLY`) |
 | Echo present but partial/summary | raw ASR (`ECHO_PARTIAL_RAW`) |
 | Raw absent (echo only) | echo (`ECHO_ONLY`); duration-sanity governs |
-| Settled << duration-derived expected words | **audio-recovery failsafe** re-transcribes the recording |
 
 There is no retry path for "the echo was incomplete": a partial echo never
-causes the whole dictation to fail. `failNoTranscript` only fires when nothing
-(echo, raw, or recovered audio) is usable.
+causes the whole dictation to fail, and a truncated echo never triggers a retry.
+`failNoTranscript` only fires when nothing (echo or raw) is usable. The old
+audio-recovery backstop (re-transcribing the retained recording via a REST
+`generateContent` call) was removed: the app uses only the
+`gemini-3.1-flash-live-preview` live model, so there is no other endpoint to
+fall back on.
+
+**Hinglish settles echo-only.** The raw `inputTranscription` ASR is never used
+for Hinglish — the server transcribes the spoken Hindi in Devanagari, not the
+Latin script the user expects — so only the instructed echo settles a Hinglish
+session. The hardened system prompt forbids Devanagari outright, and a
+live-model transliteration fallback covers any remaining script leakage.
 
 #### 9.3 Settlement timing
 
@@ -480,16 +505,16 @@ causes the whole dictation to fail. `failNoTranscript` only fires when nothing
   provisional mid-activity ASR), with a 2 s echo grace window.
 - The settle debounce is 600 ms (above the measured ~90-300 ms echo delta gaps)
   so settlement never lands mid-delta-stream.
-- The 20 s hard deadline is unchanged; at the deadline the completeness gate +
-  recovery guarantee full coverage.
+- The 20 s hard deadline is unchanged; at the deadline the completeness gate
+  guarantees coverage — the echo where complete, else the raw ASR.
 
 #### 9.4 Diagnostics
 
 Every session logs a `SESSION DONE` line (never transcript or audio) with the
-settle path and word counts, e.g. `settle=ECHO_PARTIAL_RAW expW=93 settledW=118`
-or `settle=ECHO_ONLY recovery=true recW=118`. Watch `settle=` on device: healthy
-short sessions are `ECHO_COMPLETE`; a `recovery=true` line means both live
-sources under-delivered and the recording saved the dictation.
+settle path and word counts, e.g. `settle=ECHO_PARTIAL_RAW expW=93 settledW=118`.
+Watch `settle=` on device: healthy short sessions are `ECHO_COMPLETE`; a
+`settle=ECHO_PARTIAL_RAW` line means the echo was truncated and the complete raw
+ASR was salvaged instead.
 
 ---
 
@@ -1086,7 +1111,6 @@ cross-process Messenger contract: `MSG_REGISTER_REPLY=1`, `MSG_ELIGIBILITY=2`,
 | `core/transcript/TranscriptAccumulator.kt` | Cumulative transcript merging |
 | `core/transcript/TranscriptSelector.kt` | User-speech trust validation + `diagnose()` |
 | `core/transcript/TranscriptCompleteness.kt` | Echo/raw content-ratio completeness gate |
-| `core/audio/SessionRecording.kt` | Bounded session recording for audio recovery |
 | `core/model/MutableSessionMetrics.kt` | Monotonic diagnostics + `summary()` |
 | `core/model/LanguageMode.kt`, `core/model/TranscriptionStyle.kt` | Mode -> systemInstruction mapping |
 | `core/model/DictationState.kt`, `core/model/DictationFailure.kt`, `core/model/SendResult.kt` | Typed state/failure contracts |

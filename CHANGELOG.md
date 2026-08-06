@@ -9,6 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 First tagged release. Includes the 0.4.2 reliability + Wispr-style UI work (see the
 0.4.2 section below for the full "never lose a dictation" details) plus:
 
+- **Live-model-only enforcement** — the app uses exclusively the
+  `gemini-3.1-flash-live-preview` live model. The audio-recovery REST backstop
+  (`gemini-3.6-flash` `:generateContent`) and the user-facing "Gemini model"
+  override are removed; no recording is retained for re-transcription.
+- **Hinglish Latin guarantee** — Hinglish settles only from the instructed echo
+  (never the raw ASR, which transcribes Hindi in Devanagari), with a live-model
+  transliteration fallback; the hardened system prompt forbids Devanagari.
 - **First-run onboarding** — a guided setup screen replaces the plain overlay
   screen: "How it works" steps, a live permission checklist (overlay,
   microphone, notifications, accessibility), and an inline **Gemini API key**
@@ -18,7 +25,8 @@ First tagged release. Includes the 0.4.2 reliability + Wispr-style UI work (see 
 - **Dark mode** toggle; **card-grouped Settings**; history settings moved onto
   the History page; Dictionary spun out into its own page.
 - **Status-pill anchoring** — Finalizing/Inserting/Recovering pills now center
-  on the bubble instead of drifting off to the left.
+  on the bubble instead of drifting off to the left. (The Recovering pill was
+  later removed with the audio-recovery backstop.)
 - **New default settings** — history on (30-day retention), Hinglish speech
   mode, bubble opacity 80%, mini-dot after 5 s, bubble size 38 dp.
 - **Docs consolidation** — 19 markdown files reduced to a README hub + docs/;
@@ -34,10 +42,10 @@ First tagged release. Includes the 0.4.2 reliability + Wispr-style UI work (see 
 
 - **Delta-echo accumulation** — probes proved `outputTranscription` streams as word-level deltas (and the model condenses long turns): the echo accumulator now appends deltas (fixes "just the last word"), and neither accumulator ever shrinks to a strictly shorter revision.
 - **Completeness gate** — the polished echo is inserted only when its content-word ratio covers the raw ASR; a truncated/summarized echo salvages the complete raw instead of inserting a fragment (no more silent partial output).
-- **Audio-recovery failsafe** — the session recording is retained; when the settled text is far below the duration-derived expected words, the recording is re-transcribed via REST (`gemini-3.6-flash`, verified verbatim) and that full text is inserted. Never loses the user's words even when both live sources fail.
+- **Audio-recovery failsafe** — the session recording is retained; when the settled text is far below the duration-derived expected words, the recording is re-transcribed via REST (`gemini-3.6-flash`, verified verbatim) and that full text is inserted. Never loses the user's words even when both live sources fail. (Since removed: the app now uses only the live model, so the recording backstop and its REST endpoint are gone.)
 - **Settlement hardening** — settle debounce raised to 600 ms (above measured delta gaps); the raw fallback starts only after `activityEnd` so it is always the final ASR; never a retry because the echo was incomplete.
 - **Instruction hardening** — explicit "never summarize, never shorten, never omit the end" clause in every polish style.
-- **Diagnostics** — per-session settle path (`ECHO_COMPLETE` / `ECHO_PARTIAL_RAW` / `RAW_ONLY` / `ECHO_ONLY` / `NONE`) + word counts + recovery flag in the `SESSION DONE` log line (counts only, never transcript/audio).
+- **Diagnostics** — per-session settle path (`ECHO_COMPLETE` / `ECHO_PARTIAL_RAW` / `RAW_ONLY` / `ECHO_ONLY` / `NONE`) + word counts + recovery flag in the `SESSION DONE` log line (counts only, never transcript/audio; the recovery flag was removed with the backstop).
 
 ### Wispr-style UI
 

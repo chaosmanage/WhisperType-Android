@@ -14,11 +14,10 @@ There are **no instrumented tests**. `app/src/androidTest` contains only a manif
 
 | Package | Coverage |
 | --- | --- |
-| `com.whispertype.android.platform.runtime` | `DictationCoordinatorTest` — virtual-time orchestration (duplicate START, cancel during setup, STOP immediately, stale insertion responses, capture failure, rejected boundaries, exactly-once insertion), settlement (deadline/debounce, provisional rejection, retained early turn-complete), pre-ready buffering (order drain, overflow → `connection_too_slow`), failsafes (lenient fallback insert, retry, persistent errors), auto-stop (silence threshold + hard cap), echo completeness gate, audio recovery. |
+| `com.whispertype.android.platform.runtime` | `DictationCoordinatorTest` — virtual-time orchestration (duplicate START, cancel during setup, STOP immediately, stale insertion responses, capture failure, rejected boundaries, exactly-once insertion), settlement (deadline/debounce, provisional rejection, retained early turn-complete), pre-ready buffering (order drain, overflow → `connection_too_slow`), failsafes (lenient fallback insert, retry, persistent errors), auto-stop (silence threshold + hard cap), echo completeness gate. |
 | `com.whispertype.android.platform.gemini` | `GeminiLiveWireTest` (exact wire codec: setup fields, realtime activity builders, server parse), `OkHttpGeminiLiveSessionTest` (MockWebServer WebSocket: setup-first ordering, single activity start/end, audio rejection before start/after end, no `clientContent`, output transcription never a candidate, automatic-VAD variant, setup errors, close idempotence), `WarmLiveSessionManagerTest` (prewarm/claim/backoff/idle). |
 | `com.whispertype.android.core.transcript` | `TranscriptAccumulatorTest` (cumulative merge rules), `TranscriptCompletenessTest`, `TranscriptSelectorTest` (user-speech trust policy, `diagnose()`, long-sentence regression). |
 | `com.whispertype.android.core.model` | `MutableSessionMetricsTest` (monotonic timing/counters/summary), `LanguageModeTest` (Hinglish instruction; polish styles × languages). |
-| `com.whispertype.android.core.audio` | `SessionRecordingTest`. |
 | `com.whispertype.android.audio` | `AudioCaptureOrderlyShutdownTest` (producer-owned flush, zero-padded partial frame, unblocking a blocking read, timeout fallback), `PreReadyAudioBufferTest` (bounded FIFO, overflow, close). |
 | `com.whispertype.android.core.state` | `DictationReducerTest` — state transitions, stale-session rejection, exactly-once consumption. |
 | `com.whispertype.android.core.privacy` | `LogRedactorTest`. |
@@ -131,7 +130,7 @@ If a precondition fails: reinstall (`install -r`), grant permissions, re-enable 
 - **Bubble appears over a focused field.** Focus a text field so the keyboard is visible; the mic bubble appears. Pass: `STAGE: bubble shown (eligible target + keyboard)`. Fail: the log shows `Bubble hidden; reasons=[...]` — fix the named reason (e.g. `no_editor_focus`, `uncertain_field`, `keyboard_hidden`, `secure_field`) and retry.
 - **Session connects and Gemini acknowledges setup.** Tap the bubble. Pass: `onOpen code=101` and `setupSent=true`, followed by `SESSION DONE ... setup=NNNms ...`; setup failure instead shows `outcome=Error` with `reject=` absent. A `setup=` above ~15 s implies the 15 s ready timeout.
 - **Microphone produces data.** While the panel shows Listening, speak. Pass: `SESSION DONE ... captured=N accepted=N>0 ...` (audio frames reached the session). Fail (`accepted=0`): the capture loop never sent a frame — check for an `outcome=Error` with `runtime_mic_permission` or a capture-read failure.
-- **The captured audio is real sound (not silence).** Speak loudly for 4–5 seconds, tap Stop. Pass: the text appears in the field. Fail (`outcome=Error`, `inputTx=0`, `reject=` absent): either the mic captured silence or Live ASR did not fire — cross-check with the REST `generateContent` path on the same audio to tell them apart.
+- **The captured audio is real sound (not silence).** Speak loudly for 4–5 seconds, tap Stop. Pass: the text appears in the field. Fail (`outcome=Error`, `inputTx=0`, `reject=` absent): either the mic captured silence or Live ASR did not fire — retry the dictation to tell them apart (check `captured=`/`accepted=` for frames).
 - **Server returns a transcript.** Pass: `SESSION DONE ... inputTx>=1 ... outcome=Success`. Fail (`inputTx=0`): Live-model intermittency, or a `reject=<rule>` means the transcript arrived but was rejected (see `docs/GEMINI_LIVE.md`).
 - **Candidate selection.** Pass: `outcome=Success` with the spoken text inserted. Fail: `outcome=Error` + `reject=<rule>`; `lenient=true` means the failsafe inserted it anyway. Remaining rejections should be blank / punctuation-only / garbled / Devanagari-in-English.
 - **Insertion at the cursor.** After a successful session, the spoken text is in the focused field. Fail: `outcome=Error` with `insert_ambiguous`, or a `runtime_no_accessibility` / `runtime_ipc_failed`-style failure → accessibility insertion path.
@@ -150,7 +149,7 @@ If a precondition fails: reinstall (`install -r`), grant permissions, re-enable 
 | Mic data | Real sound | Transcript | Selection | Diagnosis |
 | --- | --- | --- | --- | --- |
 | FAIL (`accepted=0`) | — | — | — | `AudioCapture` never ran (capture path) |
-| PASS | FAIL (no text) | FAIL (`inputTx=0`) | — | Mic captures silence, or Live ASR silent this session (retry; cross-check REST) |
+| PASS | FAIL (no text) | FAIL (`inputTx=0`) | — | Mic captures silence, or Live ASR silent this session (retry) |
 | PASS | PASS | PASS | `reject=<rule>` | Transcript arrived but selector rejected it |
 | PASS | PASS | PASS | `outcome=Success` | Full pipeline works; continue the acceptance matrix |
 

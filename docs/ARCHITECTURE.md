@@ -52,7 +52,7 @@ All paths are under `app/src/main/java/com/whispertype/android/`.
 | `platform/overlay/` | `PersistentOverlayHost.kt`, `WhisperTypeOverlayContent.kt`, `OverlayAppearance.kt`, `OverlayVisibility.kt`, `OverlayHostStateMachine.kt`, `OverlayOwners.kt`, `OverlayComposeContainer.kt` | The one persistent `TYPE_APPLICATION_OVERLAY` window and its Compose content: the draggable mic bubble (the app logo, round) that auto-minimizes to a mini-dot, the recording pill (`[Cancel ✕][wave][Done ✓]`) anchored so Done lands where the bubble was tapped, status capsules re-centered on the bubble, and a pure attach/detach state machine. |
 | `platform/accessibility/` | `WhisperTypeAccessibilityService.kt`, `EditorTracker.kt`, `SecurityClassifier.kt`, `EligibilityMapper.kt`, `EligibilityExplanation.kt`, `AccessibilityTargetGateway.kt`, `InsertionDecision.kt`, `InsertionVerifier.kt` | The `:accessibility` process: focus/keyboard tracking, secure-field classification, typed eligibility, target capture, and validated insertion. |
 | `platform/ipc/` | `RuntimeIpc.kt` | Typed cross-process message contract (see above). |
-| `core/` | `core/state/`, `core/model/`, `core/transcript/`, `core/audio/`, `core/privacy/`, `core/dictionary/`, `core/overlay/`, `core/contracts/` | Pure, framework-free logic: the dictation reducer, typed domain models, the transcript accumulator/completeness/selector, PCM16 audio framing + the bounded session recording used by the audio-recovery failsafe, log redaction, dictionary correction rules, and the contracts (`DictationBridge`, `GeminiLiveSession`, `TargetGateway`, `OverlayController`) that adapters implement. |
+| `core/` | `core/state/`, `core/model/`, `core/transcript/`, `core/audio/`, `core/privacy/`, `core/dictionary/`, `core/overlay/`, `core/contracts/` | Pure, framework-free logic: the dictation reducer, typed domain models, the transcript accumulator/completeness/selector, PCM16 audio framing, log redaction, dictionary correction rules, and the contracts (`DictationBridge`, `GeminiLiveSession`, `TargetGateway`, `OverlayController`) that adapters implement. |
 | `data/` | `data/settings/SettingsRepository.kt`, `data/secrets/`, `data/history/EncryptedHistoryRepository.kt` | DataStore-backed settings (language, polish level, auto-stop, dictionary, bubble position, history), Keystore+AES-GCM secrets, and the encrypted, viewable history store. |
 | `audio/` | `audio/AudioCapture.kt`, `audio/AudioPipeline.kt`, `audio/BoundedAudioQueue.kt`, `audio/Chunker.kt`, `audio/PreReadyAudioBuffer.kt` | Device microphone capture and the bounded realtime pipeline feeding the Gemini session. |
 | `ui/` | `ui/theme/`, `ui/settings/SettingsScreen.kt`, `ui/history/HistoryScreen.kt`, `ui/dictionary/DictionaryScreen.kt`, `ui/waveform/RealTimeWaveform.kt` | Compose theme (emerald-teal, light + dark), the Settings screen, the History screen (list + history settings), the Dictionary screen, and the real-time waveform used by the recording pill. |
@@ -69,10 +69,11 @@ All paths are under `app/src/main/java/com/whispertype/android/`.
    the coordinator applies the auto-stop watcher (silence + hard cap, whichever
    fires first) and publishes overlay state.
 4. On stop/finalize, the coordinator settles the transcript via the accumulator,
-   completeness gate, and selector — a truncated/summarized echo salvages the
-   complete raw ASR, and when both live sources under-deliver the audio-recovery
-   failsafe re-transcribes the retained session recording (a `Recovering` state
-   shows "Hang tight — getting your full text…"). It then applies
+   completeness gate, and selector: the polished echo is accepted only when its
+   content covers the raw ASR, otherwise the complete raw is salvaged — a
+   truncated echo never triggers a retry. (The audio-recovery backstop that
+   re-transcribed a retained recording was removed: the app uses only the
+   `gemini-3.1-flash-live-preview` live model.) It then applies
    `DictionaryCorrections` and sends an insert request over IPC. The
    accessibility process re-validates the target and commits text at the cursor;
    a typed result flows back. When history is enabled, the settled transcript is

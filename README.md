@@ -23,14 +23,16 @@ nothing leaves your device except the audio stream to Google's Gemini Live API.
   pill is anchored so Done sits exactly where you tapped the bubble.
 - **Real-time waveform** — a flat line on silence, a dancing multi-peak skyline
   while you speak (sensitive to quiet voices).
-- **Never lose a dictation** — a completeness gate verifies the polished
-  transcript covers your raw speech, and an audio-recovery failsafe
-  re-transcribes the retained recording when the live sources fall short. Long
-  dictations are never silently truncated ("Reliability first", 0.4.2).
+- **Never lose a dictation** — an echo completeness gate accepts the polished
+  transcript only when its content covers your raw speech; otherwise the complete
+  raw ASR is salvaged. There is never a retry just because the echo was
+  truncated, so long dictations are never silently cut short ("Reliability
+  first", 0.4.2).
 - **Four output-polish levels** — `NONE` / `LOW` / `MEDIUM` / `HIGH` (default
   `MEDIUM`) passed to the model through the Gemini `systemInstruction`.
-- **English + Hinglish** — Hinglish instructs the model to write Hindi words in
-  Roman/Latin script.
+- **English + Hinglish** — output is guaranteed Latin script: Hinglish settles
+  only from the instructed echo (the raw ASR is never used for Hinglish because
+  it comes back in Devanagari), with a live-model transliteration fallback.
 - **Auto-stop** — stops on silence or at a configurable hard cap
   (15 / 30 / 60 / 120 / 300 s, default 60 s).
 - **Custom dictionary** — client-side correction rules with optional
@@ -63,17 +65,18 @@ App (Messages, Gmail, Notes…)            WhisperType
 3. A recording pill with a live waveform shows while you speak.
 4. The validated transcription is inserted at the cursor; your keyboard returns.
 
-**The engine.** Audio streams over TLS to a Gemini Live realtime session. The
-model's instructed echo (`outputTranscription`) is the primary dictation source
-— the `systemInstruction` tells the model to repeat your speech back with the
-selected polish level (Latin script for Hinglish) — with the raw ASR
+**The engine.** Audio streams over TLS to a Gemini Live realtime session that
+uses only the **`gemini-3.1-flash-live-preview`** live model. The model's
+instructed echo (`outputTranscription`) is the primary dictation source — the
+`systemInstruction` tells the model to repeat your speech back with the selected
+polish level (Latin script for Hinglish) — with the raw ASR
 (`inputTranscription`) as a fast fallback. Because the echo streams as
-word-level deltas and the model can condense very long turns, 0.4.2 adds a
-**completeness gate** (the echo is accepted only when its content covers the raw
-ASR, otherwise the complete raw is salvaged) and an **audio-recovery failsafe**
-(the session recording is re-transcribed via a non-live transcription call when
-both live sources under-deliver). See `docs/GEMINI_LIVE.md` for the full engine
-and wire reference.
+word-level deltas and the model can condense very long turns, 0.4.2 adds an
+**echo completeness gate**: the polished echo is accepted only when its content
+covers the raw ASR, otherwise the complete raw is salvaged; a truncated echo
+never triggers a retry. The recording re-transcription backstop was removed —
+there is no other model or endpoint to fall back on. See `docs/GEMINI_LIVE.md`
+for the full engine and wire reference.
 
 ---
 
@@ -105,9 +108,9 @@ WhisperType has no backend server and no cloud account.
   placed in DataStore, SharedPreferences, logs, or BuildConfig. Keys are
   rejected unless they start with `AIza`.
 - **Transcripts & audio** — never logged; settled dictations are stored encrypted
-  in local history (on by default, 30-day retention, switchable in the History tab). The audio-recovery failsafe
-  writes a temporary WAV to the app cache during recovery and deletes it in all
-  paths.
+  in local history (on by default, 30-day retention, switchable in the History
+  tab). No recording is retained beyond the live session, so audio is never
+  stored.
 - **Accessibility** — the service detects editable fields, keyboard bounds, and
   performs final text insertion; it never reads or stores unrelated screen
   content. Secure fields (password, PIN, payment) are excluded by design.

@@ -213,7 +213,7 @@ The Home tab also shows your dictation stats (Sessions, Words, Words today, Word
 5. A compact recording pill appears: Cancel (red X), a live waveform, and Done (green check).
 6. Speak naturally.
 7. Tap `Done` to commit the text, or the red X to cancel and discard.
-8. Transient status pills appear while the result is prepared — `Finalizing`, then `Inserting`. If the live sources under-delivered, the pill reads `Hang tight — getting your full text…` while the recording is re-transcribed (wait for it).
+8. Transient status pills appear while the result is prepared — `Finalizing`, then `Inserting` — before the text lands at the cursor.
 9. WhisperType inserts the result at the current cursor or replaces the selected text; the keyboard stays visible throughout.
 10. The bubble returns to its idle state.
 

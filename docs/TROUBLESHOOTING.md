@@ -74,9 +74,15 @@ Fields without a safe input connection cannot be written to directly: unusual We
 
 If the text could not be committed, WhisperType surfaces `insert_ambiguous` (Copy fallback) or fails with `insert_target_stale`, `insert_target_not_safe`, or `insert_connection_unavailable` — the result was intentionally not committed because the field state changed or was protected. Tap the field and start again.
 
-## The "Hang tight — getting your full text…" pill
+## Why a session almost never loses words
 
-Expected behavior. When the live sources under-deliver, WhisperType retains the recording and re-transcribes it (via REST) to recover your full dictation, then inserts the recovered text. This is the audio-recovery failsafe — wait for it; it normally succeeds within a few seconds. A Cancel control is shown if you want to bail out, but you usually do not need it. This failsafe is why a session almost never loses words.
+Expected behavior. Reliability comes from the **echo completeness gate**: the
+polished echo is accepted only when its content covers the raw ASR, otherwise
+the complete raw is salvaged — and a truncated echo never triggers a retry. If
+neither live source delivers anything usable, the session reports
+`gemini_no_transcript` with a Retry affordance instead of inserting a fragment.
+WhisperType uses only the `gemini-3.1-flash-live-preview` live model; there is
+no recording re-transcription backstop.
 
 ## No transcript could be recognized
 
@@ -84,7 +90,6 @@ Now rare in 0.4.2. When it does happen, check the session's `SESSION DONE` log l
 
 - `reject=<rule>` — a transcript arrived but the selector rejected it; `lenient=true` means the failsafe still inserted it. Any remaining rejection is blank / punctuation-only / garbled / Devanagari-in-English.
 - `inputTx=0` — the Live model returned nothing within the deadline; retry the dictation.
-- `recovery=true` / `recW=<n>` — the audio-recovery failsafe re-transcribed the retained recording and recovered `n` words (the "Hang tight — getting your full text…" pill was shown).
 - `settle=<path>` — how the final text was chosen: `echo_complete`, `raw_only`, `echo_partial_raw`, `echo_only`, or `none`.
 
 ## App won't install on Android 13
@@ -135,7 +140,7 @@ The relevant in-app signal is the `SESSION DONE` logcat line, logged once per se
 
 3. Share the `SESSION DONE` line with the maintainers.
 
-Useful fields: `outcome=`, `inputTx=`, `outputTx=`, `reject=`, `lenient=`, `settle=`, `recovery=`, `recW=`.
+Useful fields: `outcome=`, `inputTx=`, `outputTx=`, `reject=`, `lenient=`, `settle=`.
 
 ## Privacy-safe reporting
 
