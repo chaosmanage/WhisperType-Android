@@ -55,11 +55,11 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
     override val speechMode: Flow<LanguageMode> =
         dataStore.data.map { prefs ->
             val stored = prefs[Keys.speechMode]
-            LanguageMode.entries.firstOrNull { it.name == stored } ?: LanguageMode.ENGLISH
+            LanguageMode.entries.firstOrNull { it.name == stored } ?: LanguageMode.HINGLISH
         }
 
     override val historyEnabled: Flow<Boolean> =
-        dataStore.data.map { it[Keys.historyEnabled] ?: false }
+        dataStore.data.map { it[Keys.historyEnabled] ?: true }
 
     override val historyRetentionDays: Flow<Int> =
         dataStore.data.map { it[Keys.historyRetentionDays] ?: DEFAULT_RETENTION_DAYS }
@@ -213,13 +213,13 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
     companion object {
         const val DEFAULT_RETENTION_DAYS = 30
         const val DEFAULT_AUTO_STOP_SECONDS = 60
-        const val DEFAULT_BUBBLE_SIZE_DP = 36
+        const val DEFAULT_BUBBLE_SIZE_DP = 38
         const val MIN_BUBBLE_SIZE_DP = 24
         const val MAX_BUBBLE_SIZE_DP = 72
-        const val DEFAULT_BUBBLE_OPACITY_PERCENT = 100
+        const val DEFAULT_BUBBLE_OPACITY_PERCENT = 80
         const val MIN_BUBBLE_OPACITY_PERCENT = 10
         const val MAX_BUBBLE_OPACITY_PERCENT = 100
-        const val DEFAULT_MINI_DOT_DELAY_SECONDS = 3
+        const val DEFAULT_MINI_DOT_DELAY_SECONDS = 5
         const val MIN_MINI_DOT_DELAY_SECONDS = 1
         const val MAX_MINI_DOT_DELAY_SECONDS = 15
         val DEFAULT_POLISH_LEVEL = TranscriptionStyle.MEDIUM

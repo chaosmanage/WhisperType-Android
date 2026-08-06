@@ -104,7 +104,7 @@ Both `RECORD_AUDIO` and `POST_NOTIFICATIONS` must be granted for dictation to st
 
 ## History empty
 
-`Local history` is disabled by default, and transcript text is recorded only while it is enabled.
+Local history is on by default (30-day retention) and can be turned off in the History tab; transcript text is recorded only while it is enabled.
 
 1. Open the History tab (bottom navigation).
 2. Enable `Save dictation history`.

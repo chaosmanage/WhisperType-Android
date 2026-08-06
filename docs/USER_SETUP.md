@@ -267,7 +267,7 @@ This protects sensitive information and avoids accidental recording.
 
 ## Optional history
 
-History is disabled by default. Transcript text is recorded only while it is enabled.
+History is on by default with a 30-day retention; transcript text is recorded only while it is enabled, and it can be turned off in the History tab.
 
 To enable it:
 

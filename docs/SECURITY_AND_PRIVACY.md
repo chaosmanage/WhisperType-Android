@@ -25,7 +25,7 @@ Only the current minor line is actively maintained. Devices on an older line tha
 
 - **API key encryption.** The Gemini API key is encrypted with an Android Keystore AES-GCM 256-bit key (alias `whispertype_api_key`) and stored as ciphertext plus a random 12-byte IV in an app-private no-backup file. The plaintext key is never written to DataStore, SharedPreferences, Room, resources, BuildConfig, or logs; it exists only transiently in memory. Incoming keys are rejected unless prefixed `AIza`. If the Keystore reports the key invalidated, the stored ciphertext is discarded and the user is asked to re-enter the key.
 - **No key in Git.** Keystore files, `signing.properties`, API keys, and transcripts are blacklisted for the repository (text node). The optional local history is encrypted with a separate AES-GCM Keystore key (`whispertype_history`).
-- **Transcripts are not stored by default.** Transcript candidates exist only in memory for the duration of a session and are cleared on insertion, copy fallback, cancellation, or failure. They are stored only if the user enables optional local history (disabled by default). Transcripts are never logged.
+- **Transcripts are kept only in encrypted local history.** Transcript candidates exist only in memory for the duration of a session and are cleared on insertion, copy fallback, cancellation, or failure. Settled dictations are stored encrypted in local history, which is on by default (30-day retention) and can be turned off in the History tab. Transcripts are never logged.
 - **No backend server.** Audio streams directly from the device to the Gemini Live API over TLS. There is no WhisperType cloud account or backend.
 - **Backup exclusions.** `android:allowBackup="false"` plus `data_extraction_rules.xml` exclude every backup/device-transfer path (root, database, sharedpref, file, external).
 - **Diagnostics redaction.** `DiagnosticsExporter` keeps at most 256 typed events with aggregate timing. Exports never include transcripts, audio, API keys, the authenticated Gemini URL, editor text, or app package data. Logging tags are stable and non-sensitive (`WT-Accessibility`, `WT-Gemini`, `WT-Dictation`, `WT-Settings`), and `LogRedactor` is applied to logs and exceptions.
@@ -72,7 +72,7 @@ If both the live echo and the raw ASR fail, the failsafe re-transcribes the in-m
 
 ## Optional history
 
-- Local history is **opt-in** and disabled by default; transcript text is recorded only while it is enabled.
+- Local history is **on by default** with a 30-day retention; it can be turned off in the History tab, and transcript text is recorded only while it is enabled.
 - When enabled, completed valid dictations are stored in an encrypted file store using a Keystore AES-GCM key under the alias `whispertype_history`.
 - The history store lives in no-backup storage.
 - Retention is capped by a retention-days setting; entries older than the chosen period are pruned automatically.

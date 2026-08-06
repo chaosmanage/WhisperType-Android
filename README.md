@@ -35,8 +35,8 @@ nothing leaves your device except the audio stream to Google's Gemini Live API.
   (15 / 30 / 60 / 120 / 300 s, default 60 s).
 - **Custom dictionary** — client-side correction rules with optional
   "always write as" spellings, applied at insertion.
-- **Encrypted optional history** — a viewable History page (list, copy, delete,
-  delete-all) over an encrypted store; off by default.
+- **Encrypted history** — a viewable History page (list, copy, delete, delete-all)
+  over an encrypted store; on by default (30-day retention), switchable in Settings.
 - **Dark mode** — an emerald-teal brand theme across every screen, with a light
   and a dark scheme.
 - **Bottom navigation** — Home / History / Dictionary / Settings.
@@ -104,8 +104,8 @@ WhisperType has no backend server and no cloud account.
   Keystore AES-GCM 256-bit key, kept in an app-private no-backup file, never
   placed in DataStore, SharedPreferences, logs, or BuildConfig. Keys are
   rejected unless they start with `AIza`.
-- **Transcripts & audio** — never logged; stored only if you enable local
-  history (off by default), and then encrypted. The audio-recovery failsafe
+- **Transcripts & audio** — never logged; settled dictations are stored encrypted
+  in local history (on by default, 30-day retention, switchable in the History tab). The audio-recovery failsafe
   writes a temporary WAV to the app cache during recovery and deletes it in all
   paths.
 - **Accessibility** — the service detects editable fields, keyboard bounds, and
