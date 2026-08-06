@@ -22,6 +22,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -38,25 +40,29 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.whispertype.android.R
 import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.data.history.HistoryRepository
+import com.whispertype.android.data.settings.SettingsRepository
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
  * History screen: encrypted dictation transcript list with per-entry copy and
  * delete. The 0.4.2 redesign uses a standard top app bar (back arrow + title)
- * with a subtle delete-all icon action and a confirmation dialog, instead of
- * the heavy text-button header.
+ * with a subtle delete-all icon action and a confirmation dialog, and moves the
+ * history-recording controls (enable + retention) here from Settings.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(
     historyRepository: HistoryRepository,
+    settings: SettingsRepository,
     onBack: () -> Unit,
     onCopied: (String) -> Unit = {},
 ) {
@@ -64,6 +70,9 @@ fun HistoryScreen(
     val context = LocalContext.current
     val clearedLabel = stringResource(R.string.history_cleared)
     val copiedLabel = stringResource(R.string.history_copied)
+    val historyEnabled by settings.historyEnabled.collectAsStateWithLifecycle(initialValue = false)
+    val retentionDays by settings.historyRetentionDays
+        .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_RETENTION_DAYS)
 
     var refreshKey by remember { mutableStateOf(0) }
     var entries by remember { mutableStateOf<List<HistoryRepository.HistoryEntry>>(emptyList()) }
@@ -125,27 +134,73 @@ fun HistoryScreen(
             )
         },
     ) { padding ->
-        if (entries.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = stringResource(R.string.history_empty),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // 0.4.2: history recording settings live on this page.
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = stringResource(R.string.settings_history),
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                Text(
+                                    text = stringResource(R.string.settings_history_desc),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                            Switch(
+                                checked = historyEnabled,
+                                onCheckedChange = { scope.launch { settings.setHistoryEnabled(it) } },
+                            )
+                        }
+                        if (historyEnabled) {
+                            Text(
+                                text = stringResource(R.string.settings_history_retention),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                text = "$retentionDays ${stringResource(R.string.days_unit)}",
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Slider(
+                                value = retentionDays.toFloat(),
+                                onValueChangeFinished = { /* commit on release only */ },
+                                onValueChange = { scope.launch { settings.setHistoryRetentionDays(it.roundToInt()) } },
+                                valueRange = RETENTION_RANGE_DAYS_F,
+                            )
+                        }
+                    }
+                }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+            if (entries.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.history_empty),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            } else {
                 items(entries, key = { it.id }) { entry ->
                     HistoryEntryCard(
                         entry = entry,
@@ -167,6 +222,8 @@ fun HistoryScreen(
         }
     }
 }
+
+private val RETENTION_RANGE_DAYS_F: ClosedFloatingPointRange<Float> = 7f..90f
 
 @Composable
 private fun HistoryEntryCard(

@@ -42,7 +42,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.whispertype.android.R
-import com.whispertype.android.core.dictionary.DictionaryEntry
 import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.core.model.TranscriptionStyle
 import com.whispertype.android.data.secrets.KeyProvider
@@ -61,21 +60,16 @@ fun SettingsScreen(
     settings: SettingsRepository,
     keyProvider: KeyProvider,
     onBack: () -> Unit,
-    onOpenHistory: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
 
     val appEnabled by settings.appEnabled.collectAsStateWithLifecycle(initialValue = true)
     val speechMode by settings.speechMode.collectAsStateWithLifecycle(initialValue = LanguageMode.ENGLISH)
     val modelOverride by settings.modelOverride.collectAsStateWithLifecycle(initialValue = null)
-    val historyEnabled by settings.historyEnabled.collectAsStateWithLifecycle(initialValue = false)
-    val retentionDays by settings.historyRetentionDays
-        .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_RETENTION_DAYS)
     val autoStopSeconds by settings.autoStopSeconds
         .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_AUTO_STOP_SECONDS)
     val polishLevel by settings.polishLevel
         .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_POLISH_LEVEL)
-    val dictionary by settings.dictionary.collectAsStateWithLifecycle(initialValue = emptyList())
     val bubbleSizeDp by settings.bubbleSizeDp
         .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_BUBBLE_SIZE_DP)
     val bubbleOpacity by settings.bubbleOpacityPercent
@@ -89,8 +83,6 @@ fun SettingsScreen(
     var keyInput by remember { mutableStateOf("") }
     var keyFeedback by remember { mutableStateOf<String?>(null) }
     var modelInput by remember { mutableStateOf(modelOverride ?: "") }
-    var dictionaryWord by remember { mutableStateOf("") }
-    var dictionaryReplacement by remember { mutableStateOf("") }
 
     val keySavedMessage = stringResource(R.string.settings_key_saved)
     val keySaveFailedMessage = stringResource(R.string.settings_key_save_failed)
@@ -284,124 +276,6 @@ fun SettingsScreen(
             }
 
             // ------------------------------------------------------------------
-            // Dictionary
-            // ------------------------------------------------------------------
-            SettingsSection(stringResource(R.string.settings_section_dictionary)) {
-                SettingRow(
-                    title = stringResource(R.string.settings_dictionary),
-                    description = stringResource(R.string.settings_dictionary_desc),
-                ) {}
-                Column {
-                    if (dictionary.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.settings_dictionary_empty),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    } else {
-                        dictionary.forEach { entry ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = if (entry.replace.isBlank()) {
-                                        entry.match
-                                    } else {
-                                        "${entry.match} → ${entry.replace}"
-                                    },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                TextButton(
-                                    onClick = { scope.launch { settings.removeDictionaryEntry(entry.match) } },
-                                ) {
-                                    Text(stringResource(R.string.history_delete))
-                                }
-                            }
-                        }
-                    }
-                    OutlinedTextField(
-                        value = dictionaryWord,
-                        onValueChange = { dictionaryWord = it },
-                        label = { Text(stringResource(R.string.settings_dictionary_word_hint)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = dictionaryReplacement,
-                        onValueChange = { dictionaryReplacement = it },
-                        label = { Text(stringResource(R.string.settings_dictionary_replacement_hint)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = {
-                                val word = dictionaryWord.trim()
-                                if (word.isNotEmpty()) {
-                                    scope.launch {
-                                        settings.addDictionaryEntry(
-                                            DictionaryEntry(word, dictionaryReplacement.trim()),
-                                        )
-                                    }
-                                    dictionaryWord = ""
-                                    dictionaryReplacement = ""
-                                }
-                            },
-                        ) {
-                            Text(stringResource(R.string.settings_dictionary_add))
-                        }
-                        TextButton(
-                            onClick = { scope.launch { settings.clearDictionary() } },
-                        ) {
-                            Text(stringResource(R.string.settings_dictionary_clear))
-                        }
-                    }
-                }
-            }
-
-            // ------------------------------------------------------------------
-            // History
-            // ------------------------------------------------------------------
-            SettingsSection(stringResource(R.string.settings_section_history)) {
-                SettingRow(
-                    title = stringResource(R.string.settings_history),
-                    description = stringResource(R.string.settings_history_desc),
-                ) {
-                    Switch(
-                        checked = historyEnabled,
-                        onCheckedChange = { scope.launch { settings.setHistoryEnabled(it) } },
-                    )
-                }
-                if (historyEnabled) {
-                    Column {
-                        Text(
-                            text = stringResource(R.string.settings_history_retention),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Text(
-                            text = "$retentionDays ${stringResource(R.string.days_unit)}",
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Slider(
-                            value = retentionDays.toFloat(),
-                            onValueChangeFinished = { /* commit on release only */ },
-                            onValueChange = { scope.launch { settings.setHistoryRetentionDays(it.roundToInt()) } },
-                            valueRange = RETENTION_RANGE_DAYS_F,
-                        )
-                    }
-                }
-                SettingRow(
-                    title = stringResource(R.string.settings_history_view),
-                    description = "",
-                ) {
-                    OutlinedButton(onClick = onOpenHistory) {
-                        Text(">")
-                    }
-                }
-            }
-
-            // ------------------------------------------------------------------
             // Gemini account
             // ------------------------------------------------------------------
             SettingsSection(stringResource(R.string.settings_section_gemini)) {
@@ -539,8 +413,6 @@ private fun SettingRow(
         trailing()
     }
 }
-
-private val RETENTION_RANGE_DAYS_F: ClosedFloatingPointRange<Float> = 7f..90f
 
 private val BUBBLE_SIZE_RANGE_DP_F: ClosedFloatingPointRange<Float> =
     SettingsRepository.MIN_BUBBLE_SIZE_DP.toFloat()..SettingsRepository.MAX_BUBBLE_SIZE_DP.toFloat()

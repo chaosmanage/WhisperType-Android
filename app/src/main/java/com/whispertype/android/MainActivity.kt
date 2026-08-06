@@ -29,14 +29,18 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,6 +56,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
@@ -65,6 +70,7 @@ import com.whispertype.android.data.secrets.KeyProvider
 import com.whispertype.android.data.settings.SettingsRepository
 import com.whispertype.android.platform.accessibility.WhisperTypeAccessibilityService
 import com.whispertype.android.platform.runtime.FlowRuntimeService
+import com.whispertype.android.ui.dictionary.DictionaryScreen
 import com.whispertype.android.ui.history.HistoryScreen
 import com.whispertype.android.ui.settings.SettingsScreen
 import com.whispertype.android.ui.theme.WhisperTypeTheme
@@ -203,8 +209,7 @@ class MainActivity : ComponentActivity() {
         keyProvider: KeyProvider,
         isAccessibilityEnabled: () -> Boolean,
     ) {
-        var showSettings by remember { mutableStateOf(false) }
-        var showHistory by remember { mutableStateOf(false) }
+        var selectedTab by remember { mutableStateOf(0) }
         var neededPermissions by remember { mutableStateOf(runtimePermissionsNeeded()) }
         val historyEntries by historyRepository.events().collectAsState(initial = emptyList())
         val historyEnabled by settings.historyEnabled.collectAsState(initial = false)
@@ -213,150 +218,165 @@ class MainActivity : ComponentActivity() {
         ) {
             neededPermissions = runtimePermissionsNeeded()
         }
-        // 0.4.2: back returns Home from Settings/History instead of closing the app.
-        if (showSettings || showHistory) {
-            BackHandler {
-                showSettings = false
-                showHistory = false
-            }
+        // 0.4.2: back returns Home from any other tab instead of closing the app.
+        if (selectedTab != 0) {
+            BackHandler { selectedTab = 0 }
         }
-        if (showHistory) {
-            HistoryScreen(
-                historyRepository = historyRepository,
-                onBack = { showHistory = false },
-                onCopied = { msg -> Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show() },
-            )
-        } else if (showSettings) {
-            SettingsScreen(
-                settings = settings,
-                keyProvider = keyProvider,
-                onBack = { showSettings = false },
-                onOpenHistory = {
-                    showSettings = false
-                    showHistory = true
-                },
-            )
-        } else {
-            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(24.dp)
-                        .widthIn(max = 420.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Spacer(Modifier.height(8.dp))
-                    HomeHeader()
-                    Spacer(Modifier.height(24.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        Scaffold(
+            bottomBar = {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = selectedTab == 0,
+                        onClick = { selectedTab = 0 },
+                        icon = { Icon(Icons.Filled.Home, contentDescription = null) },
+                        label = { Text(stringResource(R.string.nav_home)) },
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == 1,
+                        onClick = { selectedTab = 1 },
+                        icon = { Icon(Icons.Filled.History, contentDescription = null) },
+                        label = { Text(stringResource(R.string.nav_history)) },
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == 2,
+                        onClick = { selectedTab = 2 },
+                        icon = { Icon(Icons.Filled.Book, contentDescription = null) },
+                        label = { Text(stringResource(R.string.nav_dictionary)) },
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == 3,
+                        onClick = { selectedTab = 3 },
+                        icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                        label = { Text(stringResource(R.string.nav_settings)) },
+                    )
+                }
+            },
+        ) { padding ->
+            Box(Modifier.padding(padding)) {
+                when (selectedTab) {
+                    1 -> HistoryScreen(
+                        historyRepository = historyRepository,
+                        settings = settings,
+                        onBack = { selectedTab = 0 },
+                        onCopied = { msg -> Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show() },
+                    )
+
+                    2 -> DictionaryScreen(
+                        settings = settings,
+                        onBack = { selectedTab = 0 },
+                    )
+
+                    3 -> SettingsScreen(
+                        settings = settings,
+                        keyProvider = keyProvider,
+                        onBack = { selectedTab = 0 },
+                    )
+
+                    else -> Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background,
                     ) {
-                        ActionCard(
-                            icon = Icons.Filled.Settings,
-                            label = stringResource(R.string.home_open_settings),
-                            tint = Color(0xFF0E9B8A),
-                            onClick = { showSettings = true },
-                            modifier = Modifier.weight(1f),
-                        )
-                        ActionCard(
-                            icon = Icons.Filled.History,
-                            label = stringResource(R.string.home_open_history),
-                            tint = Color(0xFF3B82F6),
-                            onClick = { showHistory = true },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    Spacer(Modifier.height(24.dp))
-                    StatsSection(
-                        historyEnabled = historyEnabled,
-                        entries = historyEntries,
-                    )
-                    Spacer(Modifier.height(24.dp))
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                StatusTile(
-                                    label = stringResource(R.string.home_status_overlay),
-                                    on = true,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                StatusTile(
-                                    label = stringResource(R.string.home_status_runtime),
-                                    on = FlowRuntimeService.isRunning,
-                                    onFix = { startRuntime() },
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                StatusTile(
-                                    label = stringResource(R.string.home_status_accessibility),
-                                    on = isAccessibilityEnabled(),
-                                    onFix = {
-                                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                )
-                                StatusTile(
-                                    label = stringResource(R.string.home_status_key),
-                                    on = keyProvider.hasKey(),
-                                    onFix = { showSettings = true },
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                StatusTile(
-                                    label = stringResource(R.string.home_status_mic),
-                                    on = hasMicPermission(),
-                                    onFix = {
-                                        permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                )
-                                StatusTile(
-                                    label = stringResource(R.string.home_status_notifications),
-                                    on = hasNotificationPermission(),
-                                    onFix = {
-                                        permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
-                        }
-                    }
-                    if (neededPermissions.isNotEmpty()) {
-                        Spacer(Modifier.height(12.dp))
-                        Button(
-                            onClick = { permissionLauncher.launch(neededPermissions.toTypedArray()) },
-                            modifier = Modifier.fillMaxWidth(),
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(24.dp)
+                                .widthIn(max = 420.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                            Text(stringResource(R.string.home_grant_permissions))
+                            Spacer(Modifier.height(8.dp))
+                            HomeHeader()
+                            Spacer(Modifier.height(24.dp))
+                            StatsSection(
+                                historyEnabled = historyEnabled,
+                                entries = historyEntries,
+                            )
+                            Spacer(Modifier.height(24.dp))
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(8.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        StatusTile(
+                                            label = stringResource(R.string.home_status_overlay),
+                                            on = true,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        StatusTile(
+                                            label = stringResource(R.string.home_status_runtime),
+                                            on = FlowRuntimeService.isRunning,
+                                            onFix = { startRuntime() },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        StatusTile(
+                                            label = stringResource(R.string.home_status_accessibility),
+                                            on = isAccessibilityEnabled(),
+                                            onFix = {
+                                                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        StatusTile(
+                                            label = stringResource(R.string.home_status_key),
+                                            on = keyProvider.hasKey(),
+                                            onFix = { selectedTab = 3 },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        StatusTile(
+                                            label = stringResource(R.string.home_status_mic),
+                                            on = hasMicPermission(),
+                                            onFix = {
+                                                permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        StatusTile(
+                                            label = stringResource(R.string.home_status_notifications),
+                                            on = hasNotificationPermission(),
+                                            onFix = {
+                                                permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                }
+                            }
+                            if (neededPermissions.isNotEmpty()) {
+                                Spacer(Modifier.height(12.dp))
+                                Button(
+                                    onClick = { permissionLauncher.launch(neededPermissions.toTypedArray()) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(stringResource(R.string.home_grant_permissions))
+                                }
+                            }
+                            Spacer(Modifier.height(24.dp))
+                            Text(
+                                text = stringResource(
+                                    R.string.home_version,
+                                    BuildConfig.VERSION_NAME,
+                                    BuildConfig.VERSION_CODE,
+                                    BuildConfig.GIT_COMMIT,
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.height(16.dp))
                         }
                     }
-                    Spacer(Modifier.height(24.dp))
-                    Text(
-                        text = stringResource(
-                            R.string.home_version,
-                            BuildConfig.VERSION_NAME,
-                            BuildConfig.VERSION_CODE,
-                            BuildConfig.GIT_COMMIT,
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(16.dp))
                 }
             }
         }
@@ -403,7 +423,9 @@ class MainActivity : ComponentActivity() {
     ) {
         val fixable = !on && onFix != null
         Surface(
-            modifier = modifier.then(if (fixable) Modifier.clickable { onFix() } else Modifier),
+            modifier = modifier
+                .height(60.dp)
+                .then(if (fixable) Modifier.clickable { onFix() } else Modifier),
             shape = RoundedCornerShape(12.dp),
             color = when {
                 on -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
@@ -420,6 +442,8 @@ class MainActivity : ComponentActivity() {
                         text = label,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = stringResource(
@@ -435,6 +459,7 @@ class MainActivity : ComponentActivity() {
                         } else {
                             MaterialTheme.colorScheme.error
                         },
+                        maxLines = 1,
                     )
                 }
                 if (fixable) {
@@ -445,44 +470,6 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.size(18.dp),
                     )
                 }
-            }
-        }
-    }
-
-    /** A prominent icon action card (Settings / History). */
-    @Composable
-    private fun ActionCard(
-        icon: androidx.compose.ui.graphics.vector.ImageVector,
-        label: String,
-        tint: Color,
-        onClick: () -> Unit,
-        modifier: Modifier = Modifier,
-    ) {
-        Surface(
-            onClick = onClick,
-            modifier = modifier.height(88.dp),
-            shape = RoundedCornerShape(16.dp),
-            color = tint.copy(alpha = 0.14f),
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = tint,
-                    modifier = Modifier.size(30.dp),
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
             }
         }
     }
