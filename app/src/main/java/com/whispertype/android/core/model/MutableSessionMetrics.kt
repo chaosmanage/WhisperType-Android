@@ -74,18 +74,6 @@ class MutableSessionMetrics(
     /** 0.4.2 reliability: which source the settled transcript came from. */
     var settlePath: SettlePath? = null
 
-    /** Duration-derived expected words at settle time (0 when no audio seen). */
-    var expectedWords: Double = 0.0
-
-    /** Content words in the text chosen before the recovery gate. */
-    var settledWords: Int = 0
-
-    /** Content words in the REST-recovered text, when recovery ran and succeeded. */
-    var recoveredWords: Int = 0
-
-    /** True when the audio-recovery failsafe re-transcribed the session recording. */
-    var usedAudioRecovery: Boolean = false
-
     /** Records the first timestamp observed for [event]; later marks are ignored. */
     fun mark(event: Event) {
         val now = nowNanos()
@@ -190,10 +178,6 @@ class MutableSessionMetrics(
         if (lastRejection != null) add("reject=$lastRejection")
         if (usedLenientFallback) add("lenient=true")
         settlePath?.let { add("settle=$it") }
-        if (expectedWords > 0) add("expW=${expectedWords.toInt()}")
-        if (settledWords > 0) add("settledW=$settledWords")
-        if (usedAudioRecovery) add("recovery=true")
-        if (recoveredWords > 0) add("recW=$recoveredWords")
     }.joinToString(" ")
 
     private fun durationToken(name: String, ms: Long?): String? = ms?.let { "$name=${it}ms" }
@@ -204,8 +188,7 @@ class MutableSessionMetrics(
  * reliability diagnostic: ECHO_COMPLETE and RAW_ONLY are the expected healthy
  * paths; ECHO_PARTIAL_RAW records that the echo was truncated/summarized and
  * the complete raw ASR was salvaged; ECHO_ONLY means the raw never arrived and
- * the echo was the only available text (its completeness is governed by the
- * duration-sanity gate); NONE means nothing settled.
+ * the echo was the only available text; NONE means nothing settled.
  */
 enum class SettlePath {
     ECHO_COMPLETE,

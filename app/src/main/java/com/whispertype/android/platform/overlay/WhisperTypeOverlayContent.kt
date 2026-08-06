@@ -89,7 +89,6 @@ fun WhisperTypeOverlayContent(
             )
             OverlayVisibility.Finalizing ->
                 StatusCapsule(stringResource(R.string.dictation_finalizing))
-            OverlayVisibility.Recovering -> RecoveringCapsule(onIntent = onIntent)
             OverlayVisibility.Inserting ->
                 StatusCapsule(stringResource(R.string.dictation_inserting))
             OverlayVisibility.Success -> Unit
@@ -286,37 +285,6 @@ private fun StatusCapsule(text: String) {
             style = MaterialTheme.typography.labelLarge,
             color = WhisperTypeColors.OnSurface,
         )
-    }
-}
-
-/** 0.4.2 recovering pill: a status message plus a Cancel so the user can always
- *  bail out while the audio-recovery failsafe re-transcribes. */
-@Composable
-private fun RecoveringCapsule(onIntent: (OverlayIntent) -> Unit) {
-    Surface(
-        modifier = Modifier.testTag(stringResource(R.string.test_tag_panel)),
-        shape = RoundedCornerShape(50),
-        color = WhisperTypeColors.SurfaceRaised.copy(alpha = 0.85f),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.dictation_recovering),
-                style = MaterialTheme.typography.labelLarge,
-                color = WhisperTypeColors.OnSurface,
-                modifier = Modifier.padding(horizontal = 8.dp),
-            )
-            PillAction(
-                tag = stringResource(R.string.test_tag_cancel),
-                label = stringResource(R.string.dictation_cancel),
-                icon = Icons.Filled.Close,
-                tint = WhisperTypeColors.ErrorAccent,
-                onClick = { onIntent(OverlayIntent.CANCEL) },
-            )
-        }
     }
 }
 

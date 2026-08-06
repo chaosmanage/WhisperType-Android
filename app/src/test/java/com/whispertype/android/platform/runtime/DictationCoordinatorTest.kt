@@ -119,11 +119,9 @@ class DictationCoordinatorTest {
         val capture = FakeCapture()
         val finished = mutableListOf<Pair<DictationState, MutableSessionMetrics>>()
         val finishedTranscripts = mutableListOf<String?>()
-        val recoverCalls = mutableListOf<ByteArray>()
         var resolveResult: SessionResolve = SessionResolve.Ok(SessionResolution(session, LanguageMode.ENGLISH))
         var captureStart: CaptureStart = CaptureStart.Started(capture)
         var insertionAccepted = true
-        var recoverResult: String? = null
 
         override fun publish(state: DictationState) {
             published += state
@@ -136,11 +134,6 @@ class DictationCoordinatorTest {
         override fun sendInsertion(sessionId: SessionId, text: String): Boolean {
             insertions += sessionId to text
             return insertionAccepted
-        }
-
-        override suspend fun recoverTranscript(sessionId: SessionId, wav: ByteArray): String? {
-            recoverCalls += wav
-            return recoverResult
         }
 
         override fun onSessionFinished(state: DictationState, metrics: MutableSessionMetrics, transcript: String?) {
@@ -908,81 +901,6 @@ class DictationCoordinatorTest {
         advanceTimeBy(700)
         assertEquals(1, host.insertions.size)
         assertEquals("The quick brown fox jumps over the lazy dog", host.insertions[0].second)
-        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    private suspend fun streamChunks(host: FakeHost, count: Int) {
-        for (i in 0 until count) host.capture.chunksChannel.send(chunk(i.toLong()))
-    }
-
-    @Test
-    fun `both sources truncated triggers the audio recovery failsafe`() = runTest {
-        val host = FakeHost()
-        host.recoverResult = "This is the full recovered dictation text"
-        val coordinator = coordinator(this, host)
-        coordinator.start()
-        advanceUntilIdle()
-        val sessionId = listeningId(host)
-        // ~4s of audio: expected ~8.8 words, so a 1-word result is clearly partial.
-        streamChunks(host, 200)
-        advanceUntilIdle()
-        coordinator.stop()
-        runCurrent()
-
-        sendEcho(host, "Test") // the only thing that came back
-        advanceUntilIdle()
-
-        assertEquals(1, host.recoverCalls.size)
-        assertEquals(1, host.insertions.size)
-        assertEquals("This is the full recovered dictation text", host.insertions[0].second)
-        assertTrue(states(host).any { it is DictationState.Recovering })
-        assertTrue(coordinator.activeMetrics()!!.usedAudioRecovery)
-        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `recovery failure keeps the best available text`() = runTest {
-        val host = FakeHost()
-        host.recoverResult = null // recovery unavailable
-        val coordinator = coordinator(this, host)
-        coordinator.start()
-        advanceUntilIdle()
-        val sessionId = listeningId(host)
-        streamChunks(host, 200)
-        advanceUntilIdle()
-        coordinator.stop()
-        runCurrent()
-
-        sendEcho(host, "Test")
-        advanceUntilIdle()
-
-        assertEquals(1, host.recoverCalls.size)
-        assertEquals(1, host.insertions.size)
-        assertEquals("Test", host.insertions[0].second, "the best available text is never discarded")
-        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `a complete echo does not trigger recovery`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(this, host)
-        coordinator.start()
-        advanceUntilIdle()
-        val sessionId = listeningId(host)
-        streamChunks(host, 200) // ~4s
-        advanceUntilIdle()
-        coordinator.stop()
-        runCurrent()
-
-        sendEcho(host, "This is a reasonably complete sentence for testing")
-        advanceUntilIdle()
-
-        assertTrue(host.recoverCalls.isEmpty())
-        assertEquals(1, host.insertions.size)
-        assertEquals("This is a reasonably complete sentence for testing", host.insertions[0].second)
         coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
         advanceUntilIdle()
     }

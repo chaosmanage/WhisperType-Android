@@ -183,7 +183,6 @@ class DictationReducer {
         is DictationState.Starting,
         is DictationState.Listening,
         is DictationState.Finalizing,
-        is DictationState.Recovering,
         is DictationState.Inserting,
         -> true
 
@@ -194,7 +193,6 @@ class DictationReducer {
         is DictationState.Starting -> sessionId
         is DictationState.Listening -> sessionId
         is DictationState.Finalizing -> sessionId
-        is DictationState.Recovering -> sessionId
         is DictationState.Inserting -> sessionId
         else -> null
     }

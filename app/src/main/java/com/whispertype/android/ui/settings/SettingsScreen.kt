@@ -77,7 +77,6 @@ fun SettingsScreen(
 
     val appEnabled by settings.appEnabled.collectAsStateWithLifecycle(initialValue = true)
     val speechMode by settings.speechMode.collectAsStateWithLifecycle(initialValue = LanguageMode.ENGLISH)
-    val modelOverride by settings.modelOverride.collectAsStateWithLifecycle(initialValue = null)
     val autoStopSeconds by settings.autoStopSeconds
         .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_AUTO_STOP_SECONDS)
     val polishLevel by settings.polishLevel
@@ -94,7 +93,6 @@ fun SettingsScreen(
     var hasKey by remember { mutableStateOf(keyProvider.hasKey()) }
     var keyInput by remember { mutableStateOf("") }
     var keyFeedback by remember { mutableStateOf<String?>(null) }
-    var modelInput by remember { mutableStateOf(modelOverride ?: "") }
 
     val keySavedMessage = stringResource(R.string.settings_key_saved)
     val keySaveFailedMessage = stringResource(R.string.settings_key_save_failed)
@@ -216,24 +214,6 @@ fun SettingsScreen(
                             }
                         }
                     }
-                }
-
-                SettingRow(
-                    title = stringResource(R.string.settings_model),
-                    description = stringResource(R.string.settings_model_desc),
-                ) {}
-                OutlinedTextField(
-                    value = modelInput,
-                    onValueChange = { modelInput = it },
-                    label = { Text(stringResource(R.string.settings_model_hint)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedButton(
-                    onClick = { scope.launch { settings.setModelOverride(modelInput) } },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(R.string.settings_model_save))
                 }
             }
 

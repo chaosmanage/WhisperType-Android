@@ -15,7 +15,6 @@ interface SettingsProvider {
     val historyRetentionDays: Flow<Int>
     val appEnabled: Flow<Boolean>
     val onboardingCompleted: Flow<Boolean>
-    val modelOverride: Flow<String?>
     val autoStopSeconds: Flow<Int>
     val polishLevel: Flow<TranscriptionStyle>
     val dictionary: Flow<List<DictionaryEntry>>

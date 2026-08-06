@@ -39,7 +39,6 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         val historyRetentionDays = intPreferencesKey("history_retention_days")
         val appEnabled = booleanPreferencesKey("app_enabled")
         val onboardingCompleted = booleanPreferencesKey("onboarding_completed")
-        val modelOverride = stringPreferencesKey("model_override")
         val autoStopSeconds = intPreferencesKey("auto_stop_seconds")
         val polishLevel = stringPreferencesKey("polish_level")
         val dictionary = stringPreferencesKey("dictionary")
@@ -69,9 +68,6 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     override val onboardingCompleted: Flow<Boolean> =
         dataStore.data.map { it[Keys.onboardingCompleted] ?: false }
-
-    override val modelOverride: Flow<String?> =
-        dataStore.data.map { it[Keys.modelOverride] }
 
     override val autoStopSeconds: Flow<Int> =
         dataStore.data.map { it[Keys.autoStopSeconds] ?: DEFAULT_AUTO_STOP_SECONDS }
@@ -124,12 +120,6 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     suspend fun setOnboardingCompleted(completed: Boolean) {
         dataStore.edit { it[Keys.onboardingCompleted] = completed }
-    }
-
-    suspend fun setModelOverride(model: String?) {
-        dataStore.edit {
-            if (model.isNullOrBlank()) it.remove(Keys.modelOverride) else it[Keys.modelOverride] = model.trim()
-        }
     }
 
     suspend fun setAutoStopSeconds(seconds: Int) {

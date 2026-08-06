@@ -167,7 +167,7 @@ class PersistentOverlayHost(
                     // 0.4.2: anchor the pill so it appears where the bubble was.
                     // Interactive pills (Starting/Listening) keep their Done button
                     // on the bubble's center (the tap point); status capsules
-                    // (Finalizing/Inserting/Recovering) re-center on the bubble so
+                    // (Finalizing/Inserting) re-center on the bubble so
                     // they do not drift left of it. Restore on return to idle.
                     val s = effective.state
                     val kind = when (s) {
@@ -176,7 +176,6 @@ class PersistentOverlayHost(
                         -> PillKind.INTERACTIVE
 
                         is DictationState.Finalizing,
-                        is DictationState.Recovering,
                         is DictationState.Inserting,
                         -> PillKind.STATUS
 
@@ -428,7 +427,7 @@ class PersistentOverlayHost(
         currentPixel = x to y
     }
 
-    /** Centers a status capsule (Finalizing/Inserting/Recovering) on the bubble's
+    /** Centers a status capsule (Finalizing/Inserting) on the bubble's
      *  center so the text appears exactly where the bubble/pill was. Because the
      *  capsule's size depends on its text and re-layouts after the state change, the
      *  reposition runs on the next global layout with the freshly measured size. */

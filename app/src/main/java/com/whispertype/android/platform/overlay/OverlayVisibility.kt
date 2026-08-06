@@ -13,7 +13,6 @@ enum class OverlayVisibility {
     Starting,
     Listening,
     Finalizing,
-    Recovering,
     Inserting,
     Success,
     CopyAvailable,
@@ -42,7 +41,6 @@ fun visibilityOf(ui: OverlayUiState): OverlayVisibility = when (ui.state) {
     is DictationState.Starting -> OverlayVisibility.Starting
     is DictationState.Listening -> OverlayVisibility.Listening
     is DictationState.Finalizing -> OverlayVisibility.Finalizing
-    is DictationState.Recovering -> OverlayVisibility.Recovering
     is DictationState.Inserting -> OverlayVisibility.Inserting
     is DictationState.Success -> OverlayVisibility.Hidden
     is DictationState.Cancelled -> OverlayVisibility.Hidden
