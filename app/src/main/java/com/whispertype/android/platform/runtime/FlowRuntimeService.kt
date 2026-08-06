@@ -486,6 +486,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         Log.i(TAG, "SESSION DONE outcome=${state::class.simpleName} ${metrics.summary()}")
         // Opt-in history: record the settled transcript when enabled.
         if (cachedHistoryEnabled && !transcript.isNullOrBlank()) {
+            val durationMs = metrics.capturedFrames * 20L // 20 ms per captured chunk
             scope.launch {
                 historyRepository.record(
                     HistoryRepository.HistoryEntry(
@@ -495,6 +496,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                         language = cachedSpeechMode.name,
                         charCount = transcript.length,
                         outcome = state::class.simpleName ?: "Unknown",
+                        durationMs = durationMs,
                     ),
                 )
             }

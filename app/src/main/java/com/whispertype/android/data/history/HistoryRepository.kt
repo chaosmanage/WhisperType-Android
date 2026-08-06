@@ -12,6 +12,8 @@ interface HistoryRepository {
         val language: String,
         val charCount: Int,
         val outcome: String,
+        /** 0.4.2: recorded audio duration in ms (0 for pre-0.4.2 entries). */
+        val durationMs: Long = 0L,
     )
 
     /** Newest-first, retention-pruned entries. */

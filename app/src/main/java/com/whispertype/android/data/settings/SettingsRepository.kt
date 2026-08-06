@@ -45,6 +45,9 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         val dictionary = stringPreferencesKey("dictionary")
         val bubbleX = floatPreferencesKey("bubble_x")
         val bubbleY = floatPreferencesKey("bubble_y")
+        val bubbleSizeDp = intPreferencesKey("bubble_size_dp")
+        val bubbleOpacityPercent = intPreferencesKey("bubble_opacity_percent")
+        val miniDotEnabled = booleanPreferencesKey("mini_dot_enabled")
     }
 
     override val speechMode: Flow<LanguageMode> =
@@ -85,6 +88,15 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     override val bubbleY: Flow<Float?> =
         dataStore.data.map { it[Keys.bubbleY] }
+
+    override val bubbleSizeDp: Flow<Int> =
+        dataStore.data.map { (it[Keys.bubbleSizeDp] ?: DEFAULT_BUBBLE_SIZE_DP).coerceIn(MIN_BUBBLE_SIZE_DP, MAX_BUBBLE_SIZE_DP) }
+
+    override val bubbleOpacityPercent: Flow<Int> =
+        dataStore.data.map { (it[Keys.bubbleOpacityPercent] ?: DEFAULT_BUBBLE_OPACITY_PERCENT).coerceIn(MIN_BUBBLE_OPACITY_PERCENT, MAX_BUBBLE_OPACITY_PERCENT) }
+
+    override val miniDotEnabled: Flow<Boolean> =
+        dataStore.data.map { it[Keys.miniDotEnabled] ?: true }
 
     suspend fun setSpeechMode(mode: LanguageMode) {
         dataStore.edit { it[Keys.speechMode] = mode.name }
@@ -152,6 +164,18 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         }
     }
 
+    suspend fun setBubbleSizeDp(dp: Int) {
+        dataStore.edit { it[Keys.bubbleSizeDp] = dp.coerceIn(MIN_BUBBLE_SIZE_DP, MAX_BUBBLE_SIZE_DP) }
+    }
+
+    suspend fun setBubbleOpacityPercent(percent: Int) {
+        dataStore.edit { it[Keys.bubbleOpacityPercent] = percent.coerceIn(MIN_BUBBLE_OPACITY_PERCENT, MAX_BUBBLE_OPACITY_PERCENT) }
+    }
+
+    suspend fun setMiniDotEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.miniDotEnabled] = enabled }
+    }
+
     /** Decodes the stored dictionary JSON; malformed or unset input yields an empty list. */
     private fun decodeDictionary(raw: String?): List<DictionaryEntry> {
         if (raw.isNullOrBlank()) return emptyList()
@@ -173,6 +197,12 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
     companion object {
         const val DEFAULT_RETENTION_DAYS = 30
         const val DEFAULT_AUTO_STOP_SECONDS = 60
+        const val DEFAULT_BUBBLE_SIZE_DP = 36
+        const val MIN_BUBBLE_SIZE_DP = 24
+        const val MAX_BUBBLE_SIZE_DP = 72
+        const val DEFAULT_BUBBLE_OPACITY_PERCENT = 100
+        const val MIN_BUBBLE_OPACITY_PERCENT = 10
+        const val MAX_BUBBLE_OPACITY_PERCENT = 100
         val DEFAULT_POLISH_LEVEL = TranscriptionStyle.MEDIUM
     }
 }

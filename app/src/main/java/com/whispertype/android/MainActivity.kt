@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -28,6 +29,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import com.whispertype.android.data.history.EncryptedHistoryRepository
+import com.whispertype.android.data.history.HistoryStats
 import com.whispertype.android.data.secrets.AndroidKeystoreKeyStore
 import com.whispertype.android.data.secrets.FileBlobStore
 import com.whispertype.android.data.secrets.JavaxAesGcmCipher
@@ -50,6 +53,7 @@ import com.whispertype.android.platform.runtime.FlowRuntimeService
 import com.whispertype.android.ui.history.HistoryScreen
 import com.whispertype.android.ui.settings.SettingsScreen
 import com.whispertype.android.ui.theme.WhisperTypeTheme
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 /**
@@ -186,10 +190,19 @@ class MainActivity : ComponentActivity() {
         var showSettings by remember { mutableStateOf(false) }
         var showHistory by remember { mutableStateOf(false) }
         var neededPermissions by remember { mutableStateOf(runtimePermissionsNeeded()) }
+        val historyEntries by historyRepository.events().collectAsState(initial = emptyList())
+        val historyEnabled by settings.historyEnabled.collectAsState(initial = false)
         val permissionLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions(),
         ) {
             neededPermissions = runtimePermissionsNeeded()
+        }
+        // 0.4.2: back returns Home from Settings/History instead of closing the app.
+        if (showSettings || showHistory) {
+            BackHandler {
+                showSettings = false
+                showHistory = false
+            }
         }
         if (showHistory) {
             HistoryScreen(
@@ -265,6 +278,11 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     Spacer(Modifier.height(24.dp))
+                    StatsCard(
+                        historyEnabled = historyEnabled,
+                        entries = historyEntries,
+                    )
+                    Spacer(Modifier.height(24.dp))
                     Button(
                         onClick = { showSettings = true },
                         modifier = Modifier.fillMaxWidth(),
@@ -311,6 +329,70 @@ class MainActivity : ComponentActivity() {
                 } else {
                     MaterialTheme.colorScheme.error
                 },
+            )
+        }
+    }
+
+    /** 0.4.2 home stats card: sessions, words, today's words, and average WPM
+     *  derived from history entries (which carry recorded durations). Shows an
+     *  enable hint while history is off. */
+    @Composable
+    private fun StatsCard(
+        historyEnabled: Boolean,
+        entries: List<com.whispertype.android.data.history.HistoryRepository.HistoryEntry>,
+    ) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = stringResource(R.string.home_stats_title),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Spacer(Modifier.height(8.dp))
+                if (!historyEnabled) {
+                    Text(
+                        text = stringResource(R.string.home_stats_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    val wpm = HistoryStats.wordsPerMinute(entries)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        StatItem(label = stringResource(R.string.home_stats_sessions), value = HistoryStats.sessions(entries).toString())
+                        StatItem(
+                            label = stringResource(R.string.home_stats_words),
+                            value = HistoryStats.totalWords(entries).toString(),
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        StatItem(
+                            label = stringResource(R.string.home_stats_today),
+                            value = HistoryStats.todayWords(entries, System.currentTimeMillis()).toString(),
+                        )
+                        StatItem(
+                            label = stringResource(R.string.home_stats_wpm),
+                            value = wpm?.roundToInt()?.toString() ?: "—",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun StatItem(label: String, value: String) {
+        Column {
+            Text(text = value, style = MaterialTheme.typography.titleLarge)
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

@@ -225,4 +225,43 @@ class SettingsRepositoryTest {
         assertEquals(null, repo.bubbleX.first())
         assertEquals(null, repo.bubbleY.first())
     }
+
+    @Test
+    fun `bubble size defaults and round-trips within bounds`() = runTest {
+        val repo = newRepository()
+        assertEquals(SettingsRepository.DEFAULT_BUBBLE_SIZE_DP, repo.bubbleSizeDp.first())
+
+        repo.setBubbleSizeDp(56)
+        assertEquals(56, repo.bubbleSizeDp.first())
+
+        repo.setBubbleSizeDp(999) // coerced to the max
+        assertEquals(SettingsRepository.MAX_BUBBLE_SIZE_DP, repo.bubbleSizeDp.first())
+
+        repo.setBubbleSizeDp(1) // coerced to the min
+        assertEquals(SettingsRepository.MIN_BUBBLE_SIZE_DP, repo.bubbleSizeDp.first())
+    }
+
+    @Test
+    fun `bubble opacity defaults and round-trips within bounds`() = runTest {
+        val repo = newRepository()
+        assertEquals(SettingsRepository.DEFAULT_BUBBLE_OPACITY_PERCENT, repo.bubbleOpacityPercent.first())
+
+        repo.setBubbleOpacityPercent(50)
+        assertEquals(50, repo.bubbleOpacityPercent.first())
+
+        repo.setBubbleOpacityPercent(0) // coerced to the min
+        assertEquals(SettingsRepository.MIN_BUBBLE_OPACITY_PERCENT, repo.bubbleOpacityPercent.first())
+    }
+
+    @Test
+    fun `mini dot defaults on and round-trips`() = runTest {
+        val repo = newRepository()
+        assertTrue(repo.miniDotEnabled.first())
+
+        repo.setMiniDotEnabled(false)
+        assertFalse(repo.miniDotEnabled.first())
+
+        repo.setMiniDotEnabled(true)
+        assertTrue(repo.miniDotEnabled.first())
+    }
 }

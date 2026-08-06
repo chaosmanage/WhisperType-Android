@@ -21,4 +21,9 @@ interface SettingsProvider {
     val dictionary: Flow<List<DictionaryEntry>>
     val bubbleX: Flow<Float?>
     val bubbleY: Flow<Float?>
+
+    /** 0.4.2 bubble visual settings (Wispr-style). */
+    val bubbleSizeDp: Flow<Int>
+    val bubbleOpacityPercent: Flow<Int>
+    val miniDotEnabled: Flow<Boolean>
 }

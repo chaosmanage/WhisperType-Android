@@ -107,6 +107,7 @@ class EncryptedHistoryRepository(
             language = language,
             charCount = charCount,
             outcome = outcome,
+            durationMs = durationMs,
         )
 
     private fun HistoryEntryDto.toEntry() =
@@ -117,6 +118,7 @@ class EncryptedHistoryRepository(
             language = language,
             charCount = charCount,
             outcome = outcome,
+            durationMs = durationMs,
         )
 
     companion object {
@@ -142,4 +144,5 @@ private data class HistoryEntryDto(
     val language: String,
     val charCount: Int,
     val outcome: String,
+    val durationMs: Long = 0L,
 )
