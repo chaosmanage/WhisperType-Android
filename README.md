@@ -206,5 +206,5 @@ scripts/        build, install, and diagnostics helper scripts
 
 ## Version
 
-Current version **0.4.2** (versionCode 25), developed on the `feature` branch.
+Current version **0.5.4** (versionCode 30), developed on the `feature` branch.
 See `CHANGELOG.md` for the full release history.

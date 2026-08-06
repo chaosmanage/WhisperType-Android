@@ -33,3 +33,6 @@ fixtures/*.txt
 
 # Out-of-scope uncommitted parallel workstream, parked out of the source tree
 /_wip_uncommitted/
+
+# Playwright MCP session artifacts
+.playwright-mcp/
