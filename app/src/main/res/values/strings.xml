@@ -52,7 +52,7 @@
     <string name="onboarding_accessibility">Accessibility</string>
     <string name="onboarding_accessibility_desc">Detects the focused text field and inserts your dictation.</string>
     <string name="onboarding_key">Gemini API key</string>
-    <string name="onboarding_key_desc">Add it in Settings → Gemini account once you are in.</string>
+    <string name="onboarding_key_desc">Paste your Gemini API key below to finish setup.</string>
     <string name="onboarding_grant">Grant</string>
     <string name="onboarding_open">Open</string>
     <string name="onboarding_done">Done</string>

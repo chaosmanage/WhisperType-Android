@@ -22,6 +22,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,6 +30,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +44,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.whispertype.android.R
+import com.whispertype.android.data.secrets.KeyProvider
+import kotlinx.coroutines.launch
 
 /**
  * First-run orientation + permission guide (0.4.2). Shown before the overlay
@@ -54,10 +58,10 @@ import com.whispertype.android.R
 @Composable
 fun OnboardingScreen(
     overlayGranted: Boolean,
+    keyProvider: KeyProvider,
     hasMic: () -> Boolean,
     hasNotifications: () -> Boolean,
     hasAccessibility: () -> Boolean,
-    hasKey: () -> Boolean,
     onRequestOverlay: () -> Unit,
     onRequestMicNotifications: () -> Unit,
     onOpenAccessibility: () -> Unit,
@@ -75,7 +79,12 @@ fun OnboardingScreen(
     val micGranted = remember(refresh) { hasMic() }
     val notificationsGranted = remember(refresh) { hasNotifications() }
     val accessibilityOn = remember(refresh) { hasAccessibility() }
-    val keySet = remember(refresh) { hasKey() }
+    val keySet = remember(refresh) { keyProvider.hasKey() }
+    val scope = rememberCoroutineScope()
+    var keyInput by remember { mutableStateOf("") }
+    var keyFeedback by remember { mutableStateOf<String?>(null) }
+    val keySavedLabel = stringResource(R.string.settings_key_saved)
+    val keyFailedLabel = stringResource(R.string.settings_key_save_failed)
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -172,6 +181,43 @@ fun OnboardingScreen(
                         actionLabel = null,
                         onAction = {},
                     )
+                    if (!keySet) {
+                        Column(
+                            modifier = Modifier.padding(start = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedTextField(
+                                value = keyInput,
+                                onValueChange = { keyInput = it },
+                                label = { Text(stringResource(R.string.settings_key_hint)) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        val saved = keyProvider.storeKey(keyInput.trim())
+                                        keyFeedback = if (saved) {
+                                            keyInput = ""
+                                            refresh++
+                                            keySavedLabel
+                                        } else {
+                                            keyFailedLabel
+                                        }
+                                    }
+                                },
+                            ) {
+                                Text(stringResource(R.string.settings_key_save))
+                            }
+                            keyFeedback?.let {
+                                Text(
+                                    text = it,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
                 }
             }
             Spacer(Modifier.height(20.dp))

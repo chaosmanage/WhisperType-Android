@@ -139,10 +139,10 @@ class MainActivity : ComponentActivity() {
                 } else {
                     OnboardingScreen(
                         overlayGranted = overlayGranted,
+                        keyProvider = keyProvider,
                         hasMic = ::hasMicPermission,
                         hasNotifications = ::hasNotificationPermission,
                         hasAccessibility = ::isAccessibilityEnabled,
-                        hasKey = { keyProvider.hasKey() },
                         onRequestOverlay = ::requestOverlayPermission,
                         onRequestMicNotifications = {
                             permissionLauncher.launch(
