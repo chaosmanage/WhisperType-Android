@@ -1,20 +1,19 @@
 # WhisperType Android — Release Process
 
-This document covers versioning, signing, APK generation, checksum generation, installation, upgrade testing, rollback/uninstall, and release notes for WhisperType Android. The command-driven workflows reference the deployment scripts defined in Implementation Plan section 22.14; manual command equivalents are given so the process is reproducible without them.
+This document covers versioning, signing, APK generation, checksum generation, installation, upgrade testing, rollback/uninstall, and release notes for WhisperType Android. Manual command equivalents are given so the process is reproducible end to end.
 
 ## Versioning
 
 - The project follows semantic versioning: `MAJOR.MINOR.PATCH`.
-- Roadmap (Implementation Plan section 21): `0.1.0` first private prototype, `0.2.0` verified docked overlay and Gemini dictation, `0.3.0` compatibility and fallback hardening, `1.0.0` stable private release after Pixel/Samsung acceptance.
-- The version lives in `app/build.gradle.kts`:
+- The current line is 0.4.x. The version lives in `app/build.gradle.kts`:
 
 ```kotlin
 defaultConfig {
     applicationId = "com.whispertype.android"
-    minSdk = 34
+    minSdk = 33
     targetSdk = 36
-    versionCode = 1
-    versionName = "0.1.0"
+    versionCode = 25
+    versionName = "0.4.2"
 }
 ```
 
@@ -67,7 +66,7 @@ Outputs:
 - `app/build/outputs/apk/debug/app-debug.apk`
 - `app/build/outputs/apk/release/app-release.apk`
 
-The automated `SourcePrivacyAuditTest` is part of `:app:testDebugUnitTest` and scans the source tree for API key literals, authenticated URL literals, sensitive log lines, and committed keystore/secret files.
+A privacy review is part of every release: the source tree is checked for API key literals, authenticated URL literals, sensitive log lines, and committed keystore/secret files (see `docs/CONTRIBUTING.md`).
 
 ## Checksum generation
 
@@ -119,6 +118,6 @@ Each release entry in `CHANGELOG.md` must record:
 - Any behavior changes and known limitations for that release.
 - Do not include secrets, transcripts, audio, unique device identifiers, or sensitive diagnostic artifacts.
 
-## Release gate (from Implementation Plan section 22.15)
+## Release gate
 
 A deployment is complete only when: preflight works in all device states; a signed non-debug APK exists with the expected application id/version; `apksigner` verification succeeds against the recorded certificate; clean-install and upgrade tests pass; the versioned `dist` directory contains the APK, SHA-256 checksum, install guide, and release notes; at least one additional personal device install is tested or explicitly marked pending; and the release keystore plus credentials remain outside the repository.

@@ -49,13 +49,13 @@ All paths are under `app/src/main/java/com/whispertype/android/`.
 | --- | --- | --- |
 | `platform/runtime/` | `DictationCoordinator.kt`, `FlowRuntimeService.kt` | Pure, host-testable session orchestration (state machine, auto-stop, retry, metrics) and the foreground host that binds it to Android. |
 | `platform/gemini/` | `GeminiLiveWire.kt`, `OkHttpGeminiLiveSession.kt`, `GeminiSessionFactory.kt`, `GeminiSessionConfig.kt`, `WarmLiveSessionManager.kt`, `GeminiLog.kt` | The Gemini Live engine. `GeminiLiveWire` is the pure wire codec (JSON build/parse); `OkHttpGeminiLiveSession` is the WebSocket transport; the factory builds sessions; the warm manager prewarm pool. |
-| `platform/overlay/` | `PersistentOverlayHost.kt`, `WhisperTypeOverlayContent.kt`, `OverlayVisibility.kt`, `OverlayHostStateMachine.kt`, `OverlayOwners.kt`, `OverlayComposeContainer.kt` | The one persistent `TYPE_APPLICATION_OVERLAY` window, its Compose content (draggable bubble, capsule recording UI), and a pure attach/detach state machine. |
+| `platform/overlay/` | `PersistentOverlayHost.kt`, `WhisperTypeOverlayContent.kt`, `OverlayAppearance.kt`, `OverlayVisibility.kt`, `OverlayHostStateMachine.kt`, `OverlayOwners.kt`, `OverlayComposeContainer.kt` | The one persistent `TYPE_APPLICATION_OVERLAY` window and its Compose content: the draggable mic bubble (the app logo, round) that auto-minimizes to a mini-dot, the recording pill (`[Cancel ✕][wave][Done ✓]`) anchored so Done lands where the bubble was tapped, status capsules re-centered on the bubble, and a pure attach/detach state machine. |
 | `platform/accessibility/` | `WhisperTypeAccessibilityService.kt`, `EditorTracker.kt`, `SecurityClassifier.kt`, `EligibilityMapper.kt`, `EligibilityExplanation.kt`, `AccessibilityTargetGateway.kt`, `InsertionDecision.kt`, `InsertionVerifier.kt` | The `:accessibility` process: focus/keyboard tracking, secure-field classification, typed eligibility, target capture, and validated insertion. |
 | `platform/ipc/` | `RuntimeIpc.kt` | Typed cross-process message contract (see above). |
-| `core/` | `core/state/`, `core/model/`, `core/transcript/`, `core/audio/`, `core/privacy/`, `core/dictionary/`, `core/validation/`, `core/overlay/`, `core/contracts/` | Pure, framework-free logic: the dictation reducer, typed domain models, the transcript accumulator/selector, PCM16 audio framing, log redaction, dictionary correction rules, and the contracts (`DictationBridge`, `GeminiLiveSession`, `TargetGateway`, `OverlayController`) that adapters implement. |
+| `core/` | `core/state/`, `core/model/`, `core/transcript/`, `core/audio/`, `core/privacy/`, `core/dictionary/`, `core/overlay/`, `core/contracts/` | Pure, framework-free logic: the dictation reducer, typed domain models, the transcript accumulator/completeness/selector, PCM16 audio framing + the bounded session recording used by the audio-recovery failsafe, log redaction, dictionary correction rules, and the contracts (`DictationBridge`, `GeminiLiveSession`, `TargetGateway`, `OverlayController`) that adapters implement. |
 | `data/` | `data/settings/SettingsRepository.kt`, `data/secrets/`, `data/history/EncryptedHistoryRepository.kt` | DataStore-backed settings (language, polish level, auto-stop, dictionary, bubble position, history), Keystore+AES-GCM secrets, and the encrypted, viewable history store. |
 | `audio/` | `audio/AudioCapture.kt`, `audio/AudioPipeline.kt`, `audio/BoundedAudioQueue.kt`, `audio/Chunker.kt`, `audio/PreReadyAudioBuffer.kt` | Device microphone capture and the bounded realtime pipeline feeding the Gemini session. |
-| `ui/` | `ui/theme/`, `ui/settings/SettingsScreen.kt`, `ui/history/HistoryScreen.kt`, `ui/waveform/CircularWaveform.kt` | Compose theme, settings, the encrypted history screen, and the animated circular waveform used by the capsule UI. |
+| `ui/` | `ui/theme/`, `ui/settings/SettingsScreen.kt`, `ui/history/HistoryScreen.kt`, `ui/dictionary/DictionaryScreen.kt`, `ui/waveform/RealTimeWaveform.kt` | Compose theme (emerald-teal, light + dark), the Settings screen, the History screen (list + history settings), the Dictionary screen, and the real-time waveform used by the recording pill. |
 
 ## How a session flows
 
@@ -68,20 +68,24 @@ All paths are under `app/src/main/java/com/whispertype/android/`.
 3. PCM16 16 kHz audio streams to Gemini Live over the shared OkHttp WebSocket;
    the coordinator applies the auto-stop watcher (silence + hard cap, whichever
    fires first) and publishes overlay state.
-4. On stop/finalize, the coordinator settles the transcript via the accumulator
-   and selector, applies `DictionaryCorrections`, and sends an insert request over
-   IPC. The accessibility process re-validates the target and commits text at the
-   cursor; a typed result flows back. When history is enabled, the settled
-   transcript is recorded encrypted.
+4. On stop/finalize, the coordinator settles the transcript via the accumulator,
+   completeness gate, and selector — a truncated/summarized echo salvages the
+   complete raw ASR, and when both live sources under-deliver the audio-recovery
+   failsafe re-transcribes the retained session recording (a `Recovering` state
+   shows "Hang tight — getting your full text…"). It then applies
+   `DictionaryCorrections` and sends an insert request over IPC. The
+   accessibility process re-validates the target and commits text at the cursor;
+   a typed result flows back. When history is enabled, the settled transcript is
+   recorded encrypted.
 5. Failures surface as typed `DictationFailure`s with a Retry/Dismiss panel; a
    failed insertion offers an explicit Copy fallback.
 
 ## Further reading
 
-- **`docs/GEMINI_LIVE_TRANSCRIPTION.md`** — the Gemini Live voice engine: wire
-  protocol, prompt, session/settlement state machines, and failsafes.
-- **`docs/GEMINI_LIVE_WIRE_REFERENCE.md`** — exhaustive Gemini Live wire mechanics
-  reference.
-- **`docs/IMPLEMENTATION_PLAN_3.md`** — the 0.4.0 evolution ("Experience & Reach"):
-  Android 13+, draggable bubble, capsule UI, auto-stop, polish levels, custom
-  dictionary, and the history screen.
+- **`docs/GEMINI_LIVE.md`** — the Gemini Live voice engine: wire protocol, prompt,
+  session/settlement state machines, the 0.4.2 reliability findings, and the
+  exact wire mechanics reference.
+- **`docs/TESTING.md`** — unit-test inventory, device matrix, and the on-device
+  acceptance protocol.
+- **`docs/PUSH_TO_PHONE_VIA_ADB.md`** — pushing the build to the phone over
+  wireless ADB (Tailscale).

@@ -2,16 +2,17 @@
 
 WhisperType Android keeps your existing SwiftKey, Gboard, or Samsung Keyboard active. It does not replace your keyboard.
 
-When you focus a normal text field, a small WhisperType microphone control appears attached to the keyboard boundary. Tap it to dictate. The keyboard is visually replaced by a WhisperType voice panel while you speak, then returns after the text is inserted.
+When you focus a normal text field, a round mic bubble (the app logo) appears near it. The bubble is freely draggable and, after a few seconds of idle, auto-minimizes into a small dot. Tapping the bubble or the dot starts dictation. While you speak, a compact recording pill appears with Cancel (red X), a live waveform, and Done (green check) — Done commits the text, Cancel discards it.
 
 ## Requirements
 
-- Android 13 or newer (0.4.0 targets Android 13+ with a runtime RECORD_AUDIO + POST_NOTIFICATIONS permission flow).
+- Android 13 or newer (0.4.x targets Android 13+ with a runtime RECORD_AUDIO + POST_NOTIFICATIONS permission flow).
 - A supported Pixel or Samsung device, or an Android 13+ tablet.
 - Gboard, SwiftKey, or Samsung Keyboard in standard docked mode.
 - Internet access for Gemini Live.
 - A Gemini API key.
 - Permission to use the microphone.
+- Overlay (draw over other apps) permission.
 - WhisperType Accessibility Service enabled.
 
 ## Install the APK
@@ -25,16 +26,22 @@ When you focus a normal text field, a small WhisperType microphone control appea
 For development installation from a computer:
 
 ```powershell
-adb install -r WhisperType-Android-0.1.0-release.apk
+adb install -r WhisperType-Android-0.4.2-release.apk
 ```
+
+## Grant overlay permission
+
+The bubble is drawn over other apps, so overlay access is required.
+
+1. Open WhisperType.
+2. On first launch, tap `Grant overlay permission` and allow it in the system dialog.
 
 ## Grant microphone permission
 
 1. Open WhisperType.
-2. Tap `Allow microphone`.
+2. On the Home tab, tap the `Microphone permission` tile (or `Grant microphone & notifications`).
 3. Choose `While using the app` if Android presents that option.
-4. Return to WhisperType.
-5. Confirm that microphone status says `Ready`.
+4. The tile now reads On.
 
 WhisperType does not record continuously. The microphone is used only during an active dictation session.
 
@@ -42,7 +49,7 @@ WhisperType does not record continuously. The microphone is used only during an 
 
 WhisperType shows a recording notification while the microphone is active.
 
-1. When Android asks for notifications, tap `Allow`.
+1. On the Home tab, tap the `Notifications` tile and allow it.
 2. If you previously denied it, open:
 
    `Settings → Apps → WhisperType → Notifications`
@@ -57,7 +64,7 @@ Accessibility access is required so WhisperType can:
 
 - detect when a text field is active,
 - detect the active keyboard’s position,
-- place the docked control next to the keyboard,
+- place the mic bubble,
 - insert the final text at the cursor.
 
 WhisperType does not use this permission to read or store unrelated screen content.
@@ -104,12 +111,11 @@ Keep SwiftKey, Gboard, or Samsung Keyboard selected as your default.
 ## Configure the Gemini API key
 
 1. Open WhisperType.
-2. Open `Settings`.
-3. Tap `Gemini API key`.
+2. Tap the `Settings` tab (bottom navigation).
+3. Open the `Gemini account` section.
 4. Paste or type your key.
-5. Tap `Save`.
-6. Tap `Test connection`.
-7. Confirm that the test succeeds.
+5. Tap `Save key`.
+6. The card confirms the key is configured; the Home tab's `Gemini API key` tile reads On.
 
 The key is encrypted with Android Keystore-backed storage. It is not saved in normal app preferences, history, logs, backups, or the clipboard.
 
@@ -117,7 +123,7 @@ The key is encrypted with Android Keystore-backed storage. It is not saved in no
 
 Open:
 
-`WhisperType → Settings → Speech mode`
+`WhisperType → Settings tab → Recording`
 
 Choose:
 
@@ -126,32 +132,27 @@ Choose:
 
 Hinglish supports natural English/Hindi code-switching but always produces Latin-script output. Devanagari is rejected.
 
-## Customize the dock
+## Customize the bubble
 
 Open:
 
-`WhisperType → Settings → Dock`
+`WhisperType → Settings tab → Bubble`
 
 Available controls:
 
-- Position: Left, Center, Right.
-- Size: Compact, Standard, Large.
-- Vertical overlap: Mostly over keyboard or Mostly above keyboard.
-- Opacity.
-- Theme: System, Light, Dark.
-- Accent color.
-- Haptic feedback.
-- Optional start/stop sound.
-- Elapsed-time visibility.
-- Cancel button side.
+- Bubble size (24-72 dp).
+- Bubble opacity (10-100%).
+- `Mini dot` — shrink the bubble to a small dot when idle (the dot still starts dictation).
+- `Turn to dot after` — idle seconds before auto-minimizing (1-15 s, default 3 s).
+- `Reset bubble position` — return the bubble to its default spot.
 
-The mic bubble is freely draggable: drag it with your finger to place it anywhere on screen. Its position persists across sessions and device restarts. To restore the default position, use `WhisperType → Settings → Reset bubble position`.
+The mic bubble is freely draggable: drag it with your finger to place it anywhere on screen. Its position persists across sessions and device restarts. The bubble is the round app logo.
 
 ## Set the auto-stop timeout
 
 Open:
 
-`WhisperType → Settings → Auto-stop timeout`
+`WhisperType → Settings tab → Recording → Auto-stop timeout`
 
 Choose 15, 30, 60, 120, or 300 seconds. The default is 60.
 
@@ -161,20 +162,23 @@ Recording stops automatically after you have been silent for the chosen interval
 
 Open:
 
-`WhisperType → Settings → Output polish`
+`WhisperType → Settings tab → Recording → Output polish`
 
 Choose None, Low, Medium, or High. The default is Medium.
 
-Higher polish levels ask the transcription engine to clean up filler words, disfluencies, and speech quirks; None keeps the raw transcript. The level is passed to the Gemini session as a system instruction (see `docs/GEMINI_LIVE_TRANSCRIPTION.md`).
+Higher polish levels ask the transcription engine to clean up filler words, disfluencies, and speech quirks; None keeps the raw transcript. The level is passed to the Gemini session as a system instruction (see `docs/GEMINI_LIVE.md`).
+
+## Enable / disable dictation (App enabled)
+
+`Settings → General → App enabled` is a kill switch. When it is off, the bubble is hidden entirely and dictation cannot start, even though the Accessibility Service and permissions are still granted. Leave it on for normal use; turn it off to hide the bubble without touching any permissions.
 
 ## Set up the custom dictionary
 
-Open:
+Open the `Dictionary` tab (bottom navigation).
 
-`WhisperType → Settings → Custom dictionary`
-
-- Tap `Add word` and enter a word or phrase.
+- Enter the word exactly as you say it (Word as spoken).
 - Optionally enter `Always write as` to force a specific spelling.
+- Tap `Add` to save it.
 - Delete a single entry, or `Clear all` to remove every entry.
 
 Corrections are applied when the transcript is inserted, so the dictionary never rewrites the live transcript mid-session. Matching is word-boundary and case-insensitive.
@@ -183,47 +187,42 @@ Corrections are applied when the transcript is inserted, so the dictionary never
 
 If you dragged the mic bubble somewhere awkward, reset it:
 
-`WhisperType → Settings → Reset bubble position`
+`WhisperType → Settings tab → Bubble → Reset bubble position`
 
 The bubble returns to its default position.
 
-## Run the compatibility test
+## Check the Home status grid
 
-1. Open WhisperType.
-2. Tap `Compatibility test`.
-3. Focus the sample text field.
-4. Wait for your normal keyboard to appear.
-5. Confirm that the WhisperType dock appears at the keyboard boundary.
-6. Tap the dock.
-7. Confirm that the voice panel covers the keyboard.
-8. Tap Stop.
-9. Confirm that the sample text field receives the result.
-10. Confirm that the original keyboard returns.
+The Home tab shows a 2-column status grid of everything dictation needs. Any tile that reads Off can be tapped to `Fix` it:
 
-If the test fails, use `Settings → Troubleshooting` and export diagnostics. Diagnostics contain timing and error codes, not transcripts, audio, API keys, or editor text.
+- Overlay permission
+- Runtime service
+- Accessibility service
+- Gemini API key
+- Microphone permission
+- Notifications
+
+The Home tab also shows your dictation stats (Sessions, Words, Words today, Words this week, Words/min, Words/session), derived from local history.
 
 ## Daily use
 
 1. Open an app such as Messages, Gmail, Chrome, Notes, or another supported application.
 2. Tap inside a normal text field.
 3. Wait for your normal keyboard to appear.
-4. Tap the WhisperType docked microphone.
-5. The keyboard area changes into the WhisperType voice panel.
+4. Tap the WhisperType bubble (or the mini dot it may have shrunk to).
+5. A compact recording pill appears: Cancel (red X), a live waveform, and Done (green check).
 6. Speak naturally.
-7. Tap `Stop`.
-8. Wait while WhisperType finalizes the transcript.
-9. WhisperType inserts the result at the current cursor or replaces the selected text.
-10. The normal keyboard returns.
-
-The voice panel does not display transcript text. It displays the waveform, recording state, and optional elapsed time.
+7. Tap `Done` to commit the text, or the red X to cancel and discard.
+8. Transient status pills appear while the result is prepared — `Finalizing`, then `Inserting`. If the live sources under-delivered, the pill reads `Hang tight — getting your full text…` while the recording is re-transcribed (wait for it).
+9. WhisperType inserts the result at the current cursor or replaces the selected text; the keyboard stays visible throughout.
+10. The bubble returns to its idle state.
 
 ## Cancel a dictation
 
 You can cancel by:
 
-- tapping `Cancel` in the voice panel,
+- tapping the red X (`Cancel`) in the recording pill,
 - tapping `Cancel` in the recording notification,
-- pressing the Android Back button while the voice panel is active,
 - locking the phone,
 - switching to another app or field.
 
@@ -272,56 +271,51 @@ History is disabled by default. Transcript text is recorded only while it is ena
 
 To enable it:
 
-1. Open `Settings`.
-2. Tap `Privacy and history`.
-3. Enable `Local history`.
-4. Choose a retention period (in days).
+1. Open the `History` tab (bottom navigation).
+2. Turn on `Save dictation history`.
+3. Choose a retention period with the slider (7-90 days).
 
 When enabled, history is encrypted and stored locally. Audio is never stored.
 
-To view or manage it:
-
-`Settings → Privacy and history → View history`
-
-The list is viewable in-app: copy an entry, delete a single entry, or `Clear all history` to empty it. Entries are automatically pruned once they are older than the retention period.
-
-To remove everything at once:
-
-`Settings → Privacy and history → Clear all history`
+The History tab shows the transcript list: copy an entry, delete a single entry, or delete all with the delete icon (a confirmation dialog appears first). Entries are automatically pruned once they are older than the retention period. Enabling history also powers the stats grid on the Home tab.
 
 ## Troubleshooting
 
-### The dock does not appear
+### The bubble does not appear
 
 Check:
 
 1. WhisperType Accessibility Service is enabled.
-2. Microphone permission is enabled.
-3. Gemini API key is saved.
-4. The text field is not secure.
-5. The keyboard is fully visible.
-6. The keyboard is a supported docked keyboard.
-7. WhisperType is not disabled for the current app.
-8. Android has not stopped the Accessibility Service.
+2. Overlay permission is granted.
+3. `Settings → General → App enabled` is on.
+4. Microphone permission is enabled.
+5. Gemini API key is saved.
+6. The text field is not secure.
+7. The keyboard is fully visible.
+8. The keyboard is a supported docked keyboard.
+9. Android has not stopped the Accessibility Service.
 
 Reopen:
 
 `Settings → Accessibility → Installed/Downloaded apps → WhisperType`
 
-### The dock disappears
+For more detail, see `docs/TROUBLESHOOTING.md`.
 
-The dock hides when:
+### The bubble disappears
+
+The bubble hides when:
 
 - the keyboard closes,
 - the text field loses focus,
 - the screen locks,
 - an unsupported keyboard layout is detected,
 - the current field is secure,
-- the Accessibility Service disconnects.
+- the Accessibility Service disconnects,
+- `Settings → General → App enabled` is turned off.
 
-This is expected behavior.
+When idle, the bubble shrinking into a mini dot after a few seconds is expected behavior, not a fault.
 
-### The voice panel does not start
+### The recording pill does not start
 
 Check:
 
@@ -336,7 +330,7 @@ Check:
 
 The application likely did not expose a reliable input connection. Tap `Copy`, return to the field, and paste manually.
 
-### Samsung stops showing the dock
+### Samsung stops showing the bubble
 
 Open:
 
@@ -372,13 +366,13 @@ WhisperType never displays or logs the full authenticated Gemini connection URL.
 
 `Settings → Accessibility → Installed apps → WhisperType → Off`
 
-Disabling the service immediately hides the dock and cancels any active recording.
+Disabling the service immediately hides the bubble and cancels any active recording.
 
 ## Delete the Gemini API key
 
 Open:
 
-`WhisperType → Settings → Gemini API key → Delete key`
+`WhisperType → Settings tab → Gemini account → Clear key`
 
 Then confirm deletion.
 
@@ -401,7 +395,7 @@ Before uninstalling, optionally:
 
 WhisperType:
 
-- records only after you tap the dock,
+- records only after you tap the bubble,
 - streams audio directly to Gemini Live,
 - does not use a WhisperType cloud account,
 - does not use a backend server,

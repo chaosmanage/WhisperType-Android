@@ -1,6 +1,44 @@
 # WhisperType Android — Security and Privacy
 
-This document describes how WhisperType Android handles secrets, transcripts, history, the clipboard, logging, Accessibility access, and the microphone. It is the security and privacy reference for the app and is mirrored by the implementation plan's audit checks (Phase 14).
+WhisperType Android is a private, local-first dictation app. Its security model is centered on keeping the Gemini API key encrypted on the device, keeping transcripts and audio out of storage and logs by default, and keeping the Accessibility Service's reach minimal. This document is the security and privacy reference for the app and describes how it handles secrets, transcripts, history, the clipboard, logging, Accessibility access, and the microphone.
+
+## Vulnerability reporting
+
+This project ships to trusted personal devices only. If you believe a change creates a security or privacy issue:
+
+1. Report privately to the repository maintainers.
+2. Never post secrets, transcripts, audio samples, or device logs that contain user data in a public issue.
+3. Describe the issue with only the minimum non-sensitive details: failure codes, device class (for example Pixel or Samsung), Android version, keyboard, and the component involved.
+4. There is no public bug bounty program.
+
+Reasonable reports are acknowledged and triaged as a normal PR with the `privacy` scope label.
+
+## Supported versions
+
+| Version | Support |
+| --- | --- |
+| 0.4.x | Current line; developed on the `feature` branch. |
+
+Only the current minor line is actively maintained. Devices on an older line than the currently tested one receive security fixes by upgrading to the current release.
+
+## App threat model summary
+
+- **API key encryption.** The Gemini API key is encrypted with an Android Keystore AES-GCM 256-bit key (alias `whispertype_api_key`) and stored as ciphertext plus a random 12-byte IV in an app-private no-backup file. The plaintext key is never written to DataStore, SharedPreferences, Room, resources, BuildConfig, or logs; it exists only transiently in memory. Incoming keys are rejected unless prefixed `AIza`. If the Keystore reports the key invalidated, the stored ciphertext is discarded and the user is asked to re-enter the key.
+- **No key in Git.** Keystore files, `signing.properties`, API keys, and transcripts are blacklisted for the repository (text node). The optional local history is encrypted with a separate AES-GCM Keystore key (`whispertype_history`).
+- **Transcripts are not stored by default.** Transcript candidates exist only in memory for the duration of a session and are cleared on insertion, copy fallback, cancellation, or failure. They are stored only if the user enables optional local history (disabled by default). Transcripts are never logged.
+- **No backend server.** Audio streams directly from the device to the Gemini Live API over TLS. There is no WhisperType cloud account or backend.
+- **Backup exclusions.** `android:allowBackup="false"` plus `data_extraction_rules.xml` exclude every backup/device-transfer path (root, database, sharedpref, file, external).
+- **Diagnostics redaction.** `DiagnosticsExporter` keeps at most 256 typed events with aggregate timing. Exports never include transcripts, audio, API keys, the authenticated Gemini URL, editor text, or app package data. Logging tags are stable and non-sensitive (`WT-Accessibility`, `WT-Gemini`, `WT-Dictation`, `WT-Settings`), and `LogRedactor` is applied to logs and exceptions.
+- **Accessibility disclosure.** The service requests only editable-field detection, keyboard-window bounds, input connection access, and final text insertion, and never reads or stores unrelated screen content. Secure fields are excluded.
+- **Microphone.** Recorded only during an active dictation session initiated by the user. A foreground notification with Stop and Cancel actions is shown while recording; there is no background recording.
+
+## Security-critical code
+
+- `data/secrets/` — `AesGcmCipher`, `KeystoreKeyStore`, `KeystoreKeyProvider`, `KeyProvider`, `SecretStore`, `BlobStore`, `SensitiveClipboard`
+- `platform/accessibility/` — `AccessibilityTargetGateway`, `SecurityClassifier`, `InsertionDecision`, `InsertionVerifier`, `EditorTracker`
+- `platform/gemini/OkHttpGeminiLiveSession.kt` (never logs the authenticated URL or keys)
+- `data/history/EncryptedHistoryRepository.kt`
+- `core/privacy/LogRedactor.kt` (applied to all log and exception output)
 
 ## API key storage
 
@@ -28,13 +66,17 @@ The Gemini API key is the only secret the app stores.
 - Transcripts are never logged.
 - Transcripts are never written to disk unless the user has enabled optional local history.
 
+## Audio-recovery failsafe
+
+If both the live echo and the raw ASR fail, the failsafe re-transcribes the in-memory session recording via a non-live `generateContent` call. During recovery a temporary WAV is written to the app cache directory (`wt_recovery_<session>.wav`); it is app-private, deleted in all paths, and never logged or uploaded. No transcript or audio content is ever logged.
+
 ## Optional history
 
 - Local history is **opt-in** and disabled by default; transcript text is recorded only while it is enabled.
 - When enabled, completed valid dictations are stored in an encrypted file store using a Keystore AES-GCM key under the alias `whispertype_history`.
 - The history store lives in no-backup storage.
 - Retention is capped by a retention-days setting; entries older than the chosen period are pruned automatically.
-- History is viewable and deletable in-app (`Settings → Privacy and history → View history`): copy an entry, delete a single entry, or clear all.
+- History is viewable and deletable in-app via the **History** tab in the bottom navigation: copy an entry, delete a single entry, or clear all.
 - `Clear all history` removes the stored records.
 - Audio is never stored.
 - API keys are never stored.
@@ -44,7 +86,7 @@ The Gemini API key is the only secret the app stores.
 
 ## Custom dictionary
 
-- The custom dictionary (correction rules) is stored locally in app-private storage; it is never uploaded, backed up, or sent to Gemini.
+- The custom dictionary (correction rules) has its own page in the app and is stored locally in app-private storage; it is never uploaded, backed up, or sent to Gemini.
 - Correction rules are applied at insertion time — they are not prompt injection and are never included in the session `systemInstruction`.
 - Dictionary entries are never logged.
 
@@ -58,7 +100,7 @@ The Gemini API key is the only secret the app stores.
 ## Logging restrictions
 
 - Logging uses stable, non-sensitive tags only: `WT-Accessibility`, `WT-Gemini`, `WT-Dictation`, `WT-Settings`.
-- `SecretRedactor` is applied to all log and exception output.
+- `LogRedactor` is applied to all log and exception output.
 - The app never logs: API keys, authenticated Gemini URLs, complete transcripts, audio, AccessibilityNode trees, clipboard content, or custom dictionary entries.
 - Crash reports and diagnostics carry only typed error codes and aggregate timing metadata.
 
@@ -86,7 +128,7 @@ It does not inspect unrelated screen content.
 
 ## Security test checklist
 
-From implementation plan section 8 (Phase 3 — Secure credential storage), the following tests must pass:
+The following tests must pass:
 
 - Store and retrieve key.
 - Replace key.

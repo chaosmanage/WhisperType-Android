@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [0.4.2] - 2026-08-06 (in development, feature branch)
 
-"Reliability first" — fixes the lost-transcription bug (first-few-words / 1-2 word summary / last-word-only) plus the Wispr-style UI round. Calibration evidence in `docs/GEMINI_LIVE_TRANSCRIPTION.md` §10 and `docs/IMPLEMENTATION_PLAN_3.md` §0.4.2.
+"Reliability first" — fixes the lost-transcription bug (first-few-words / 1-2 word summary / last-word-only) plus the Wispr-style UI round. Calibration evidence and the full reliability write-up are in `docs/GEMINI_LIVE.md` §15.
 
 ### Reliability — never lose a dictation
 
@@ -29,16 +29,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [0.4.1] - 2026-08-06 (in development, feature branch)
 
-Follow-up to 0.4.0 from on-device testing + host probes. See `docs/GEMINI_LIVE_TRANSCRIPTION.md` §9.
+Follow-up to 0.4.0 from on-device testing + host probes. See `docs/GEMINI_LIVE.md`.
 
 - **Echo transcription engine** — the dictation source is now the model's instructed spoken reply (`outputTranscription`): the `systemInstruction` tells the model to repeat the user's speech back verbatim with the selected polish level (and, for Hinglish, in Roman/Latin script). Host probes proved `outputTranscription` works even with a `systemInstruction`, controls Latin script and polish, and streams in ~0.6 s (sentence) to ~8 s (100 words). `inputTranscription` (raw ASR) is the 2 s fast fallback; settlement prefers the echo (always waits for it, 20 s cap).
 - **Bubble simplified** — one `TYPE_APPLICATION_OVERLAY` window, always `TOP|START` with an absolute pixel position and real-measured-size clamp; drag shows an X drop-target that hides the bubble until the next eligible field. Removed the gravity-switching placement logic that caused the jump-to-corner bug.
 - **Long-dictation insertion fix** — surrounding-text verification window enlarged (5000/500) and a truncation-robust tail match, fixing "Could not confirm the text was inserted / Use Copy" on long dictations.
-- **Docs** — `GEMINI_LIVE_TRANSCRIPTION.md` §9 and `GEMINI_LIVE_WIRE_REFERENCE.md` §2.1/§3/§7.3 record the verified echo mechanics.
+- **Docs** — the consolidated `docs/GEMINI_LIVE.md` records the verified echo mechanics.
 
 ## [0.4.0] - 2026-08-06 (in development, feature branch)
 
-"Experience & Reach" — see `docs/IMPLEMENTATION_PLAN_3.md`.
+"Experience & Reach" — see the CHANGELOG entries below.
 
 - **Android 13+ support** — `minSdk 33` so the Android 13 tablet can install the app.
 - **Draggable bubble** — the mic bubble is now freely draggable to any position and the position is remembered.
@@ -47,11 +47,11 @@ Follow-up to 0.4.0 from on-device testing + host probes. See `docs/GEMINI_LIVE_T
 - **Output-polish levels** — four transcription styles (`NONE`/`LOW`/`MEDIUM`/`HIGH`, default `MEDIUM`) passed through the Gemini `systemInstruction`.
 - **Custom dictionary** — client-side correction rules with optional "always write as" spellings, applied at insertion.
 - **Encrypted history screen** — viewable, encrypted transcript history: list, copy, delete one, delete all, retention-days respected.
-- **Docs overhaul** — removed obsolete/historical docs and rewrote `docs/ARCHITECTURE.md` for the current two-process layout; see also `docs/GEMINI_LIVE_WIRE_REFERENCE.md`.
+- **Docs overhaul** — removed obsolete/historical docs and rewrote `docs/ARCHITECTURE.md` for the current two-process layout; see also the consolidated `docs/GEMINI_LIVE.md`.
 
 ## [0.3.1] - 2026-08-06
 
-Voice-to-text reliability and Hinglish. See `docs/GEMINI_LIVE_TRANSCRIPTION.md`.
+Voice-to-text reliability and Hinglish. See `docs/GEMINI_LIVE.md`.
 
 ### Transcription (inputTranscription is user speech)
 
@@ -82,7 +82,7 @@ Voice-to-text reliability and Hinglish. See `docs/GEMINI_LIVE_TRANSCRIPTION.md`.
 
 ## [0.3.0] - 2026-08-05
 
-- Consolidated the A–F remediation into one release (`docs/GEMINI_LIVE_TRANSCRIPTION.md`).
+- Consolidated the A–F remediation into one release (documented in `docs/GEMINI_LIVE.md`).
 - Home screen shows `Version <name> (<code>) · commit <git hash>` (BuildConfig
   GIT_COMMIT embedded at build time).
 
@@ -175,4 +175,4 @@ The foundation build of WhisperType Android. Requires Android 14+ (minSdk 34) an
 - Single utterance session per dictation.
 - English and Latin-script Hinglish only.
 - No transcript history browsing UI in v0.1 (history can be enabled and cleared in Settings).
-- Physical-device acceptance still pending in `docs/DEVICE_COMPATIBILITY.md`.
+- Physical-device acceptance is tracked in `docs/TESTING.md`.
