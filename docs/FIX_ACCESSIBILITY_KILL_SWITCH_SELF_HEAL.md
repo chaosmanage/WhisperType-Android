@@ -1,7 +1,6 @@
 # Accessibility fix: self-healing kill-switch toggle
 
-**Status:** ready to apply to `main` · originally landed as **0.6.2** (versionCode 33) on the
-(now-deleted) `feature/compact-keyboard-capsule` branch · **not yet on `main`**.
+**Status:** applied to `main` as **0.5.5** (versionCode 31).
 
 ## Problem
 
@@ -134,9 +133,9 @@ re-enable).
   null, string-valued key → null, multiple booleans in one file.
 - Full suite: **503 unit tests pass**, `:app:lintDebug` clean (warnings as errors).
 
-### On-device (0.6.2, before the branch was removed)
+### On-device (0.5.5, before the branch was removed)
 
-After installing 0.6.2 over a stale install and launching:
+After installing 0.5.5 over a stale install and launching:
 
 ```
 WhisperTypeAccessibility: Runtime service connected over IPC
@@ -169,9 +168,9 @@ test(settings): cover PreferencesFileReader against a real DataStore file
 ```
 
 Plus the standard version bump + `CHANGELOG.md` entry for any behavior change
-(0.6.2 was `versionCode 33` / `versionName 0.6.2`) and the doc note below.
+(0.5.5 was `versionCode 31` / `versionName 0.5.5`) and the doc note below.
 
-## Doc note for CHANGELOG (0.6.2)
+## Doc note for CHANGELOG (0.5.5)
 
 > **Self-healing kill switch** — toggling "App enabled" off and back on can no
 > longer leave the bubble permanently missing. The accessibility process now

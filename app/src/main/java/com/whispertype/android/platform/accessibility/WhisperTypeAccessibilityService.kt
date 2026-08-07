@@ -117,7 +117,7 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
         scope.launch {
             tracker.eligibility.collect { pushEligibility() }
         }
-        // 0.6.2: the kill-switch setting is re-read from disk every couple of
+        // 0.5.5: the kill-switch setting is re-read from disk every couple of
         // seconds instead of through the in-process DataStore flow — the flow
         // only sees writes made in THIS process, so a main-process toggle (the
         // Settings switch) left cachedAppEnabled permanently stale and the
@@ -176,7 +176,7 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * 0.6.2: polls the on-disk `app_enabled` value so a kill-switch toggle made
+     * 0.5.5: polls the on-disk `app_enabled` value so a kill-switch toggle made
      * in the main process is observed here within ~[APP_ENABLED_POLL_MS] — the
      * in-process DataStore flow could never see the main process's writes. The
      * first pass seeds [cachedAppEnabled] and performs the initial runtime bind
