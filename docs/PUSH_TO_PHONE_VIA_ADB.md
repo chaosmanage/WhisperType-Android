@@ -138,6 +138,6 @@ adb -s <SERIAL> logcat --pid=<PID>
 - **Tailscale IP:** `100.127.110.79`
 - **ADB connect port:** `45197` — current for the 0.4.2 push; the port rotates after
   each phone reboot (re-read it from Wireless debugging)
-- **Package:** `com.whispertype.android` (currently `versionName 0.4.2`, `versionCode 25`)
+- **Package:** `com.whispertype.android` (currently `versionName 0.6.2`, `versionCode 33`)
 - **Branch:** `feature`
 - **APK:** `app/build/outputs/apk/debug/app-debug.apk`

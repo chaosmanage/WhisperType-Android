@@ -37,7 +37,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         val speechMode = stringPreferencesKey("speech_mode")
         val historyEnabled = booleanPreferencesKey("history_enabled")
         val historyRetentionDays = intPreferencesKey("history_retention_days")
-        val appEnabled = booleanPreferencesKey("app_enabled")
+        val appEnabled = booleanPreferencesKey(SettingsRepository.KEY_APP_ENABLED)
         val onboardingCompleted = booleanPreferencesKey("onboarding_completed")
         val autoStopSeconds = intPreferencesKey("auto_stop_seconds")
         val polishLevel = stringPreferencesKey("polish_level")
@@ -209,6 +209,8 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         )
 
     companion object {
+        /** Stable wire key for the "App enabled" kill-switch setting; shared with [com.whispertype.android.core.settings.PreferencesFileReader]. */
+        const val KEY_APP_ENABLED = "app_enabled"
         const val DEFAULT_RETENTION_DAYS = 30
         const val DEFAULT_AUTO_STOP_SECONDS = 60
         const val DEFAULT_BUBBLE_SIZE_DP = 38

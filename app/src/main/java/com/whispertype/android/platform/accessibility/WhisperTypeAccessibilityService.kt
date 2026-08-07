@@ -18,14 +18,18 @@ import android.view.accessibility.AccessibilityWindowInfo
 import com.whispertype.android.core.model.InsertionResult
 import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.TargetSnapshot
+import com.whispertype.android.core.settings.PreferencesFileReader
 import com.whispertype.android.data.settings.SettingsRepository
 import com.whispertype.android.platform.ipc.RuntimeIpc
 import com.whispertype.android.platform.runtime.FlowRuntimeService
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -56,6 +60,9 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
      *  service while the app is disabled does not resurrect the runtime. */
     @Volatile
     private var cachedAppEnabled: Boolean = true
+
+    /** Whether [cachedAppEnabled] has been seeded by the poller yet. */
+    private var appEnabledInitialized = false
 
     private var insertionJob: Job? = null
 
@@ -105,37 +112,18 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
         // Focus + keyboard are (re)initialized on connect and on every window
         // change (§2.3), so a bubble decision is never made from a stale editor.
         refreshFocusedEditorAndKeyboard()
-        // 0.5.4: never resurrect the runtime while the app is disabled; the
-        // app-enabled collector rebinds when the app is re-enabled.
-        if (cachedAppEnabled) bindToRuntime()
 
         // Push eligibility to the runtime on every change so the bubble tracks focus.
         scope.launch {
             tracker.eligibility.collect { pushEligibility() }
         }
-        // 0.4.2 kill switch: observe the app-enabled setting (DataStore is safe
-        // to read from this process) so toggling it off in Settings immediately
-        // hides the bubble until it is turned back on.
-        // 0.5.4: while disabled the process releases its runtime binding so the
-        // runtime service can fully die, and rebinds (re-establishing IPC) when
-        // re-enabled.
-        scope.launch {
-            val settings = SettingsRepository(this@WhisperTypeAccessibilityService)
-            settings.appEnabled.collect { enabled ->
-                cachedAppEnabled = enabled
-                tracker.setAppEnabled(enabled)
-                if (enabled) {
-                    bindToRuntime()
-                } else {
-                    runtimeMessenger = null
-                    try {
-                        unbindService(runtimeConnection)
-                    } catch (_: Throwable) {
-                        // never bound
-                    }
-                }
-            }
-        }
+        // 0.6.2: the kill-switch setting is re-read from disk every couple of
+        // seconds instead of through the in-process DataStore flow — the flow
+        // only sees writes made in THIS process, so a main-process toggle (the
+        // Settings switch) left cachedAppEnabled permanently stale and the
+        // bubble missing until a reboot. The poller observes every toggle
+        // within ~APP_ENABLED_POLL_MS.
+        scope.launch { runAppEnabledPoller() }
         Log.i(TAG, "Accessibility service connected (:accessibility process)")
     }
 
@@ -184,6 +172,41 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
             bindService(intent, runtimeConnection, BIND_AUTO_CREATE)
         } catch (t: Throwable) {
             Log.w(TAG, "Could not bind runtime service", t)
+        }
+    }
+
+    /**
+     * 0.6.2: polls the on-disk `app_enabled` value so a kill-switch toggle made
+     * in the main process is observed here within ~[APP_ENABLED_POLL_MS] — the
+     * in-process DataStore flow could never see the main process's writes. The
+     * first pass seeds [cachedAppEnabled] and performs the initial runtime bind
+     * (replacing the one-shot bind in [onServiceConnected]).
+     */
+    private suspend fun runAppEnabledPoller() {
+        val settings = SettingsRepository(this@WhisperTypeAccessibilityService)
+        val appEnabledFile = File(filesDir, PreferencesFileReader.DATASTORE_RELATIVE_PATH)
+        while (true) {
+            val enabled = PreferencesFileReader.readBoolean(appEnabledFile, SettingsRepository.KEY_APP_ENABLED)
+                ?: settings.appEnabled.first() // fallback: DataStore default
+            applyAppEnabled(enabled)
+            delay(APP_ENABLED_POLL_MS)
+        }
+    }
+
+    private fun applyAppEnabled(enabled: Boolean) {
+        val changed = !appEnabledInitialized || enabled != cachedAppEnabled
+        cachedAppEnabled = enabled
+        appEnabledInitialized = true
+        tracker.setAppEnabled(enabled)
+        if (enabled) {
+            if (runtimeMessenger == null) bindToRuntime()
+        } else if (changed) {
+            runtimeMessenger = null
+            try {
+                unbindService(runtimeConnection)
+            } catch (_: Throwable) {
+                // never bound
+            }
         }
     }
 
@@ -293,6 +316,9 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
 
     private companion object {
         const val TAG = "WhisperTypeAccessibility"
+
+        /** Poll cadence for re-reading the on-disk app-enabled kill switch. */
+        const val APP_ENABLED_POLL_MS = 2000L
     }
 }
 

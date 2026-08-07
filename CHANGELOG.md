@@ -4,6 +4,13 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-08-07
+
+> **Self-healing kill switch** — toggling "App enabled" off and back on can no
+> longer leave the bubble permanently missing. The accessibility process now
+> re-reads the on-disk setting directly every couple of seconds, so re-enabling
+> the app restores the bubble on its own, in-app, with no device fiddling.
+
 ## [0.5.4] - 2026-08-06
 
 "App enabled" is now a genuine kill switch.
