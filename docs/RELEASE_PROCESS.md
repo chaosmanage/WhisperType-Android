@@ -78,6 +78,62 @@ Get-FileHash -Algorithm SHA256 -Path "app\build\outputs\apk\release\app-release.
 
 Store the checksum next to the APK in the versioned distribution directory and this is verified before installation by `install-release.ps1`.
 
+## GitHub release
+
+Each tagged version is published as a GitHub Release carrying the signed release
+APK, so testers download one checksummed artifact (see `docs/TESTING.md`).
+
+1. **Tag the release** on `main` with an annotated tag and push branch + tag:
+
+   ```bash
+   git tag -a v0.5.8 -m "release(0.5.8): <one-line summary>"
+   git push origin main
+   git push origin v0.5.8
+   ```
+
+2. **Create the release and attach the APK.** With the GitHub CLI:
+
+   ```bash
+   gh release create v0.5.8 \
+     --title "0.5.8" \
+     --notes-file CHANGELOG.md \
+     app/build/outputs/apk/release/app-release.apk
+   ```
+
+   or over the REST API with a personal access token (the `origin` remote of
+   this repo already embeds one; never print it, and keep it out of logs and
+   commit messages):
+
+   ```bash
+   curl -X POST -H "Authorization: token <TOKEN>" -H "Accept: application/vnd.github+json" \
+     https://api.github.com/repos/<owner>/<repo>/releases \
+     -d '{"tag_name":"v0.5.8","name":"0.5.8","body":"<release notes>"}'
+   # upload the asset (replace <id> with the "id" from the create response):
+   curl -X POST -H "Authorization: token <TOKEN>" \
+     -H "Content-Type: application/octet-stream" \
+     --data-binary @app/build/outputs/apk/release/app-release.apk \
+     "https://uploads.github.com/repos/<owner>/<repo>/releases/<id>/assets?name=app-release.apk"
+   ```
+
+3. **Share link** — download link for the published release:
+
+   `https://github.com/<owner>/<repo>/releases/download/<tag>/app-release.apk`
+
+   The repository is private, so the link only works for signed-in
+   collaborators; anonymous requests (browser page and REST API) return `404`.
+   The authenticated GitHub API is the ground truth for whether the release and
+   asset exist.
+
+4. **Verify the upload** — GitHub records the SHA-256 of every uploaded asset.
+   Compare it against the local build (and the checksum from the Checksum
+   generation section) via the asset endpoint:
+
+   ```bash
+   curl -s -H "Authorization: token <TOKEN>" \
+     https://api.github.com/repos/<owner>/<repo>/releases/assets/<asset-id> \
+   # the "digest" field (sha256:…) must equal `sha256sum app-release.apk`
+   ```
+
 ## Installation
 
 Preflight and install via the documented scripts:
