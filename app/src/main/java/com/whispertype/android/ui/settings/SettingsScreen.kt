@@ -1,5 +1,7 @@
 package com.whispertype.android.ui.settings
 
+import android.media.AudioManager
+import android.view.KeyEvent
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,10 +41,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.whispertype.android.R
+import com.whispertype.android.audio.AudioInputDevices
+import com.whispertype.android.core.audio.AudioInputSelection
+import com.whispertype.android.core.model.AudioSourcePreference
+import com.whispertype.android.core.model.HotkeyShortcut
 import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.core.model.TranscriptionStyle
 import com.whispertype.android.data.secrets.KeyProvider
@@ -81,6 +92,12 @@ fun SettingsScreen(
         .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_AUTO_STOP_SECONDS)
     val polishLevel by settings.polishLevel
         .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_POLISH_LEVEL)
+    val audioSourcePreference by settings.audioSourcePreference
+        .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_AUDIO_SOURCE_PREFERENCE)
+    val hotkeyKeycode by settings.hotkeyKeycode
+        .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_HOTKEY_KEYCODE)
+    val hotkeyModifiers by settings.hotkeyModifiers
+        .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_HOTKEY_MODIFIERS)
     val bubbleSizeDp by settings.bubbleSizeDp
         .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_BUBBLE_SIZE_DP)
     val bubbleOpacity by settings.bubbleOpacityPercent
@@ -212,6 +229,114 @@ fun SettingsScreen(
                                     },
                                 )
                             }
+                        }
+                    }
+                }
+
+                // 0.6.0: recording input device. Phone mic by default; the
+                // connected bluetooth headset only when explicitly selected.
+                SettingRow(
+                    title = stringResource(R.string.settings_audio_source),
+                    description = stringResource(R.string.settings_audio_source_desc),
+                ) {
+                    var menuOpen by remember { mutableStateOf(false) }
+                    Box {
+                        OutlinedButton(onClick = { menuOpen = true }) {
+                            Text(stringResource(audioSourceLabelRes(audioSourcePreference)))
+                        }
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false },
+                        ) {
+                            AudioSourcePreference.entries.forEach { preference ->
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(audioSourceLabelRes(preference))) },
+                                    onClick = {
+                                        menuOpen = false
+                                        scope.launch { settings.setAudioSourcePreference(preference) }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                if (audioSourcePreference == AudioSourcePreference.BLUETOOTH) {
+                    // Re-query the connected bluetooth device when the choice
+                    // (re)selects Bluetooth, so the status stays current.
+                    val context = LocalContext.current
+                    val bluetoothDeviceName = remember(context, audioSourcePreference) {
+                        context.getSystemService(AudioManager::class.java)?.let { audioManager ->
+                            AudioInputSelection.selectBluetoothHeadset(
+                                AudioInputDevices(audioManager).listAll(),
+                            )?.name
+                        }
+                    }
+                    Text(
+                        text = if (bluetoothDeviceName != null) {
+                            stringResource(R.string.settings_audio_source_bluetooth_found, bluetoothDeviceName)
+                        } else {
+                            stringResource(R.string.settings_audio_source_bluetooth_missing)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+
+                // 0.6.0: physical-keyboard hotkey to start/complete dictation.
+                // Press-to-set capture: tapping the button grabs keyboard focus;
+                // the next key (optionally with a Ctrl/Alt/Shift/Meta combo) is
+                // recorded. Esc cancels.
+                SettingRow(
+                    title = stringResource(R.string.settings_hotkey),
+                    description = stringResource(R.string.settings_hotkey_desc),
+                ) {
+                    var capturing by remember { mutableStateOf(false) }
+                    val focusRequester = remember { FocusRequester() }
+                    LaunchedEffect(capturing) {
+                        if (capturing) focusRequester.requestFocus()
+                    }
+                    Box(
+                        modifier = Modifier
+                            .focusRequester(focusRequester)
+                            .focusable()
+                            .onKeyEvent { event ->
+                                if (!capturing) return@onKeyEvent false
+                                val native = event.nativeKeyEvent
+                                when (native.action) {
+                                    KeyEvent.ACTION_DOWN -> {
+                                        when (native.keyCode) {
+                                            KeyEvent.KEYCODE_ESCAPE -> {
+                                                capturing = false
+                                                true
+                                            }
+                                            in HOTKEY_MODIFIER_KEYS -> true // keep waiting
+                                            else -> {
+                                                scope.launch {
+                                                    settings.setHotkeyKeycode(native.keyCode)
+                                                    settings.setHotkeyModifiers(
+                                                        native.metaState and HotkeyShortcut.MODIFIER_MASK,
+                                                    )
+                                                }
+                                                capturing = false
+                                                true
+                                            }
+                                        }
+                                    }
+                                    KeyEvent.ACTION_UP -> false
+                                    else -> false
+                                }
+                            },
+                    ) {
+                        if (capturing) {
+                            Text(stringResource(R.string.settings_hotkey_capture))
+                        } else {
+                            OutlinedButton(onClick = { capturing = true }) {
+                                Text(hotkeyLabel(hotkeyKeycode, hotkeyModifiers))
+                            }
+                        }
+                    }
+                    if (capturing) {
+                        TextButton(onClick = { capturing = false }) {
+                            Text(stringResource(R.string.settings_hotkey_cancel))
                         }
                     }
                 }
@@ -434,3 +559,63 @@ private fun polishLevelLabelRes(style: TranscriptionStyle): Int = when (style) {
     TranscriptionStyle.MEDIUM -> R.string.polish_medium
     TranscriptionStyle.HIGH -> R.string.polish_high
 }
+
+@StringRes
+private fun audioSourceLabelRes(preference: AudioSourcePreference): Int = when (preference) {
+    AudioSourcePreference.DEFAULT -> R.string.audio_source_phone
+    AudioSourcePreference.BLUETOOTH -> R.string.audio_source_bluetooth
+}
+
+/** 0.6.0 physical-keyboard hotkey choices: (keycode, label). 0 = disabled. */
+
+/**
+ * 0.6.0: renders the configured hotkey as a readable label, e.g. `Ctrl + F9`,
+ * `Shift + Grave`, or `Off`. Key codes that are themselves modifiers are not
+ * capturable as a hotkey (see [HOTKEY_MODIFIER_KEYS]).
+ */
+@Composable
+private fun hotkeyLabel(keycode: Int, modifiers: Int): String {
+    if (keycode == 0) return stringResource(R.string.hotkey_off)
+    val parts = buildList {
+        if (modifiers and HotkeyShortcut.META_CTRL_ON != 0) add(stringResource(R.string.hotkey_mod_ctrl))
+        if (modifiers and HotkeyShortcut.META_ALT_ON != 0) add(stringResource(R.string.hotkey_mod_alt))
+        if (modifiers and HotkeyShortcut.META_SHIFT_ON != 0) add(stringResource(R.string.hotkey_mod_shift))
+        if (modifiers and HotkeyShortcut.META_META_ON != 0) add(stringResource(R.string.hotkey_mod_meta))
+        val res = KEY_LABEL_RES[keycode]
+        add(if (res != null) stringResource(res) else keyFallbackLabel(keycode))
+    }
+    return parts.joinToString(" + ")
+}
+
+/** Friendly labels for common keys (falls back to the raw KeyEvent name). */
+private val KEY_LABEL_RES: Map<Int, Int> = mapOf(
+    android.view.KeyEvent.KEYCODE_GRAVE to R.string.hotkey_grave,
+    android.view.KeyEvent.KEYCODE_F9 to R.string.hotkey_f9,
+    android.view.KeyEvent.KEYCODE_F10 to R.string.hotkey_f10,
+    android.view.KeyEvent.KEYCODE_F11 to R.string.hotkey_f11,
+    android.view.KeyEvent.KEYCODE_SCROLL_LOCK to R.string.hotkey_scroll_lock,
+    android.view.KeyEvent.KEYCODE_SPACE to R.string.hotkey_space,
+    android.view.KeyEvent.KEYCODE_ENTER to R.string.hotkey_enter,
+    android.view.KeyEvent.KEYCODE_TAB to R.string.hotkey_tab,
+)
+
+/** Raw KeyEvent name for an uncaptured-by-default key, e.g. "Keycode F12". */
+private fun keyFallbackLabel(keycode: Int): String =
+    try {
+        android.view.KeyEvent.keyCodeToString(keycode)?.removePrefix("KEYCODE_")
+            ?.replace('_', ' ') ?: "Key $keycode"
+    } catch (_: Throwable) {
+        "Key $keycode"
+    }
+
+/** Modifier keys that cannot themselves be the hotkey (they only combine). */
+private val HOTKEY_MODIFIER_KEYS: Set<Int> = setOf(
+    android.view.KeyEvent.KEYCODE_CTRL_LEFT,
+    android.view.KeyEvent.KEYCODE_CTRL_RIGHT,
+    android.view.KeyEvent.KEYCODE_ALT_LEFT,
+    android.view.KeyEvent.KEYCODE_ALT_RIGHT,
+    android.view.KeyEvent.KEYCODE_SHIFT_LEFT,
+    android.view.KeyEvent.KEYCODE_SHIFT_RIGHT,
+    android.view.KeyEvent.KEYCODE_META_LEFT,
+    android.view.KeyEvent.KEYCODE_META_RIGHT,
+)

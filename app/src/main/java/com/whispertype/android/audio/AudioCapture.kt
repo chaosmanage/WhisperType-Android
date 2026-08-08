@@ -1,6 +1,7 @@
 package com.whispertype.android.audio
 
 import android.annotation.SuppressLint
+import android.media.AudioDeviceInfo
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import com.whispertype.android.core.audio.GemAudioFormat
@@ -205,6 +206,45 @@ class AudioCapture(
                     bufferSize,
                 )
             }.getOrNull() ?: return null
+            return initializedRecordSource(record)
+        }
+
+        /**
+         * 0.6.0: builds a mono, 16-bit, 16 kHz [AudioRecord]-backed source pinned
+         * to a specific input [device] (e.g. a connected bluetooth headset), or
+         * null when the device cannot be initialized. Uses the
+         * [MediaRecorder.AudioSource.VOICE_COMMUNICATION] source so the system
+         * routes to the headset profile (SCO) when the device is a bluetooth
+         * headset, and [AudioRecord.setPreferredDevice] pins the recording to it.
+         * Init/read failures surface as typed failures, never raw throws.
+         */
+        @SuppressLint("MissingPermission")
+        fun createDeviceSource(device: AudioDeviceInfo): PcmSource? {
+            val minBuffer = AudioRecord.getMinBufferSize(
+                GemAudioFormat.SAMPLE_RATE_HZ,
+                GemAudioFormat.CHANNEL_IN,
+                GemAudioFormat.AUDIO_FORMAT,
+            )
+            val bufferSize = if (minBuffer > 0) minBuffer else DEFAULT_BUFFER_BYTES
+            val record = runCatching {
+                AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    GemAudioFormat.SAMPLE_RATE_HZ,
+                    GemAudioFormat.CHANNEL_IN,
+                    GemAudioFormat.AUDIO_FORMAT,
+                    bufferSize,
+                )
+            }.getOrNull() ?: return null
+            val preferred = runCatching { record.setPreferredDevice(device) }.getOrDefault(false)
+            if (!preferred) {
+                record.release()
+                return null
+            }
+            return initializedRecordSource(record)
+        }
+
+        /** Shared state/start validation and [PcmSource] adapter for a built record. */
+        private fun initializedRecordSource(record: AudioRecord): PcmSource? {
             if (record.state != AudioRecord.STATE_INITIALIZED) {
                 record.release()
                 return null

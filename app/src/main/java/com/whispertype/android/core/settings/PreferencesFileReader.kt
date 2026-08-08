@@ -37,7 +37,17 @@ object PreferencesFileReader {
      * Returns the boolean stored under [key], or `null` when the file is
      * missing/unreadable, the key is absent, or the value is not a boolean.
      */
-    fun readBoolean(file: File, key: String): Boolean? {
+    fun readBoolean(file: File, key: String): Boolean? = readValue(file, key)?.boolean
+
+    /**
+     * Returns the int stored under [key] (e.g. a hotkey keycode), or `null`
+     * when the file is missing/unreadable, the key is absent, or the value is
+     * not an int.
+     */
+    fun readInt(file: File, key: String): Int? = readValue(file, key)?.intValue
+
+    /** Decodes the whole file once and hands back only the wanted entry. */
+    private fun readValue(file: File, key: String): ParsedValue? {
         if (!file.isFile) return null
         val bytes = try {
             file.readBytes()
@@ -47,10 +57,9 @@ object PreferencesFileReader {
         return parsePreferencesMap(bytes, key)
     }
 
-    private fun parsePreferencesMap(bytes: ByteArray, wantedKey: String): Boolean? {
+    private fun parsePreferencesMap(bytes: ByteArray, wantedKey: String): ParsedValue? {
         var offset = 0
-        var found = false
-        var result: Boolean? = null
+        var found: ParsedValue? = null
         while (offset < bytes.size) {
             val tag = readVarint(bytes, offset) ?: return null
             offset = tag.second
@@ -62,10 +71,7 @@ object PreferencesFileReader {
                     offset = len.second
                     val entryEnd = boundedEnd(offset, len.first, bytes.size) ?: return null
                     val entry = parseEntry(bytes, offset, entryEnd, wantedKey) ?: return null
-                    if (entry.first) {
-                        found = true
-                        result = entry.second
-                    }
+                    if (entry.first) found = entry.second
                     offset = entryEnd
                 }
                 else -> {
@@ -73,19 +79,19 @@ object PreferencesFileReader {
                 }
             }
         }
-        return if (found) result else null
+        return found
     }
 
-    /** Parses one PreferenceMapEntry; returns (keyMatched, booleanValueOrNull). */
+    /** Parses one PreferenceMapEntry; returns (keyMatched, parsedValueOrNull). */
     private fun parseEntry(
         bytes: ByteArray,
         start: Int,
         end: Int,
         wantedKey: String,
-    ): Pair<Boolean, Boolean?>? {
+    ): Pair<Boolean, ParsedValue?>? {
         var offset = start
         var key: String? = null
-        var value: Boolean? = null
+        var value: ParsedValue? = null
         while (offset < end) {
             val tag = readVarint(bytes, offset) ?: return null
             offset = tag.second
@@ -116,10 +122,15 @@ object PreferencesFileReader {
         return (key == wantedKey) to value
     }
 
-    /** Parses a Value message; returns the boolean when present, else null. */
-    private fun parseValue(bytes: ByteArray, start: Int, end: Int): Boolean? {
+    /**
+     * Parses a Value message, or returns `null` when the value is malformed.
+     * Holds whichever of the supported oneof members (boolean / int) the value
+     * actually carries; a well-formed value of some other type yields a holder
+     * with both members null.
+     */
+    private fun parseValue(bytes: ByteArray, start: Int, end: Int): ParsedValue? {
+        val parsed = ParsedValue()
         var offset = start
-        var bool: Boolean? = null
         while (offset < end) {
             val tag = readVarint(bytes, offset) ?: return null
             offset = tag.second
@@ -129,14 +140,25 @@ object PreferencesFileReader {
                 fieldNumber == 1L && wireType == 0 -> {
                     val v = readVarint(bytes, offset) ?: return null
                     offset = v.second
-                    bool = v.first != 0L
+                    parsed.boolean = v.first != 0L
+                }
+                fieldNumber == 3L && wireType == 0 -> {
+                    val v = readVarint(bytes, offset) ?: return null
+                    offset = v.second
+                    parsed.intValue = v.first.toInt()
                 }
                 else -> {
                     offset = skipField(bytes, offset, wireType, end) ?: return null
                 }
             }
         }
-        return bool
+        return parsed
+    }
+
+    /** One decoded entry value: the boolean and/or int member it carried. */
+    private class ParsedValue {
+        var boolean: Boolean? = null
+        var intValue: Int? = null
     }
 
     private fun skipField(bytes: ByteArray, offset: Int, wireType: Int, limit: Int): Int? {

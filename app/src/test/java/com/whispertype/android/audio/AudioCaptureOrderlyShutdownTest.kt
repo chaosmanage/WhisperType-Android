@@ -102,4 +102,16 @@ class AudioCaptureOrderlyShutdownTest {
 
         capture.stop() // hard-cancel fallback must not throw
     }
+
+    @Test
+    fun `a source factory that yields null surfaces a typed mic-init failure`() = runBlocking {
+        // Models the bluetooth fallback: when no usable device is available the
+        // factory returns null, and start() reports a typed failure, never a throw.
+        val capture = AudioCapture(sourceFactory = { null })
+
+        val result = capture.start()
+
+        assertIs<AudioStartResult.Failed>(result)
+        assertTrue(capture.failures.replayCache.single().code.contains("MIC_INIT"))
+    }
 }

@@ -20,6 +20,16 @@ data class TargetEligibility(
             keyboardVisible && microphoneGranted && apiKeyConfigured && appEnabled &&
             !sessionActive
 
+    /**
+     * The hotkey path relaxes only the [keyboardVisible] gate: a physical
+     * keyboard user typically has no soft IME window, yet a focused safe editor
+     * is a perfectly good dictation target. All security gates
+     * ([editorSecure] / [editorUncertain]) and the config gates remain closed.
+     */
+    val eligibleForHotkey: Boolean
+        get() = serviceConnected && editorFocused && !editorSecure && !editorUncertain &&
+            microphoneGranted && apiKeyConfigured && appEnabled && !sessionActive
+
     companion object {
         val Ineligible = TargetEligibility(
             serviceConnected = false,

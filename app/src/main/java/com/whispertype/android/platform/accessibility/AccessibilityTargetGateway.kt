@@ -50,8 +50,11 @@ class AccessibilityTargetGateway(
     override fun currentEligibility(): Flow<TargetEligibility> = tracker.eligibility
 
     override fun captureTarget(sessionId: SessionId): TargetSnapshot? {
+        // 0.6.0: use the hotkey-relaxed gate — a physical-keyboard dictation can
+        // legitimately complete with no soft IME window showing, while every
+        // security gate (secure/uncertain) still fails closed.
         val eligibility = tracker.eligibility.value
-        if (!eligibility.eligible) return null
+        if (!eligibility.eligibleForHotkey) return null
         val focus = tracker.currentFocus ?: return null
         return TargetSnapshot(
             sessionId = sessionId,

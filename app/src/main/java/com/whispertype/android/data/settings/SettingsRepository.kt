@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.whispertype.android.core.dictionary.DictionaryEntry
+import com.whispertype.android.core.model.AudioSourcePreference
 import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.core.model.TranscriptionStyle
 import kotlinx.coroutines.flow.Flow
@@ -41,6 +42,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         val onboardingCompleted = booleanPreferencesKey("onboarding_completed")
         val autoStopSeconds = intPreferencesKey("auto_stop_seconds")
         val polishLevel = stringPreferencesKey("polish_level")
+        val audioSourcePreference = stringPreferencesKey("audio_source_preference")
         val dictionary = stringPreferencesKey("dictionary")
         val bubbleX = floatPreferencesKey("bubble_x")
         val bubbleY = floatPreferencesKey("bubble_y")
@@ -50,6 +52,8 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         val miniDotDelaySeconds = intPreferencesKey("mini_dot_delay_seconds")
         val a11yHasConnectedOnce = booleanPreferencesKey("a11y_has_connected_once")
         val darkMode = booleanPreferencesKey("dark_mode")
+        val hotkeyKeycode = intPreferencesKey(SettingsRepository.KEY_HOTKEY_KEYCODE)
+        val hotkeyModifiers = intPreferencesKey(SettingsRepository.KEY_HOTKEY_MODIFIERS)
     }
 
     override val speechMode: Flow<LanguageMode> =
@@ -79,6 +83,12 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
             TranscriptionStyle.entries.firstOrNull { it.name == stored } ?: DEFAULT_POLISH_LEVEL
         }
 
+    override val audioSourcePreference: Flow<AudioSourcePreference> =
+        dataStore.data.map { prefs ->
+            val stored = prefs[Keys.audioSourcePreference]
+            AudioSourcePreference.entries.firstOrNull { it.name == stored } ?: DEFAULT_AUDIO_SOURCE_PREFERENCE
+        }
+
     override val dictionary: Flow<List<DictionaryEntry>> =
         dataStore.data.map { decodeDictionary(it[Keys.dictionary]) }
 
@@ -102,6 +112,12 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     override val darkMode: Flow<Boolean> =
         dataStore.data.map { it[Keys.darkMode] ?: false }
+
+    override val hotkeyKeycode: Flow<Int> =
+        dataStore.data.map { it[Keys.hotkeyKeycode] ?: DEFAULT_HOTKEY_KEYCODE }
+
+    override val hotkeyModifiers: Flow<Int> =
+        dataStore.data.map { it[Keys.hotkeyModifiers] ?: DEFAULT_HOTKEY_MODIFIERS }
 
     override val a11yHasConnectedOnce: Flow<Boolean> =
         dataStore.data.map { it[Keys.a11yHasConnectedOnce] ?: false }
@@ -136,6 +152,10 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     suspend fun setPolishLevel(style: TranscriptionStyle) {
         dataStore.edit { it[Keys.polishLevel] = style.name }
+    }
+
+    suspend fun setAudioSourcePreference(preference: AudioSourcePreference) {
+        dataStore.edit { it[Keys.audioSourcePreference] = preference.name }
     }
 
     suspend fun addDictionaryEntry(entry: DictionaryEntry) {
@@ -190,6 +210,14 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         dataStore.edit { it[Keys.darkMode] = enabled }
     }
 
+    suspend fun setHotkeyKeycode(keycode: Int) {
+        dataStore.edit { it[Keys.hotkeyKeycode] = keycode }
+    }
+
+    suspend fun setHotkeyModifiers(modifiers: Int) {
+        dataStore.edit { it[Keys.hotkeyModifiers] = modifiers }
+    }
+
     /** Decodes the stored dictionary JSON; malformed or unset input yields an empty list. */
     private fun decodeDictionary(raw: String?): List<DictionaryEntry> {
         if (raw.isNullOrBlank()) return emptyList()
@@ -211,6 +239,18 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
     companion object {
         /** Stable wire key for the "App enabled" kill-switch setting; shared with [com.whispertype.android.core.settings.PreferencesFileReader]. */
         const val KEY_APP_ENABLED = "app_enabled"
+
+        /** Stable wire key for the physical-keyboard hotkey; shared with [com.whispertype.android.core.settings.PreferencesFileReader]. */
+        const val KEY_HOTKEY_KEYCODE = "hotkey_keycode"
+
+        /** Stable wire key for the hotkey modifier mask; shared with [com.whispertype.android.core.settings.PreferencesFileReader]. */
+        const val KEY_HOTKEY_MODIFIERS = "hotkey_modifiers"
+
+        /** Physical-keyboard hotkey: the grave/backtick key toggles dictation. */
+        val DEFAULT_HOTKEY_KEYCODE = android.view.KeyEvent.KEYCODE_GRAVE
+
+        /** Hotkey default: no modifier required. */
+        const val DEFAULT_HOTKEY_MODIFIERS = 0
         const val DEFAULT_RETENTION_DAYS = 30
         const val DEFAULT_AUTO_STOP_SECONDS = 60
         const val DEFAULT_BUBBLE_SIZE_DP = 38
@@ -223,6 +263,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         const val MIN_MINI_DOT_DELAY_SECONDS = 1
         const val MAX_MINI_DOT_DELAY_SECONDS = 15
         val DEFAULT_POLISH_LEVEL = TranscriptionStyle.MEDIUM
+        val DEFAULT_AUDIO_SOURCE_PREFERENCE = AudioSourcePreference.DEFAULT
     }
 }
 

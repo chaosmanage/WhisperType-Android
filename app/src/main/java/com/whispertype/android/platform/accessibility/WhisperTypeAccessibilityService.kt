@@ -1,6 +1,7 @@
 package com.whispertype.android.platform.accessibility
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.InputMethod
 import android.content.ComponentName
 import android.content.Intent
@@ -12,9 +13,11 @@ import android.os.Message
 import android.os.Messenger
 import android.os.RemoteException
 import android.util.Log
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import com.whispertype.android.core.model.HotkeyShortcut
 import com.whispertype.android.core.model.InsertionResult
 import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.TargetSnapshot
@@ -64,6 +67,11 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
     /** Whether [cachedAppEnabled] has been seeded by the poller yet. */
     private var appEnabledInitialized = false
 
+    /** 0.6.0: physical-keyboard hotkey, polled from disk alongside
+     *  [cachedAppEnabled] so a main-process Settings change is observed here. */
+    @Volatile
+    private var cachedHotkey: HotkeyShortcut = HotkeyShortcut(SettingsRepository.DEFAULT_HOTKEY_KEYCODE)
+
     private var insertionJob: Job? = null
 
     private val replyHandler = object : Handler(Looper.getMainLooper()) {
@@ -108,6 +116,11 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        // 0.6.0: request hardware-key filtering so the physical-keyboard hotkey
+        // can start/complete dictation (config flag + runtime flag both needed).
+        serviceInfo = serviceInfo.apply {
+            flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+        }
         tracker.serviceConnected()
         // Focus + keyboard are (re)initialized on connect and on every window
         // change (§2.3), so a bubble decision is never made from a stale editor.
@@ -144,6 +157,29 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {
         // No-op: cancellation of an in-flight session is handled by higher layers.
+    }
+
+    /**
+     * 0.6.0: physical-keyboard hotkey. A single key toggles dictation: the
+     * runtime starts when Idle and completes (finalizes) when Listening. The key
+     * is consumed (return true) only when it maps to the configured hotkey, so
+     * normal typing keys are never swallowed. The runtime gates the actual
+     * start/stop on its own state and the hotkey-relaxed eligibility.
+     */
+    override fun onKeyEvent(event: KeyEvent): Boolean {
+        if (!cachedAppEnabled) return false
+        if (event.action != KeyEvent.ACTION_DOWN) return false
+        if (event.repeatCount != 0) return false
+        if (!cachedHotkey.matches(event.keyCode, event.metaState)) return false
+        val remote = runtimeMessenger ?: return false
+        return try {
+            remote.send(Message.obtain(null, RuntimeIpc.MSG_HOTKEY_TOGGLE))
+            Log.i(TAG, "Hotkey ${event.keyCode} toggled dictation")
+            true
+        } catch (_: RemoteException) {
+            runtimeMessenger = null
+            false
+        }
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
@@ -189,6 +225,13 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
             val enabled = PreferencesFileReader.readBoolean(appEnabledFile, SettingsRepository.KEY_APP_ENABLED)
                 ?: settings.appEnabled.first() // fallback: DataStore default
             applyAppEnabled(enabled)
+            // 0.6.0: hotkey changes made in the main-process Settings screen are
+            // observed here from disk (same cross-process reason as app_enabled).
+            val hotkeyKeycode = PreferencesFileReader.readInt(appEnabledFile, SettingsRepository.KEY_HOTKEY_KEYCODE)
+                ?: cachedHotkey.keyCode
+            val hotkeyModifiers = PreferencesFileReader.readInt(appEnabledFile, SettingsRepository.KEY_HOTKEY_MODIFIERS)
+                ?: cachedHotkey.modifiers
+            cachedHotkey = HotkeyShortcut(hotkeyKeycode, hotkeyModifiers)
             delay(APP_ENABLED_POLL_MS)
         }
     }

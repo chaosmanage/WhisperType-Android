@@ -168,6 +168,48 @@ Choose None, Low, Medium, or High. The default is Medium.
 
 Higher polish levels ask the transcription engine to clean up filler words, disfluencies, and speech quirks; None keeps the raw transcript. The level is passed to the Gemini session as a system instruction (see `docs/GEMINI_LIVE.md`).
 
+## Choose the recording source
+
+Open:
+
+`WhisperType → Settings tab → Recording → Recording source`
+
+Choose:
+
+- `Phone microphone` (default) — always records from the phone's built-in mic.
+- `Bluetooth headset` — records from a connected bluetooth headset's mic.
+
+The default is `Phone microphone`. Bluetooth is strict opt-in: even with a headset
+paired, dictation keeps using the phone mic until you explicitly select
+`Bluetooth headset`. With `Bluetooth headset` selected, the Settings screen shows
+the connected device's name; if no headset is connected (or one cannot be used at
+the required 16 kHz format), dictation silently falls back to the phone mic
+instead of failing.
+
+## Dictate with a physical keyboard hotkey
+
+A single hardware key toggles dictation: press once to **start**, press again to
+**complete** (finalize and insert) the current turn.
+
+Open:
+
+`WhisperType → Settings tab → Recording → Keyboard shortcut`
+
+The default hotkey is the **grave / backtick key (`` ` ``)**. Available choices:
+`Off`, `Grave key (`` ` ``)`, `F9`, `F10`, `F11`, `Scroll Lock`. The chosen key is
+read by the accessibility service from disk, so a change in Settings applies
+within ~2 seconds (the poll interval).
+
+Notes:
+
+- The hotkey works **without** the soft keyboard being visible — a physical-keyboard
+  setup typically has no IME window, which is exactly the case this is built for.
+- Security is unchanged: the hotkey never starts dictation into a password/secure
+  or uncertain field, and those checks fail closed just as they do for the bubble.
+- Only the configured key is intercepted; normal typing keys pass through untouched.
+- The keyboard shortcut requires the Accessibility Service to be enabled (it is the
+  only component that can observe hardware keys).
+
 ## Enable / disable dictation (App enabled)
 
 `Settings → General → App enabled` is a genuine kill switch. Turning it **off**

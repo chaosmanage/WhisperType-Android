@@ -21,6 +21,14 @@ nothing leaves your device except the audio stream to Google's Gemini Live API.
 - **Recording pill** — while dictating, a thin translucent capsule shows
   **[Cancel ✕] [live waveform] [Done ✓]**; Done commits, Cancel discards. The
   pill is anchored so Done sits exactly where you tapped the bubble.
+- **Bluetooth headset mic** — by default dictation records from the phone mic.
+  Set `Settings → Recording → Recording source` to **Bluetooth headset** and the
+  connected headset's mic is used (falling back to the phone mic when no headset
+  is connected).
+- **Physical-keyboard hotkey** — a single hardware key (default: the grave/backtick
+  key, configurable in `Settings → Recording → Keyboard shortcut`) toggles
+  dictation: press once to start, again to complete. Works without the soft
+  keyboard being visible; secure fields are still excluded.
 - **Real-time waveform** — a flat line on silence, a dancing multi-peak skyline
   while you speak (sensitive to quiet voices).
 - **Never lose a dictation** — an echo completeness gate accepts the polished
@@ -206,5 +214,5 @@ scripts/        build, install, and diagnostics helper scripts
 
 ## Version
 
-Current version **0.5.4** (versionCode 30), developed on the `feature` branch.
+Current version **0.5.6** (versionCode 32), developed on the `feature` branch.
 See `CHANGELOG.md` for the full release history.

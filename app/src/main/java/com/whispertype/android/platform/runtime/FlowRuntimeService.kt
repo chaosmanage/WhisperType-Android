@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioManager
 import android.os.Binder
 import android.os.Build
 import android.os.Bundle
@@ -28,8 +29,10 @@ import com.whispertype.android.R
 import com.whispertype.android.audio.AudioCapture
 import com.whispertype.android.audio.AudioPipeline
 import com.whispertype.android.audio.AudioStartResult
+import com.whispertype.android.audio.audioSourceFactory
 import com.whispertype.android.core.dictionary.DictionaryCorrections
 import com.whispertype.android.core.dictionary.DictionaryEntry
+import com.whispertype.android.core.model.AudioSourcePreference
 import com.whispertype.android.core.model.DictationFailure
 import com.whispertype.android.core.model.DictationState
 import com.whispertype.android.core.model.InsertionResult
@@ -152,6 +155,10 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     @Volatile
     private var cachedAutoStopSeconds: Int = SettingsRepository.DEFAULT_AUTO_STOP_SECONDS
 
+    /** 0.6.0: recording input device (phone mic unless Bluetooth is selected). */
+    @Volatile
+    private var cachedAudioSourcePreference: AudioSourcePreference = SettingsRepository.DEFAULT_AUDIO_SOURCE_PREFERENCE
+
     @Volatile
     private var cachedDictionary: List<DictionaryEntry> = emptyList()
 
@@ -202,6 +209,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                         RuntimeIpc.unpackInsertionResult(b),
                     )
                 }
+                RuntimeIpc.MSG_HOTKEY_TOGGLE -> onHotkeyToggle()
                 else -> Log.w(TAG, "Unhandled IPC message ${msg.what}")
             }
         }
@@ -229,6 +237,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         scope.launch { settings.historyRetentionDays.collect { cachedHistoryRetentionDays = it } }
         scope.launch { settings.polishLevel.collect { cachedPolishLevel = it } }
         scope.launch { settings.autoStopSeconds.collect { cachedAutoStopSeconds = it } }
+        scope.launch { settings.audioSourcePreference.collect { cachedAudioSourcePreference = it } }
         scope.launch { settings.dictionary.collect { cachedDictionary = it } }
         scope.launch { settings.bubbleX.collect { cachedBubbleX = it } }
         scope.launch { settings.bubbleY.collect { cachedBubbleY = it } }
@@ -311,6 +320,24 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
      */
     private fun startDictation() {
         coordinator.start()
+    }
+
+    /**
+     * 0.6.0 physical-keyboard hotkey: one toggle key. Completes an active turn
+     * (Listening -> Finalizing) via the same [DictationCoordinator.stop] as the
+     * overlay STOP; otherwise starts dictation, gated on the hotkey-relaxed
+     * eligibility (safe focused editor, no soft-IME requirement).
+     */
+    private fun onHotkeyToggle() {
+        if (coordinator.isActive) {
+            coordinator.stop()
+            return
+        }
+        if (!_eligibility.value.eligibleForHotkey) {
+            Log.i(TAG, "Hotkey ignored; no safe focused editor")
+            return
+        }
+        startDictation()
     }
 
     // ------------------------------------------------------------------
@@ -424,7 +451,11 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         // (Release D4); failures surface as typed mic-init failures.
         metrics.mark(MutableSessionMetrics.Event.CaptureStartRequested)
         return withContext(Dispatchers.IO) {
-            val cap = AudioCapture()
+            // 0.6.0: the capture source honors the selected recording device
+            // (phone mic by default; the connected headset only when explicitly
+            // chosen), falling back to the phone mic when no headset is usable.
+            val audioManager = getSystemService(AudioManager::class.java)
+            val cap = AudioCapture(sourceFactory = audioSourceFactory(audioManager, cachedAudioSourcePreference))
             when (val start = cap.start()) {
                 is AudioStartResult.Failed -> CaptureStart.Failed(start.failure)
                 AudioStartResult.Started -> {

@@ -1,6 +1,7 @@
 package com.whispertype.android.data.settings
 
 import com.whispertype.android.core.dictionary.DictionaryEntry
+import com.whispertype.android.core.model.AudioSourcePreference
 import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.core.model.TranscriptionStyle
 import kotlinx.coroutines.flow.Flow
@@ -17,6 +18,9 @@ interface SettingsProvider {
     val onboardingCompleted: Flow<Boolean>
     val autoStopSeconds: Flow<Int>
     val polishLevel: Flow<TranscriptionStyle>
+
+    /** 0.6.0: recording input device; [AudioSourcePreference.DEFAULT] is the phone mic. */
+    val audioSourcePreference: Flow<AudioSourcePreference>
     val dictionary: Flow<List<DictionaryEntry>>
     val bubbleX: Flow<Float?>
     val bubbleY: Flow<Float?>
@@ -38,4 +42,16 @@ interface SettingsProvider {
      * to a fresh install that simply never enabled the service.
      */
     val a11yHasConnectedOnce: Flow<Boolean>
+
+    /**
+     * Physical-keyboard hotkey keycode (android.view.KeyEvent key code) that
+     * toggles dictation start/complete. 0 disables the hotkey.
+     */
+    val hotkeyKeycode: Flow<Int>
+
+    /**
+     * Modifier mask for the hotkey (see [com.whispertype.android.core.model.HotkeyShortcut]).
+     * 0 = no modifier required.
+     */
+    val hotkeyModifiers: Flow<Int>
 }

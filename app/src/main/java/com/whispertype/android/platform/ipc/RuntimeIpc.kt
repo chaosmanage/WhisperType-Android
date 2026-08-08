@@ -29,6 +29,9 @@ object RuntimeIpc {
     const val MSG_INSERT = 3
     const val MSG_INSERT_RESULT = 4
 
+    /** 0.6.0: physical-keyboard hotkey press (start or complete dictation). */
+    const val MSG_HOTKEY_TOGGLE = 5
+
     // Bundle keys (typed, non-sensitive). No editor content is ever transported.
     const val KEY_REPLY_MESSENGER = "reply_messenger"
     const val KEY_SESSION_ID = "session_id"

@@ -3,6 +3,7 @@ package com.whispertype.android.core.settings
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import java.io.File
 import kotlinx.coroutines.test.runTest
@@ -80,6 +81,39 @@ class PreferencesFileReaderTest {
         val dataStore = newDataStore(file)
         dataStore.edit { it[stringPreferencesKey("speech_mode")] = "HINGLISH" }
         assertNull(PreferencesFileReader.readBoolean(file, "speech_mode"))
+    }
+
+    @Test
+    fun `missing int key yields null`() {
+        assertNull(PreferencesFileReader.readInt(File(tmp.root, "does-not-exist.pb"), "hotkey_keycode"))
+    }
+
+    @Test
+    fun `boolean-valued key yields null for int read`() = runTest {
+        val file = settingsFile()
+        val dataStore = newDataStore(file)
+        dataStore.edit { it[booleanPreferencesKey("app_enabled")] = true }
+        assertNull(PreferencesFileReader.readInt(file, "app_enabled"))
+    }
+
+    @Test
+    fun `int round-trips through a real datastore file`() = runTest {
+        val file = settingsFile()
+        val dataStore = newDataStore(file)
+        dataStore.edit { it[intPreferencesKey("hotkey_keycode")] = 96 }
+        assertEquals(96, PreferencesFileReader.readInt(file, "hotkey_keycode"))
+    }
+
+    @Test
+    fun `mixed ints in one file are each readable`() = runTest {
+        val file = settingsFile()
+        val dataStore = newDataStore(file)
+        dataStore.edit {
+            it[intPreferencesKey("hotkey_keycode")] = 131
+            it[booleanPreferencesKey("app_enabled")] = true
+        }
+        assertEquals(131, PreferencesFileReader.readInt(file, "hotkey_keycode"))
+        assertEquals(true, PreferencesFileReader.readBoolean(file, "app_enabled"))
     }
 
     @Test

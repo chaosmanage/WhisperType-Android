@@ -4,6 +4,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.whispertype.android.core.dictionary.DictionaryEntry
+import com.whispertype.android.core.model.AudioSourcePreference
 import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.core.model.TranscriptionStyle
 import java.io.File
@@ -265,5 +266,62 @@ class SettingsRepositoryTest {
 
         repo.setA11yHasConnectedOnce(false)
         assertFalse(repo.a11yHasConnectedOnce.first())
+    }
+
+    @Test
+    fun `audio source defaults to the phone mic`() = runTest {
+        val repo = newRepository()
+
+        assertEquals(AudioSourcePreference.DEFAULT, repo.audioSourcePreference.first())
+    }
+
+    @Test
+    fun `audio source setter round-trips`() = runTest {
+        val repo = newRepository()
+
+        repo.setAudioSourcePreference(AudioSourcePreference.BLUETOOTH)
+        assertEquals(AudioSourcePreference.BLUETOOTH, repo.audioSourcePreference.first())
+
+        repo.setAudioSourcePreference(AudioSourcePreference.DEFAULT)
+        assertEquals(AudioSourcePreference.DEFAULT, repo.audioSourcePreference.first())
+    }
+
+    @Test
+    fun `unknown stored audio source falls back to the phone mic`() = runTest {
+        val dataStore =
+            PreferenceDataStoreFactory.create(
+                produceFile = { File(tmp.root, "corrupt-audio-source.preferences_pb") },
+            )
+        val repo = SettingsRepository(dataStore)
+
+        dataStore.edit { it[stringPreferencesKey("audio_source_preference")] = "CAR" }
+
+        assertEquals(AudioSourcePreference.DEFAULT, repo.audioSourcePreference.first())
+    }
+
+    @Test
+    fun `hotkey defaults to the grave key and round-trips`() = runTest {
+        val repo = newRepository()
+
+        assertEquals(android.view.KeyEvent.KEYCODE_GRAVE, repo.hotkeyKeycode.first())
+
+        repo.setHotkeyKeycode(android.view.KeyEvent.KEYCODE_F9)
+        assertEquals(android.view.KeyEvent.KEYCODE_F9, repo.hotkeyKeycode.first())
+
+        repo.setHotkeyKeycode(0)
+        assertEquals(0, repo.hotkeyKeycode.first())
+    }
+
+    @Test
+    fun `hotkey modifiers default to none and round-trip`() = runTest {
+        val repo = newRepository()
+
+        assertEquals(0, repo.hotkeyModifiers.first())
+
+        repo.setHotkeyModifiers(com.whispertype.android.core.model.HotkeyShortcut.META_CTRL_ON)
+        assertEquals(
+            com.whispertype.android.core.model.HotkeyShortcut.META_CTRL_ON,
+            repo.hotkeyModifiers.first(),
+        )
     }
 }
