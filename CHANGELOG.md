@@ -4,6 +4,24 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.7] - 2026-08-08
+
+> **Samsung DeX support** — the bubble (and recording pill) now follows the
+> display hosting the focused text field, so dictation works while your phone is
+> in DeX mode. A safe editor focused on an external/DeX display is eligible even
+> without a visible soft keyboard (hardware-keyboard setups included).
+
+- **Display-aware overlay (`overlay`, `accessibility`, `ipc`)** — the
+  accessibility service already tracked which display the focused editor lives
+  on; that `displayId` now flows over IPC into the runtime, and the overlay
+  window is re-parented onto that display's WindowManager. The bubble, drag
+  drop-target, and recording pill all render on the DeX screen instead of the
+  phone's. Phone behavior is unchanged (the phone is always the default display).
+- **DeX eligibility (`core`)** — on a non-default display the soft-keyboard
+  gate is relaxed: a safe, focused text field is enough, mirroring the existing
+  physical-keyboard hotkey relaxation. The keyboard heuristic also scans every
+  display (`getWindowsOnAllDisplays`) so a DeX on-screen keyboard counts.
+
 ## [0.5.6] - 2026-08-08
 
 > **Bluetooth headset mic + physical-keyboard hotkey** — two new recording
