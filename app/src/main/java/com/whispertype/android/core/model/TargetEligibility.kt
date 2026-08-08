@@ -3,6 +3,11 @@ package com.whispertype.android.core.model
 /**
  * Immutable eligibility snapshot published by the accessibility service. The
  * bubble is shown only when [eligible] is true; any uncertainty fails closed.
+ *
+ * [displayId] identifies the display hosting the focused editor. On a secondary
+ * display (e.g. Samsung DeX) the [keyboardVisible] gate is relaxed: desktop
+ * setups use a hardware keyboard or an IME on another display, so a safe
+ * focused editor is sufficient there.
  */
 data class TargetEligibility(
     val serviceConnected: Boolean,
@@ -14,11 +19,13 @@ data class TargetEligibility(
     val apiKeyConfigured: Boolean,
     val appEnabled: Boolean,
     val sessionActive: Boolean,
+    /** Display hosting the focused editor; [DEFAULT_DISPLAY_ID] when unknown. */
+    val displayId: Int = DEFAULT_DISPLAY_ID,
 ) {
     val eligible: Boolean
         get() = serviceConnected && editorFocused && !editorSecure && !editorUncertain &&
-            keyboardVisible && microphoneGranted && apiKeyConfigured && appEnabled &&
-            !sessionActive
+            (keyboardVisible || displayId != DEFAULT_DISPLAY_ID) &&
+            microphoneGranted && apiKeyConfigured && appEnabled && !sessionActive
 
     /**
      * The hotkey path relaxes only the [keyboardVisible] gate: a physical
@@ -31,6 +38,9 @@ data class TargetEligibility(
             microphoneGranted && apiKeyConfigured && appEnabled && !sessionActive
 
     companion object {
+        /** Default (phone) display id; kept framework-free so core stays JVM-testable. */
+        const val DEFAULT_DISPLAY_ID = 0
+
         val Ineligible = TargetEligibility(
             serviceConnected = false,
             editorFocused = false,

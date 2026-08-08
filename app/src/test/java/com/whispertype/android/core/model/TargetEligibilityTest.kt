@@ -10,17 +10,19 @@ import org.junit.Test
  */
 class TargetEligibilityTest {
 
-    private fun eligibility(keyboardVisible: Boolean) = TargetEligibility(
-        serviceConnected = true,
-        editorFocused = true,
-        editorSecure = false,
-        editorUncertain = false,
-        keyboardVisible = keyboardVisible,
-        microphoneGranted = true,
-        apiKeyConfigured = true,
-        appEnabled = true,
-        sessionActive = false,
-    )
+    private fun eligibility(keyboardVisible: Boolean, displayId: Int = TargetEligibility.DEFAULT_DISPLAY_ID) =
+        TargetEligibility(
+            serviceConnected = true,
+            editorFocused = true,
+            editorSecure = false,
+            editorUncertain = false,
+            keyboardVisible = keyboardVisible,
+            microphoneGranted = true,
+            apiKeyConfigured = true,
+            appEnabled = true,
+            sessionActive = false,
+            displayId = displayId,
+        )
 
     @Test
     fun `soft keyboard required for bubble eligibility but not for hotkey`() {
@@ -34,6 +36,25 @@ class TargetEligibilityTest {
         val withKeyboard = eligibility(keyboardVisible = true)
         assertTrue(withKeyboard.eligible)
         assertTrue(withKeyboard.eligibleForHotkey)
+    }
+
+    @Test
+    fun `secondary display drops the keyboard gate for the bubble`() {
+        // 0.6.0: a safe editor focused on a non-default display (Samsung DeX)
+        // is eligible even without a visible soft keyboard.
+        val dex = eligibility(keyboardVisible = false, displayId = 1)
+        assertTrue(dex.eligible)
+        assertTrue(dex.eligibleForHotkey)
+    }
+
+    @Test
+    fun `secondary display still fails closed on security and focus gates`() {
+        val secure = eligibility(keyboardVisible = false, displayId = 1).copy(editorSecure = true)
+        assertFalse(secure.eligible)
+        assertFalse(secure.eligibleForHotkey)
+        val noFocus = eligibility(keyboardVisible = false, displayId = 1).copy(editorFocused = false)
+        assertFalse(noFocus.eligible)
+        assertFalse(noFocus.eligibleForHotkey)
     }
 
     @Test

@@ -46,6 +46,7 @@ object RuntimeIpc {
     const val KEY_API_CONFIGURED = "api_configured"
     const val KEY_APP_ENABLED = "app_enabled"
     const val KEY_SESSION_ACTIVE = "session_active"
+    const val KEY_DISPLAY_ID = "display_id"
 
     const val KEY_CONNECTION_PRESENT = "connection_present"
     const val KEY_TARGET_CURRENT = "target_current"
@@ -67,6 +68,7 @@ object RuntimeIpc {
         putBoolean(KEY_API_CONFIGURED, e.apiKeyConfigured)
         putBoolean(KEY_APP_ENABLED, e.appEnabled)
         putBoolean(KEY_SESSION_ACTIVE, e.sessionActive)
+        putInt(KEY_DISPLAY_ID, e.displayId)
     }
 
     fun unpackEligibility(b: Bundle): TargetEligibility = TargetEligibility(
@@ -79,6 +81,7 @@ object RuntimeIpc {
         apiKeyConfigured = b.getBoolean(KEY_API_CONFIGURED),
         appEnabled = b.getBoolean(KEY_APP_ENABLED),
         sessionActive = b.getBoolean(KEY_SESSION_ACTIVE),
+        displayId = b.getInt(KEY_DISPLAY_ID, TargetEligibility.DEFAULT_DISPLAY_ID),
     )
 
     /** Packs a typed insertion result into a Bundle (see [unpackInsertionResult]). */

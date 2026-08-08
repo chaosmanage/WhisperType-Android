@@ -20,7 +20,11 @@ object EligibilityExplanation {
         if (!e.editorFocused) reasons += REASON_NO_EDITOR_FOCUS
         if (e.editorSecure) reasons += REASON_SECURE_FIELD
         if (e.editorUncertain) reasons += REASON_UNCERTAIN_FIELD
-        if (!e.keyboardVisible) reasons += REASON_KEYBOARD_HIDDEN
+        // 0.6.0: the keyboard gate is relaxed on secondary displays (DeX), so
+        // it is not a blocking reason there either.
+        if (!e.keyboardVisible && e.displayId == TargetEligibility.DEFAULT_DISPLAY_ID) {
+            reasons += REASON_KEYBOARD_HIDDEN
+        }
         if (!e.microphoneGranted) reasons += REASON_MICROPHONE_NOT_GRANTED
         if (!e.apiKeyConfigured) reasons += REASON_API_KEY_MISSING
         if (!e.appEnabled) reasons += REASON_APP_DISABLED

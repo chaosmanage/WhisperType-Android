@@ -25,6 +25,7 @@ object EligibilityMapper {
         apiKeyConfigured: Boolean,
         appEnabled: Boolean,
         sessionActive: Boolean,
+        displayId: Int = TargetEligibility.DEFAULT_DISPLAY_ID,
     ): TargetEligibility = TargetEligibility(
         serviceConnected = serviceConnected,
         editorFocused = editorFocused,
@@ -35,5 +36,6 @@ object EligibilityMapper {
         apiKeyConfigured = apiKeyConfigured,
         appEnabled = appEnabled,
         sessionActive = sessionActive,
+        displayId = displayId,
     )
 }

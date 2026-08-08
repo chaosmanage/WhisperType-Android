@@ -17,6 +17,7 @@ import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import androidx.core.util.size
 import com.whispertype.android.core.model.HotkeyShortcut
 import com.whispertype.android.core.model.InsertionResult
 import com.whispertype.android.core.model.SessionId
@@ -329,14 +330,18 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
         refreshKeyboardVisible()
     }
 
-    @Suppress("DEPRECATION")
     private fun refreshKeyboardVisible() {
+        // 0.6.0: scan every display (API 33+, our minSdk) so an IME on a
+        // secondary display (e.g. Samsung DeX) counts as keyboard-visible.
         val hasIme = try {
-            windows?.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD } == true
+            val windowsByDisplay = windowsOnAllDisplays
+            (0 until windowsByDisplay.size).any { i ->
+                windowsByDisplay.valueAt(i).any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+            }
         } catch (_: Throwable) {
             false
         }
-        Log.d(TAG, "Keyboard window probe: hasIme=$hasIme windows=${windows?.size}")
+        Log.d(TAG, "Keyboard window probe: hasIme=$hasIme")
         tracker.updateKeyboardVisible(hasIme)
     }
 

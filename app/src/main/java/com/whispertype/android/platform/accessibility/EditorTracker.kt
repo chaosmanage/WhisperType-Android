@@ -173,6 +173,7 @@ class EditorTracker {
             apiKeyConfigured = apiKeyConfigured,
             appEnabled = appEnabled,
             sessionActive = sessionActive,
+            displayId = focus?.displayId?.takeIf { it >= 0 } ?: TargetEligibility.DEFAULT_DISPLAY_ID,
         )
     }
 

@@ -1,6 +1,7 @@
 package com.whispertype.android.platform.accessibility
 
 import com.whispertype.android.core.model.TargetEligibility
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -17,6 +18,7 @@ class EligibilityMapperTest {
         apiKeyConfigured: Boolean = true,
         appEnabled: Boolean = true,
         sessionActive: Boolean = false,
+        displayId: Int = TargetEligibility.DEFAULT_DISPLAY_ID,
     ): TargetEligibility = EligibilityMapper.toEligibility(
         serviceConnected = serviceConnected,
         editorFocused = editorFocused,
@@ -26,6 +28,7 @@ class EligibilityMapperTest {
         apiKeyConfigured = apiKeyConfigured,
         appEnabled = appEnabled,
         sessionActive = sessionActive,
+        displayId = displayId,
     )
 
     @Test
@@ -55,6 +58,17 @@ class EligibilityMapperTest {
     @Test
     fun `keyboard hidden is not eligible`() {
         assertFalse(map(keyboardVisible = false).eligible)
+    }
+
+    @Test
+    fun `display id is forwarded through the mapper`() {
+        val e = map(displayId = 3)
+        assertEquals(3, e.displayId)
+    }
+
+    @Test
+    fun `secondary display with hidden keyboard is eligible`() {
+        assertTrue(map(keyboardVisible = false, displayId = 1).eligible)
     }
 
     @Test
@@ -90,8 +104,8 @@ class EligibilityMapperTest {
 
     private fun assertEqualsSafe(expected: Boolean, e: TargetEligibility) {
         val recomputed = e.serviceConnected && e.editorFocused && !e.editorSecure &&
-            !e.editorUncertain && e.keyboardVisible && e.microphoneGranted &&
-            e.apiKeyConfigured && e.appEnabled && !e.sessionActive
+            !e.editorUncertain && (e.keyboardVisible || e.displayId != TargetEligibility.DEFAULT_DISPLAY_ID) &&
+            e.microphoneGranted && e.apiKeyConfigured && e.appEnabled && !e.sessionActive
         assertTrue("mapper eligible $expected must equal model $recomputed", expected == recomputed)
     }
 }
