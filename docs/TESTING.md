@@ -76,8 +76,9 @@ Record the results in the table below. **Never commit device serials or other un
 | Samsung Galaxy | — | SwiftKey | Portrait | Pending | Pending |  | — |
 | Android 13+ tablet (e.g. Pixel tablet) | 13+ | Gboard or Samsung Keyboard | Portrait | Pending | Pending | runtime RECORD_AUDIO + POST_NOTIFICATIONS flow | — |
 | Android 13+ tablet (e.g. Pixel tablet) | 13+ | Gboard or Samsung Keyboard | Landscape | Pending | Pending | runtime RECORD_AUDIO + POST_NOTIFICATIONS flow | — |
+| Samsung Galaxy (DeX) | 13+ | Hardware keyboard / DeX on-screen keyboard | DeX (HDMI or DeX for PC) | Pending | Pending | overlay must render on the DeX display, not the phone screen; validate the dedicated DeX acceptance steps below | — |
 
-Add additional rows (e.g. three-button navigation, other keyboards, additional OEMs) as they are validated.
+Add additional rows (e.g. three-button navigation, other keyboards, additional OEMs, DeX variants) as they are validated.
 
 ### How to record results
 
@@ -181,6 +182,26 @@ Run this sequence on every supported phone/keyboard combination before declaring
 19. Reboot the phone and confirm the documented post-reboot behavior.
 20. Record pass/fail, build version, device model, Android version, keyboard version, and notes in the compatibility table above.
 
+### Samsung DeX acceptance
+
+Run in DeX mode (HDMI/DeX station and, where available, DeX for PC) with a text
+field focused on the DeX display. Pass for each:
+
+- **Bubble on the DeX display.** Focus a text field in DeX: the bubble renders
+  on the DeX display, not on the phone screen. With no editor focused it is
+  hidden as usual.
+- **Hardware-keyboard eligibility.** With a physical keyboard (no DeX
+  on-screen IME), a safe focused editor still shows the bubble.
+- **Recording pill on the DeX display.** Tap the bubble; the recording pill
+  (and Done button) appears on the DeX display and insertion lands in the
+  focused field.
+- **Follow focus across displays.** Focus a field on the phone screen while
+  still in DeX: the bubble moves to the phone display; focus a DeX field again
+  and it moves back, clamped on-screen each time.
+- **Drag and drop-to-dismiss** work on the DeX display.
+- **DeX disconnect.** Disconnect DeX: the overlay returns to the phone display
+  with no crash and no lingering window.
+
 ### Acceptance matrix
 
 | Scenario | Runs | Expected |
@@ -208,6 +229,9 @@ Run this sequence on every supported phone/keyboard combination before declaring
 | Kill switch no-resurrection | 5 | force-stop while disabled; runtime stays off until re-enabled |
 | Dark mode rendering | 5 | screens and overlay legible in dark theme |
 | Android 13 tablet first install | 3 | installs; both runtime permissions granted |
+| DeX bubble + pill on secondary display | 3 | bubble and recording pill render on the DeX display |
+| DeX hardware-keyboard eligibility | 3 | safe focused editor shows the bubble with no IME |
+| DeX follow-focus / disconnect | 3 | bubble moves displays with focus; clean return on disconnect |
 
 ## Physical-device requirement
 

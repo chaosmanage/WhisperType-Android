@@ -66,6 +66,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -263,6 +264,9 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             owners = this,
             sessionState = sessionState,
             eligibility = eligibility,
+            // 0.6.0: the bubble follows the display hosting the focused editor
+            // (the DeX display when dictating in Samsung DeX mode).
+            displayId = eligibility.map { it.displayId },
             bubbleSizeDp = settings.bubbleSizeDp,
             bubbleOpacityPercent = settings.bubbleOpacityPercent,
             miniDotEnabled = settings.miniDotEnabled,

@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
+import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -57,6 +58,8 @@ class PersistentOverlayHost(
     private val owners: OverlayOwners,
     sessionState: Flow<DictationState>,
     eligibility: Flow<TargetEligibility>,
+    /** 0.6.0: display hosting the focused editor; the window follows it (DeX). */
+    displayId: Flow<Int> = flowOf(TargetEligibility.DEFAULT_DISPLAY_ID),
     bubbleSizeDp: Flow<Int> = flowOf(OverlayAppearance.DEFAULT_BUBBLE_SIZE_DP),
     bubbleOpacityPercent: Flow<Int> = flowOf(100),
     miniDotEnabled: Flow<Boolean> = flowOf(true),
@@ -94,6 +97,14 @@ class PersistentOverlayHost(
 
     @Volatile
     private var windowManager: WindowManager? = null
+
+    /** Display id the overlay window is currently attached to (0 = default). */
+    @Volatile
+    private var activeDisplayId: Int = TargetEligibility.DEFAULT_DISPLAY_ID
+
+    /** Context bound to the active display; drives density/size math. */
+    @Volatile
+    private var activeContext: Context = serviceContext
 
     /** Saved bubble top-left position in dp (null = default right-center). */
     @Volatile
@@ -217,6 +228,17 @@ class PersistentOverlayHost(
         scope.launch {
             appEnabled.collect { _appEnabled.value = it }
         }
+        // 0.6.0: follow the display hosting the focused editor (Samsung DeX
+        // secondary display). The overlay window is re-parented on change; a
+        // pre-attach change is picked up by performAttach via activeDisplayId.
+        scope.launch {
+            displayId.collect { id ->
+                if (id != activeDisplayId) {
+                    activeDisplayId = id
+                    handler.post { moveWindowToDisplay(activeDisplayId) }
+                }
+            }
+        }
     }
 
     /** Remembers the saved bubble top-left position (dp), or clears it when either axis is null. */
@@ -235,33 +257,17 @@ class PersistentOverlayHost(
             return
         }
         try {
-            val wm = serviceContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            val container = OverlayComposeContainer(serviceContext, owners)
-            val composeView = ComposeView(serviceContext).apply {
-                setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
-                setContent {
-                    val current by uiState.collectAsState()
-                    val currentAppearance by appearance.collectAsState()
-                    WhisperTypeOverlayContent(
-                        uiState = current,
-                        appearance = currentAppearance,
-                        onIntent = { _intents.tryEmit(it) },
-                        onDragStart = { showDropTarget() },
-                        onDragBubble = { dx, dy -> moveBy(dx, dy) },
-                        // 0.4.2: check the drop BEFORE hiding the target, because
-                        // checkDropDismiss() reads dropTargetBounds.
-                        onDragEnd = { checkDropDismiss(); hideDropTarget() },
-                    )
-                }
-            }
-            container.addView(composeView)
+            val context = windowContextFor(activeDisplayId) ?: serviceContext
+            val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            val container = buildWindow(context)
             if (!ownersStarted) {
                 owners.startOwners()
                 ownersStarted = true
             }
-            wm.addView(container, buildLayoutParams(serviceContext, placement))
-            view = container
+            activeContext = context
             windowManager = wm
+            wm.addView(container, buildLayoutParams(context, placement))
+            view = container
             retryCount = 0
             machine.attachSucceeded()
         } catch (t: Throwable) {
@@ -270,9 +276,88 @@ class PersistentOverlayHost(
             Log.w(TAG, "Overlay attach failed", t)
             view = null
             windowManager = null
+            activeContext = serviceContext
             scheduleRetry()
         }
         _status.value = machine.status
+    }
+
+    /** Builds the container + ComposeView window for [context]'s display. */
+    private fun buildWindow(context: Context): View {
+        val container = OverlayComposeContainer(context, owners)
+        val composeView = ComposeView(context).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+            setContent {
+                val current by uiState.collectAsState()
+                val currentAppearance by appearance.collectAsState()
+                WhisperTypeOverlayContent(
+                    uiState = current,
+                    appearance = currentAppearance,
+                    onIntent = { _intents.tryEmit(it) },
+                    onDragStart = { showDropTarget() },
+                    onDragBubble = { dx, dy -> moveBy(dx, dy) },
+                    // 0.4.2: check the drop BEFORE hiding the target, because
+                    // checkDropDismiss() reads dropTargetBounds.
+                    onDragEnd = { checkDropDismiss(); hideDropTarget() },
+                )
+            }
+        }
+        container.addView(composeView)
+        return container
+    }
+
+    /**
+     * 0.6.0: re-parents the overlay window onto [displayId]'s WindowManager
+     * (Samsung DeX secondary display). The window is rebuilt on that display's
+     * window context so its density/resources match. Owners stay started —
+     * re-running startOwners() would re-attach SavedStateRegistryController,
+     * which throws.
+     */
+    private fun moveWindowToDisplay(displayId: Int) {
+        val currentView = view ?: return
+        val oldWm = windowManager ?: return
+        val context = windowContextFor(displayId) ?: serviceContext
+        val newWm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        if (newWm === oldWm) return
+        try {
+            oldWm.removeView(currentView)
+        } catch (t: Throwable) {
+            // The previous display may already be gone (e.g. DeX disconnected).
+            Log.i(TAG, "Overlay window removed from previous display")
+        }
+        val container = buildWindow(context)
+        activeContext = context
+        windowManager = newWm
+        try {
+            newWm.addView(container, buildLayoutParams(context, placement))
+            view = container
+        } catch (t: Throwable) {
+            Log.w(TAG, "Overlay re-attach on display $displayId failed", t)
+            view = null
+            windowManager = null
+            activeContext = serviceContext
+        }
+    }
+
+    /**
+     * Returns a context bound to [displayId], or null when the display is
+     * unavailable (falls back to the default-display service context). Uses a
+     * window context on secondary displays so the overlay window lands there.
+     */
+    private fun windowContextFor(displayId: Int): Context? {
+        if (displayId == TargetEligibility.DEFAULT_DISPLAY_ID) return serviceContext
+        val dm = serviceContext.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        val display = dm.getDisplay(displayId) ?: return null
+        return try {
+            serviceContext.createWindowContext(
+                display,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                null,
+            )
+        } catch (t: Throwable) {
+            Log.w(TAG, "createWindowContext failed for display $displayId", t)
+            null
+        }
     }
 
     private fun scheduleRetry() {
@@ -295,6 +380,7 @@ class PersistentOverlayHost(
         } finally {
             view = null
             windowManager = null
+            activeContext = serviceContext
         }
         owners.stopOwners()
         ownersStarted = false
@@ -305,12 +391,12 @@ class PersistentOverlayHost(
     // Positioning (the simple way): always TOP|START + absolute pixels
     // ------------------------------------------------------------------
 
-    private fun density(): Float = serviceContext.resources.displayMetrics.density
+    private fun density(): Float = activeContext.resources.displayMetrics.density
 
     private fun bubblePx(): Int = (placement.bubbleDp * density()).roundToInt()
 
     private fun displaySizePx(): Pair<Int, Int> {
-        val wm = serviceContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val wm = windowManager ?: serviceContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val bounds = wm.maximumWindowMetrics.bounds
         return bounds.width() to bounds.height()
     }
@@ -335,8 +421,12 @@ class PersistentOverlayHost(
             Pair((it.first * density()).roundToInt(), (it.second * density()).roundToInt())
         }
         val base = currentPixel ?: (saved ?: defaultPosition(sizePx))
-        currentPixel = base
-        return windowParams(base.first, base.second)
+        // Clamp against the active display so a position saved on another
+        // display (different density/size) stays on-screen after a move.
+        val (dw, dh) = displaySizePx()
+        val clamped = BubblePlacement.clamp(base.first, base.second, sizePx, sizePx, dw, dh)
+        currentPixel = clamped
+        return windowParams(clamped.first, clamped.second)
     }
 
     private fun windowParams(x: Int, y: Int): WindowManager.LayoutParams =

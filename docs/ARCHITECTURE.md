@@ -29,9 +29,12 @@ before `RECORD_AUDIO` is granted; during dictation it is promoted to
 process (`android:process=":accessibility"`). It sees the screen only and owns
 **focus, target capture, and insertion** — never the overlay, microphone, or
 Gemini. The `EditorTracker` maintains eligibility (focused editor, keyboard
-visibility, secure-field exclusion); the `AccessibilityTargetGateway` snapshots a
-typed `TargetSnapshot` and performs cursor-aware `commitText()` insertion via an
-`InputMethod` surface returned by `onCreateInputMethod()`.
+visibility, secure-field exclusion) and records which display hosts the focused
+editor (`displayId`); the `AccessibilityTargetGateway` snapshots a typed
+`TargetSnapshot` and performs cursor-aware `commitText()` insertion via an
+`InputMethod` surface returned by `onCreateInputMethod()`. On a secondary
+display (Samsung DeX) the soft-keyboard eligibility gate is relaxed, matching
+the physical-keyboard hotkey relaxation.
 
 ### Typed Messenger IPC
 
@@ -49,7 +52,7 @@ All paths are under `app/src/main/java/com/whispertype/android/`.
 | --- | --- | --- |
 | `platform/runtime/` | `DictationCoordinator.kt`, `FlowRuntimeService.kt` | Pure, host-testable session orchestration (state machine, auto-stop, retry, metrics) and the foreground host that binds it to Android. |
 | `platform/gemini/` | `GeminiLiveWire.kt`, `OkHttpGeminiLiveSession.kt`, `GeminiSessionFactory.kt`, `GeminiSessionConfig.kt`, `WarmLiveSessionManager.kt`, `GeminiLog.kt` | The Gemini Live engine. `GeminiLiveWire` is the pure wire codec (JSON build/parse); `OkHttpGeminiLiveSession` is the WebSocket transport; the factory builds sessions; the warm manager prewarm pool. |
-| `platform/overlay/` | `PersistentOverlayHost.kt`, `WhisperTypeOverlayContent.kt`, `OverlayAppearance.kt`, `OverlayVisibility.kt`, `OverlayHostStateMachine.kt`, `OverlayOwners.kt`, `OverlayComposeContainer.kt` | The one persistent `TYPE_APPLICATION_OVERLAY` window and its Compose content: the draggable mic bubble (the app logo, round) that auto-minimizes to a mini-dot, the recording pill (`[Cancel ✕][wave][Done ✓]`) anchored so Done lands where the bubble was tapped, status capsules re-centered on the bubble, and a pure attach/detach state machine. |
+| `platform/overlay/` | `PersistentOverlayHost.kt`, `WhisperTypeOverlayContent.kt`, `OverlayAppearance.kt`, `OverlayVisibility.kt`, `OverlayHostStateMachine.kt`, `OverlayOwners.kt`, `OverlayComposeContainer.kt` | The one persistent `TYPE_APPLICATION_OVERLAY` window and its Compose content: the draggable mic bubble (the app logo, round) that auto-minimizes to a mini-dot, the recording pill (`[Cancel ✕][wave][Done ✓]`) anchored so Done lands where the bubble was tapped, status capsules re-centered on the bubble, and a pure attach/detach state machine. The window follows the display hosting the focused editor (via a `createWindowContext` WindowManager), so it renders on a Samsung DeX secondary display rather than the phone screen. |
 | `platform/accessibility/` | `WhisperTypeAccessibilityService.kt`, `EditorTracker.kt`, `SecurityClassifier.kt`, `EligibilityMapper.kt`, `EligibilityExplanation.kt`, `AccessibilityTargetGateway.kt`, `InsertionDecision.kt`, `InsertionVerifier.kt` | The `:accessibility` process: focus/keyboard tracking, secure-field classification, typed eligibility, target capture, and validated insertion. |
 | `platform/ipc/` | `RuntimeIpc.kt` | Typed cross-process message contract (see above). |
 | `core/` | `core/state/`, `core/model/`, `core/transcript/`, `core/audio/`, `core/privacy/`, `core/dictionary/`, `core/overlay/`, `core/contracts/` | Pure, framework-free logic: the dictation reducer, typed domain models, the transcript accumulator/completeness/selector, PCM16 audio framing, log redaction, dictionary correction rules, and the contracts (`DictationBridge`, `GeminiLiveSession`, `TargetGateway`, `OverlayController`) that adapters implement. |
