@@ -4,6 +4,23 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.6] - 2026-08-08
+
+> **Bluetooth headset mic + physical-keyboard hotkey** — two new recording
+> controls. Dictation can now record from a connected Bluetooth headset's mic,
+> and a single hardware key toggles dictation start/complete.
+
+- **Recording source (`settings`, `audio`)** — new `Settings → Recording →
+  Recording source` option. Default remains the phone microphone; selecting
+  **Bluetooth headset** records from the connected headset's mic, falling back
+  to the phone mic when no headset is connected. The Settings row shows the
+  connected device name (or a fallback notice).
+- **Physical-keyboard hotkey (`accessibility`, `overlay`)** — a single
+  physical key (default: grave/backtick, configurable in `Settings → Recording →
+  Keyboard shortcut`, including a Ctrl/Alt/Shift/Meta combo captured by
+  press-to-set) toggles dictation: press once to start, again to complete. Works
+  without the soft keyboard visible; secure fields are still excluded.
+
 ## [0.5.5] - 2026-08-07
 
 > **Self-healing kill switch** — toggling "App enabled" off and back on can no
