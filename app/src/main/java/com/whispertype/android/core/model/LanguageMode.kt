@@ -32,19 +32,30 @@ enum class LanguageMode {
                 "Repeat the user's speech back and add basic sentence punctuation and " +
                     "capitalization. Keep the exact words and the natural spoken phrasing."
             TranscriptionStyle.MEDIUM ->
-                "Repeat the user's speech back and polish it into clean, natural written " +
-                    "text: add proper punctuation and capitalization, remove fillers (um, uh, ah), " +
-                    "fix grammar and awkward phrasing, and make it read well. You may rephrase " +
-                    "and lightly reorder to improve clarity, as long as you keep the user's " +
-                    "meaning and every point they made."
+                "Repeat the user's speech back and refine it into exceptional, " +
+                    "publication-grade writing. Go well beyond clean copy: cut every filler, " +
+                    "hesitation, redundancy, and false start; tighten wordy phrasing; choose the " +
+                    "most precise and well-chosen words; vary sentence length and structure for " +
+                    "rhythm; and use sophisticated punctuation (em dashes, colons, semicolons) " +
+                    "where it clarifies. Restructure freely - reorganize ideas into the clearest " +
+                    "logical flow, split or merge sentences, and add bullet points, numbered " +
+                    "items, or paragraphs where they improve readability. The result should read " +
+                    "like a professional editor spent time on it: polished, elegant, and " +
+                    "effortless - while still carrying the user's message across and preserving " +
+                    "every point they made."
             TranscriptionStyle.HIGH ->
-                "Repeat the user's speech back and fully refine it into polished, " +
-                    "well-structured prose. You are free to completely rewrite, reorder sentences " +
-                    "and lines, and choose different words as needed - carry the user's message " +
-                    "across and preserve every point they made. Add structure where it helps: " +
-                    "bullet points, numbered items, or clear paragraphs, and write complete, " +
-                    "well-formed sentences. The final output should read like carefully edited, " +
-                    "professional writing."
+                "Repeat the user's speech back and transform it into masterfully crafted, " +
+                    "publication-grade prose - writing a professional editor would publish. " +
+                    "Eliminate every trace of spoken language: fillers, hesitations, false " +
+                    "starts, repetition, and rambling. Condense each wordy phrase to its most " +
+                    "elegant, economical form and choose words that are precise, vivid, and " +
+                    "memorable. Craft varied sentence rhythms and deploy sophisticated " +
+                    "punctuation (em dashes, colons, semicolons) deliberately. Reimagine the " +
+                    "structure - reorganize ideas into the most logical, compelling order and use " +
+                    "headings, bullet points, numbered lists, or paragraphs wherever they sharpen " +
+                    "clarity. Elevate the tone to confident, articulate, assured writing. The " +
+                    "final output should read like carefully edited, award-quality prose - while " +
+                    "still carrying the user's message across and preserving every point they made."
         }
         val base =
             "Output ONLY the repeated text and nothing else - no greetings, no " +
@@ -61,7 +72,10 @@ enum class LanguageMode {
             "CRITICAL: preserve every idea and every point from the user's speech - " +
                 "never omit, drop, or summarize away any part of the message, even for long " +
                 "dictations - but you are free to rephrase, reorder, and restructure the text " +
-                "as needed for polish."
+                "as needed for polish. Never change, invent, or drop facts, names, numbers, " +
+                "dates, or quoted phrases the user actually said - polish the wording, never " +
+                "the substance. Keep your output close to the user's length: do not drastically " +
+                "shorten a long dictation."
         val tail = if (style == TranscriptionStyle.NONE || style == TranscriptionStyle.LOW) verbatim else content
         return when (this) {
             ENGLISH -> "$styleText $base $tail"

@@ -49,6 +49,8 @@ import com.whispertype.android.data.secrets.FileBlobStore
 import com.whispertype.android.data.secrets.JavaxAesGcmCipher
 import com.whispertype.android.data.secrets.KeystoreKeyProvider
 import com.whispertype.android.data.secrets.KeyProvider
+import com.whispertype.android.data.secrets.SensitiveClipboard
+import com.whispertype.android.data.secrets.SystemSensitiveClipboard
 import com.whispertype.android.data.settings.SettingsRepository
 import com.whispertype.android.platform.gemini.GeminiLiveException
 import com.whispertype.android.platform.gemini.GeminiSessionConfig
@@ -110,6 +112,9 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     // never during the Service constructor when the base Context is unattached.
     private val keyProvider: KeyProvider by lazy { KeystoreKeyProvider(this) }
     private val settings: SettingsRepository by lazy { SettingsRepository(this) }
+
+    /** 0.5.8: sensitive-marked clipboard write for the no-target fallback. */
+    private val sensitiveClipboard: SensitiveClipboard by lazy { SystemSensitiveClipboard(this) }
 
     /** One long-lived OkHttpClient shared by every session (Release D3). Its
      *  dispatcher/connection pool must never be shut down per session. */
@@ -476,6 +481,12 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         val corrected = DictionaryCorrections.apply(text, cachedDictionary)
         return sendInsert(sessionId, corrected, reply)
     }
+
+    /** 0.5.8: clipboard fallback when the transcript could not be committed to a
+     *  focused field. Sensitive-marked write; returns true only on a confirmed
+     *  copy. */
+    override suspend fun copyToClipboard(sessionId: SessionId, text: String): Boolean =
+        withContext(Dispatchers.IO) { sensitiveClipboard.copySensitive(text) }
 
     /**
      * 0.5.0 Hinglish: transliterates Devanagari to Latin by opening a dedicated

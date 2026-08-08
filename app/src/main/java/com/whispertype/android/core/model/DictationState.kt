@@ -37,5 +37,9 @@ sealed interface DictationState {
 
     data class CopyAvailable(val sessionId: SessionId, val candidate: ResultCandidate) : DictationState
 
+    /** 0.5.8: the transcript was copied to the clipboard because it could not be
+     *  committed to a focused field. */
+    data class CopiedToClipboard(val sessionId: SessionId) : DictationState
+
     data class Error(val sessionId: SessionId, val failure: DictationFailure) : DictationState
 }

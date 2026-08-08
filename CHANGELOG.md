@@ -4,6 +4,28 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.8] - 2026-08-08
+
+> **More polished dictation + clipboard fallback** — the Medium and High
+> output-polish levels are strengthened (High is fully rewritten), and when the
+> transcript cannot be committed to a focused text field it is copied to the
+> clipboard instead of being lost.
+
+- **Output polish (`gemini`, `core`)** — Medium now targets exceptional,
+  publication-grade writing (cut fillers/redundancy, tighten wording, vary
+  rhythm, restructure freely); High is fully rewritten to transform speech into
+  masterfully crafted, publication-grade prose with headings, lists, and
+  paragraphs where they sharpen clarity. Both Medium and High additionally
+  guarantee that facts, names, numbers, dates, and quoted phrases are never
+  changed, invented, or dropped, and that the output stays close to the user's
+  length.
+- **Clipboard fallback (`dictation`, `accessibility`, `overlay`)** — when
+  insertion fails because no text field is focused, the focused field's input
+  connection cannot be reached, or the field changed mid-session, the settled
+  transcript is copied to the clipboard (sensitive-marked on Android 13+) and a
+  "Copied to clipboard" pill is shown before returning to idle. Protected or
+  uncertain (secure) fields never copy.
+
 ## [0.5.7] - 2026-08-08
 
 > **Samsung DeX support** — the bubble (and recording pill) now follows the

@@ -17,6 +17,7 @@ import com.whispertype.android.core.model.SendResult
 import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.SettlePath
 import com.whispertype.android.core.model.TargetSnapshot
+import com.whispertype.android.core.model.isClipboardFallback
 import com.whispertype.android.core.transcript.RejectionDiagnosis
 import com.whispertype.android.core.transcript.RejectionRule
 import com.whispertype.android.core.transcript.TranscriptAccumulator
@@ -50,6 +51,12 @@ interface DictationHost {
 
     /** Sends the insert request over IPC; false when accessibility is absent. */
     fun sendInsertion(sessionId: SessionId, text: String): Boolean
+
+    /**
+     * 0.5.8: copies [text] to the system clipboard (sensitive-marked). Returns
+     * true only on a confirmed write; false falls back to an Error surface.
+     */
+    suspend fun copyToClipboard(sessionId: SessionId, text: String): Boolean
 
     /**
      * 0.5.0 Hinglish: transliterates [text] (Hindi in Devanagari) to Latin script
@@ -240,6 +247,27 @@ class DictationCoordinator(
         if (holder.sessionId != sessionId) return
         if (!holder.inserted) return
         holder.metrics.mark(MutableSessionMetrics.Event.InsertionResult)
+        // 0.5.8: the transcript could not be committed to a focused field
+        // (no field, no input connection, or a field change) — copy it to the
+        // clipboard instead of dropping it into an Error surface.
+        if (result is InsertionResult.Failed && result.failure.isClipboardFallback()) {
+            val transcript = holder.settledText
+            if (!transcript.isNullOrBlank()) {
+                scope.launch {
+                    val copied = host.copyToClipboard(holder.sessionId, transcript)
+                    if (active !== holder) return@launch
+                    if (copied) {
+                        holder.metrics.mark(MutableSessionMetrics.Event.CopiedToClipboard)
+                        publish(DictationState.CopiedToClipboard(sessionId))
+                    } else {
+                        publish(DictationState.Error(sessionId, result.failure))
+                    }
+                    delay(config.returnToIdleMs)
+                    resetToIdle(holder)
+                }
+                return
+            }
+        }
         publish(
             when (result) {
                 InsertionResult.Inserted -> DictationState.Success(sessionId)

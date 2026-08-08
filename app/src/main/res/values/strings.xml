@@ -26,6 +26,7 @@
     <string name="dictation_cancel">Cancel</string>
     <string name="dictation_copy">Copy text</string>
     <string name="dictation_copied" tools:ignore="UnusedResources">Copied</string>
+    <string name="dictation_copied_to_clipboard">Copied to clipboard</string>
     <string name="dictation_could_not_insert">Could not insert text</string>
     <string name="dictation_reconnect_mic" tools:ignore="UnusedResources">Reconnect microphone permission</string>
     <string name="dictation_reconnect_accessibility" tools:ignore="UnusedResources">Reconnect Accessibility</string>

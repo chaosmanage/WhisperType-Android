@@ -16,6 +16,7 @@ enum class OverlayVisibility {
     Inserting,
     Success,
     CopyAvailable,
+    CopiedToClipboard,
     Error,
 }
 
@@ -45,6 +46,7 @@ fun visibilityOf(ui: OverlayUiState): OverlayVisibility = when (ui.state) {
     is DictationState.Success -> OverlayVisibility.Hidden
     is DictationState.Cancelled -> OverlayVisibility.Hidden
     is DictationState.CopyAvailable -> OverlayVisibility.CopyAvailable
+    is DictationState.CopiedToClipboard -> OverlayVisibility.CopiedToClipboard
     is DictationState.Error -> OverlayVisibility.Error
 }
 

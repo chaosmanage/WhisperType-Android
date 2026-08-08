@@ -112,6 +112,14 @@ class OverlayVisibilityTest {
     }
 
     @Test
+    fun `copied to clipboard maps to copied status pill`() {
+        assertEquals(
+            OverlayVisibility.CopiedToClipboard,
+            visibilityOf(ui(DictationState.CopiedToClipboard(session("s")))),
+        )
+    }
+
+    @Test
     fun `error maps to error panel`() {
         assertEquals(
             OverlayVisibility.Error,

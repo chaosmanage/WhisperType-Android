@@ -124,6 +124,8 @@ class DictationCoordinatorTest {
         var insertionAccepted = true
         var transliterateResult: String? = null
         val transliterateCalls = mutableListOf<String>()
+        var clipboardResult = true
+        val clipboardCopies = mutableListOf<Pair<SessionId, String>>()
 
         override fun publish(state: DictationState) {
             published += state
@@ -136,6 +138,11 @@ class DictationCoordinatorTest {
         override fun sendInsertion(sessionId: SessionId, text: String): Boolean {
             insertions += sessionId to text
             return insertionAccepted
+        }
+
+        override suspend fun copyToClipboard(sessionId: SessionId, text: String): Boolean {
+            clipboardCopies += sessionId to text
+            return clipboardResult
         }
 
         override suspend fun transliterateToLatin(sessionId: SessionId, text: String): String? {
@@ -1025,5 +1032,161 @@ class DictationCoordinatorTest {
         assertEquals("Aaj ka mausam", host.insertions[0].second, "best available Latin text is kept")
         coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
         advanceUntilIdle()
+    }
+
+    // ------------------------------------------------------------------
+    // 0.5.8: clipboard fallback when the transcript cannot reach a field
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `failed insertion with no focused field copies the transcript to clipboard`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        sendTranscript(host, "hello world")
+        advanceUntilIdle()
+
+        coordinator.onInsertionResult(
+            sessionId,
+            InsertionResult.Failed(
+                DictationFailure(
+                    code = "insert_target_ineligible",
+                    message = "No safe text field is focused. Not a password or secure field.",
+                    recoverable = true,
+                ),
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals(listOf(sessionId to "hello world"), host.clipboardCopies)
+        assertIs<DictationState.CopiedToClipboard>(
+            states(host).first { it is DictationState.CopiedToClipboard },
+        )
+        assertEquals(DictationState.Idle, states(host).last())
+        assertTrue(
+            host.finished.last().second.copiedToClipboardAt != null,
+            "the session must record the clipboard fallback metric",
+        )
+    }
+
+    @Test
+    fun `failed insertion with an unreachable input connection copies the transcript`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        sendTranscript(host, "schedule the meeting")
+        advanceUntilIdle()
+
+        coordinator.onInsertionResult(
+            sessionId,
+            InsertionResult.Failed(
+                DictationFailure(
+                    code = "insert_connection_unavailable",
+                    message = "Could not reach the focused text field. Tap the field and try again.",
+                    recoverable = true,
+                ),
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals(listOf(sessionId to "schedule the meeting"), host.clipboardCopies)
+        assertIs<DictationState.CopiedToClipboard>(
+            states(host).first { it is DictationState.CopiedToClipboard },
+        )
+        assertEquals(DictationState.Idle, states(host).last())
+    }
+
+    @Test
+    fun `failed insertion with a stale target copies the transcript`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        sendTranscript(host, "the birch canoe slid")
+        advanceUntilIdle()
+
+        coordinator.onInsertionResult(
+            sessionId,
+            InsertionResult.Failed(
+                DictationFailure(
+                    code = "insert_target_stale",
+                    message = "The focused field changed before insertion. Tap the field and try again.",
+                    recoverable = true,
+                ),
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals(listOf(sessionId to "the birch canoe slid"), host.clipboardCopies)
+        assertIs<DictationState.CopiedToClipboard>(
+            states(host).first { it is DictationState.CopiedToClipboard },
+        )
+        assertEquals(DictationState.Idle, states(host).last())
+    }
+
+    @Test
+    fun `a protected field failure never copies to clipboard and surfaces an error`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        sendTranscript(host, "do not leak me")
+        advanceUntilIdle()
+
+        coordinator.onInsertionResult(
+            sessionId,
+            InsertionResult.Failed(
+                DictationFailure(
+                    code = "insert_target_not_safe",
+                    message = "A protected field was focused; text was not inserted.",
+                    recoverable = true,
+                ),
+            ),
+        )
+        advanceUntilIdle()
+
+        assertTrue(host.clipboardCopies.isEmpty(), "a secure field must never copy the transcript")
+        val error = states(host).first { it is DictationState.Error } as DictationState.Error
+        assertEquals("insert_target_not_safe", error.failure.code)
+    }
+
+    @Test
+    fun `clipboard copy failure falls back to an Error surface`() = runTest {
+        val host = FakeHost()
+        host.clipboardResult = false
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        sendTranscript(host, "hello world")
+        advanceUntilIdle()
+
+        coordinator.onInsertionResult(
+            sessionId,
+            InsertionResult.Failed(
+                DictationFailure(
+                    code = "insert_target_ineligible",
+                    message = "No safe text field is focused. Not a password or secure field.",
+                    recoverable = true,
+                ),
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals(1, host.clipboardCopies.size)
+        val error = states(host).first { it is DictationState.Error } as DictationState.Error
+        assertEquals("insert_target_ineligible", error.failure.code)
+        assertTrue(states(host).none { it is DictationState.CopiedToClipboard })
     }
 }

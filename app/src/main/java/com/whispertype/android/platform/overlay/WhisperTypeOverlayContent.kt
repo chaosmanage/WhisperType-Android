@@ -93,6 +93,8 @@ fun WhisperTypeOverlayContent(
                 StatusCapsule(stringResource(R.string.dictation_inserting))
             OverlayVisibility.Success -> Unit
             OverlayVisibility.CopyAvailable -> CopyAvailablePanel(onIntent = onIntent)
+            OverlayVisibility.CopiedToClipboard ->
+                StatusCapsule(stringResource(R.string.dictation_copied_to_clipboard))
             OverlayVisibility.Error -> ErrorPanel(uiState.state as DictationState.Error, onIntent)
         }
     }

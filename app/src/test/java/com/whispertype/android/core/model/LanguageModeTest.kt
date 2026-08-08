@@ -25,21 +25,20 @@ class LanguageModeTest {
     }
 
     @Test
-    fun `English Medium polishes into clean natural written text`() {
+    fun `English Medium refines into publication-grade writing`() {
         val instruction = LanguageMode.ENGLISH.liveInstruction(TranscriptionStyle.MEDIUM)
         assertNotNull(instruction)
-        assertTrue(instruction.contains("polish it into clean, natural written text"))
-        assertTrue(instruction.contains("remove fillers"))
-        assertTrue(instruction.contains("grammar"))
+        assertTrue(instruction.contains("refine it into exceptional, publication-grade writing"))
+        assertTrue(instruction.contains("professional editor"))
         assertTrue(instruction.contains("preserve every idea and every point"))
     }
 
     @Test
-    fun `English High fully refines into polished prose`() {
+    fun `English High transforms into masterfully crafted prose`() {
         val instruction = LanguageMode.ENGLISH.liveInstruction(TranscriptionStyle.HIGH)
         assertNotNull(instruction)
-        assertTrue(instruction.contains("fully refine it into polished, well-structured prose"))
-        assertTrue(instruction.contains("well-formed sentences"))
+        assertTrue(instruction.contains("transform it into masterfully crafted, publication-grade prose"))
+        assertTrue(instruction.contains("professional editor would publish"))
         assertTrue(instruction.contains("preserve every idea and every point"))
     }
 
@@ -65,7 +64,7 @@ class LanguageModeTest {
         val instruction = LanguageMode.HINGLISH.liveInstruction(TranscriptionStyle.MEDIUM)
         assertNotNull(instruction)
         assertTrue(instruction.contains("never output a single Devanagari"))
-        assertTrue(instruction.contains("polish it into clean, natural written text"))
+        assertTrue(instruction.contains("refine it into exceptional, publication-grade writing"))
     }
 
     @Test
@@ -73,7 +72,7 @@ class LanguageModeTest {
         val instruction = LanguageMode.HINGLISH.liveInstruction(TranscriptionStyle.HIGH)
         assertNotNull(instruction)
         assertTrue(instruction.contains("never output a single Devanagari"))
-        assertTrue(instruction.contains("fully refine it into polished, well-structured prose"))
+        assertTrue(instruction.contains("transform it into masterfully crafted, publication-grade prose"))
     }
 
     @Test
@@ -106,6 +105,10 @@ class LanguageModeTest {
                 } else {
                     assertTrue(instruction.contains("preserve every idea and every point"), "$mode $style")
                     assertTrue(instruction.contains("never omit"), "$mode $style")
+                    assertTrue(
+                        instruction.contains("never change, invent, or drop facts", ignoreCase = true),
+                        "$mode $style",
+                    )
                 }
                 assertTrue(instruction.contains("Output ONLY the repeated text"), "$mode $style")
                 if (mode == LanguageMode.HINGLISH) {

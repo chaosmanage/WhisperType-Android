@@ -32,6 +32,7 @@ class MutableSessionMetrics(
         TranscriptSettled,
         InsertionRequested,
         InsertionResult,
+        CopiedToClipboard,
     }
 
     var tapAt: Long? = null
@@ -54,6 +55,7 @@ class MutableSessionMetrics(
     var transcriptSettledAt: Long? = null
     var insertionRequestedAt: Long? = null
     var insertionResultAt: Long? = null
+    var copiedToClipboardAt: Long? = null
 
     var capturedFrames: Long = 0
     var acceptedFrames: Long = 0
@@ -98,6 +100,7 @@ class MutableSessionMetrics(
             Event.TranscriptSettled -> transcriptSettledAt = transcriptSettledAt ?: now
             Event.InsertionRequested -> insertionRequestedAt = insertionRequestedAt ?: now
             Event.InsertionResult -> insertionResultAt = insertionResultAt ?: now
+            Event.CopiedToClipboard -> copiedToClipboardAt = copiedToClipboardAt ?: now
         }
     }
 
@@ -166,6 +169,7 @@ class MutableSessionMetrics(
         durationToken("stopToSettled", stopToSettledMs())?.let(::add)
         durationToken("stopToInsert", stopToInsertionResultMs())?.let(::add)
         durationToken("insertToResult", insertionRequestedToResultMs())?.let(::add)
+        if (copiedToClipboardAt != null) add("copied=true")
         add("captured=$capturedFrames")
         add("accepted=$acceptedFrames")
         add("rejected=$rejectedFrames")

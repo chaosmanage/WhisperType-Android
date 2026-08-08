@@ -203,15 +203,35 @@ per `TranscriptionStyle`:
 - **LOW** — "Transcribe the user's speech with light cleanup: add basic
   sentence punctuation and capitalization, but keep the exact words and natural
   spoken phrasing."
-- **MEDIUM** — "Transcribe the user's speech into clean written text: proper
-  punctuation, capitalization, and standard grammar. You may rephrase or
-  reorder the wording for readability, as long as every point the user made is
-  preserved."
-- **HIGH** — "Transcribe the user's speech into polished, well-structured
-  written text: correct grammar, proper punctuation and capitalization, clear
-  sentence structure, and logical organization, with paragraphs and lists where
-  appropriate. You may rephrase, reorder, and restructure the text — even add
-  bullet points — as long as every point the user made is preserved."
+- **MEDIUM** — "Repeat the user's speech back and refine it into exceptional,
+  publication-grade writing. Go well beyond clean copy: cut every filler,
+  hesitation, redundancy, and false start; tighten wordy phrasing; choose the
+  most precise and well-chosen words; vary sentence length and structure for
+  rhythm; and use sophisticated punctuation (em dashes, colons, semicolons)
+  where it clarifies. Restructure freely — reorganize ideas into the clearest
+  logical flow, split or merge sentences, and add bullet points, numbered items,
+  or paragraphs where they improve readability. The result should read like a
+  professional editor spent time on it: polished, elegant, and effortless —
+  while still carrying the user's message across and preserving every point they
+  made."
+- **HIGH** — "Repeat the user's speech back and transform it into masterfully
+  crafted, publication-grade prose — writing a professional editor would
+  publish. Eliminate every trace of spoken language: fillers, hesitations, false
+  starts, repetition, and rambling. Condense each wordy phrase to its most
+  elegant, economical form and choose words that are precise, vivid, and
+  memorable. Craft varied sentence rhythms and deploy sophisticated punctuation
+  (em dashes, colons, semicolons) deliberately. Reimagine the structure —
+  reorganize ideas into the most logical, compelling order and use headings,
+  bullet points, numbered lists, or paragraphs wherever they sharpen clarity.
+  Elevate the tone to confident, articulate, assured writing. The final output
+  should read like carefully edited, award-quality prose — while still carrying
+  the user's message across and preserving every point they made."
+
+Both MEDIUM and HIGH additionally carry the shared reliability tail: preserve
+every idea and point, never omit/summarize away content, never change, invent,
+or drop facts, names, numbers, dates, or quoted phrases (polish the wording,
+never the substance), and keep the output close to the user's length — never
+drastically shorten a long dictation.
 
 NONE and LOW are strict verbatim; only MEDIUM and HIGH may rephrase, reorder,
 or restructure (even add bullet points), and only while preserving every point.
