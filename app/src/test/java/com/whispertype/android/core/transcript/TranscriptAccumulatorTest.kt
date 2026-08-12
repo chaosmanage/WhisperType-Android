@@ -346,4 +346,78 @@ class TranscriptAccumulatorTest {
 
         assertEquals("I want to go to the store", accumulator.current)
     }
+
+    // ------------------------------------------------------------------
+    // 0.6.1: long-echo restart guard
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `long echo restart does not replay the head at the end`() {
+        // Regression for the reported "the first few words are appended again at
+        // the end, incompletely": for a long reply the server can re-emit the
+        // accumulated text PLUS a replay of its own beginning (a restart). That
+        // cumulative restart must be dropped, and the replayed tail that follows
+        // as deltas must be suppressed until it diverges into new content.
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        for (message in listOf(
+            "main aaj bazaar gaya tha",
+            "aur sabzi khareedi",
+            "phir ghar aaya",
+        )) {
+            accumulator.accept(message)
+        }
+        val full = "main aaj bazaar gaya tha aur sabzi khareedi phir ghar aaya"
+        assertEquals(full, accumulator.current)
+
+        // The restart: full text re-emitted with the opening replayed.
+        accumulator.accept("$full main aaj bazaar")
+        assertEquals(full, accumulator.current)
+
+        // The replayed tail continues as word deltas; all suppressed.
+        for (word in listOf("gaya", "tha", "aur", "sabzi", "khareedi", "phir", "ghar", "aaya")) {
+            accumulator.accept(word)
+        }
+        assertEquals(full, accumulator.current)
+    }
+
+    @Test
+    fun `genuine new content after a full replay divergence still appends`() {
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        for (message in listOf("one two three four", "five six")) {
+            accumulator.accept(message)
+        }
+        val full = "one two three four five six"
+        assertEquals(full, accumulator.current)
+
+        // Restart detected and fully replayed: "one two" then the rest.
+        accumulator.accept("$full one two")
+        for (word in listOf("three", "four", "five", "six")) accumulator.accept(word)
+        assertEquals(full, accumulator.current)
+
+        // Genuinely new content diverges and is appended normally.
+        accumulator.accept("seven eight")
+        assertEquals("$full seven eight", accumulator.current)
+    }
+
+    @Test
+    fun `cumulative extension that is not a head replay still replaces`() {
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        accumulator.accept("the cat sat")
+
+        // "on the mat" is not a replay of the existing head, so the extension is
+        // a genuine cumulative continuation, not a restart.
+        assertEquals(
+            "the cat sat on the mat",
+            accumulator.accept("the cat sat on the mat"),
+        )
+    }
+
+    @Test
+    fun `single token head replay is still treated as a restart`() {
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        accumulator.accept("one two three four")
+
+        accumulator.accept("one two three four one")
+        assertEquals("one two three four", accumulator.current)
+    }
 }

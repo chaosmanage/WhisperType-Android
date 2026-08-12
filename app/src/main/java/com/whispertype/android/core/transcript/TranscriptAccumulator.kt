@@ -29,6 +29,15 @@ class TranscriptAccumulator(
         private set
 
     /**
+     * 0.6.1 restart guard: index into the current text's tokens where an
+     * in-progress replay of the head is being suppressed, or -1 when no replay
+     * is active. When a long echo restarts (the server re-emits the accumulated
+     * text plus a replay of its own beginning), the replayed tail must not be
+     * appended again at the end.
+     */
+    private var replayPosition: Int = -1
+
+    /**
      * Accepts one streamed [message], preserving the original nullable-text API.
      * Call [acceptWithResult] when the caller also needs the change signal.
      */
@@ -39,6 +48,7 @@ class TranscriptAccumulator(
         if (message.isBlank()) return unchanged()
         val existing = current
         if (existing == null) {
+            replayPosition = -1
             return update(message)
         }
         if (message == existing) return unchanged()
@@ -53,9 +63,25 @@ class TranscriptAccumulator(
             return update(message)
         }
         if (isStrictPrefix(existingTokens, messageTokens)) {
+            // A cumulative extension whose appended tail re-leads with the
+            // existing text's own beginning is a spurious RESTART of the model's
+            // reply (observed on long echoes), not new content: drop the
+            // extension and start suppressing the replayed tail.
+            val extension = messageTokens.drop(existingTokens.size)
+            if (isPrefixOf(extension, existingTokens)) {
+                replayPosition = extension.size
+                return unchanged()
+            }
+            replayPosition = -1
             return update(message)
         }
         if (isStrictPrefix(messageTokens, existingTokens)) {
+            return unchanged()
+        }
+
+        // While a replay is being suppressed, drop deltas that continue matching
+        // the existing head at the replay position; resume on divergence.
+        if (replayPosition >= 0 && consumeReplay(existingTokens, messageTokens) > 0) {
             return unchanged()
         }
 
@@ -93,6 +119,7 @@ class TranscriptAccumulator(
     fun reset() {
         current = null
         revisionCount = 0
+        replayPosition = -1
     }
 
     private fun update(candidate: String): AcceptResult {
@@ -223,6 +250,36 @@ class TranscriptAccumulator(
         prefix.isNotEmpty() &&
             prefix.size < full.size &&
             prefix.indices.all { prefix[it].normalized == full[it].normalized }
+
+    /** True when [prefix] is empty or matches the leading tokens of [full]. */
+    private fun isPrefixOf(prefix: List<Token>, full: List<Token>): Boolean =
+        prefix.isEmpty() ||
+            (prefix.size <= full.size &&
+                prefix.indices.all { prefix[it].normalized == full[it].normalized })
+
+    /**
+     * 0.6.1 restart guard: consumes as much of [message] as continues matching
+     * [existing] at [replayPosition], advancing the replay. Returns the number
+     * of tokens consumed (0 on divergence, which ends the replay). When the
+     * replay reaches the end of [existing] it is fully suppressed and reset.
+     */
+    private fun consumeReplay(existing: List<Token>, message: List<Token>): Int {
+        if (replayPosition < 0 || replayPosition >= existing.size || message.isEmpty()) return 0
+        if (message[0].normalized != existing[replayPosition].normalized) {
+            replayPosition = -1
+            return 0
+        }
+        val limit = minOf(message.size, existing.size - replayPosition)
+        var consumed = 0
+        while (consumed < limit &&
+            message[consumed].normalized == existing[replayPosition + consumed].normalized
+        ) {
+            consumed++
+        }
+        replayPosition += consumed
+        if (replayPosition >= existing.size) replayPosition = -1
+        return consumed
+    }
 
     /** Joins a delta on a natural text boundary. */
     private fun join(existing: String, message: String): String {
