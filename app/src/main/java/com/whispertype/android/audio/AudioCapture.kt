@@ -19,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.DisposableHandle
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,7 +58,7 @@ private object DefaultAudioCaptureScope : CoroutineScope {
 }
 
 /**
- * [AudioPipeline] implementation: [PcmSource] -> [Chunker] -> [BoundedAudioQueue],
+ * [AudioPipeline] implementation: [PcmSource] -> [Chunker] -> bounded Channel,
  * with a ~20 Hz amplitude [StateFlow].
  *
  * Release C6: the producer owns the [Chunker] exclusively — no external caller
@@ -84,10 +85,10 @@ class AudioCapture(
      */
     private val lifecycleJob = SupervisorJob()
     private val captureScope = CoroutineScope(lifecycleJob + readDispatcher)
-    private val queue = BoundedAudioQueue<AudioChunk>(QUEUE_CAPACITY)
+    private val queue = Channel<AudioChunk>(QUEUE_CAPACITY)
 
     /** Bounded FIFO of 20 ms frames (capacity 64). Closed by the producer on shutdown. */
-    override val chunks: ReceiveChannel<AudioChunk> = queue.channel
+    override val chunks: ReceiveChannel<AudioChunk> = queue
 
     override val frameQueueCapacity: Int = QUEUE_CAPACITY
 

@@ -678,7 +678,6 @@ class DictationCoordinator(
         if (active !== holder) return
         when (event) {
             GeminiEvent.Ready -> Unit
-            is GeminiEvent.Amplitude -> Unit // waveform comes from the capture flow
             is GeminiEvent.TranscriptCandidates -> {
                 // ECHO (outputTranscription, instruction-controlled) is the primary
                 // source; INPUT (raw ASR) is the fast fallback.
@@ -1250,9 +1249,6 @@ class DictationCoordinator(
     companion object {
         /** Auto-stop watcher sampling interval (pure elapsed-time tick). */
         const val AUTO_STOP_CHECK_MS = 200L
-
-        /** Duration of one captured 20 ms PCM chunk (matches the Chunker). */
-        const val CHUNK_DURATION_MS = 20L
 
         /** Placeholder target used while the accessibility process resolves the real one. */
         fun EMPTY_TARGET(sessionId: SessionId): TargetSnapshot = TargetSnapshot(

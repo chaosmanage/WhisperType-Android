@@ -9,9 +9,6 @@ sealed interface GeminiEvent {
     /** Server setup acknowledgement received; audio transmission may begin. */
     data object Ready : GeminiEvent
 
-    /** Throttled amplitude for the waveform meter (never raw audio). */
-    data class Amplitude(val level: Float) : GeminiEvent
-
     /**
      * Which server text channel produced a [TranscriptCandidates] event.
      * [INPUT] is the raw ASR of the user's speech (`inputTranscription`);

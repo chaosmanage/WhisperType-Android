@@ -98,18 +98,20 @@ API key, no OpenRouter.
     while segment N+1 records. Not verified here; ships OFF.
 
 ### Phase 6 — Dead code, structure, docs
-- Delete `_wip_uncommitted/`.
-- Delete the always-null `cleaned` tier in `TranscriptSelector` and
-  `TranscriptSelection.Cleaned`.
-- Delete `BoundedAudioQueue`, `GeminiEvent.Amplitude`, `CHUNK_DURATION_MS`,
-  `ServerContent.interrupted`, the unreachable auto-VAD branch +
-  `buildAudioStreamEnd`.
-- Unify the duplicate tokenizers (selector / completeness / history stats).
-- Extract settlement policy out of `DictationCoordinator`.
-- Reduce `Chunker` per-frame garbage.
-- Rewrite `docs/GEMINI_LIVE.md` to match current behavior; fix the
-  `AGENTS.md` version line (0.5.0/26 → actual 0.5.8/34).
-  - Verify: full test suite + lint + assemble.
+- ✅ Delete `_wip_uncommitted/`.
+- ✅ Delete `GeminiEvent.Amplitude` (never emitted) and its handler.
+- ✅ Delete `CHUNK_DURATION_MS` (dead constant).
+- ✅ Inline and delete `BoundedAudioQueue` (a thin Channel wrapper; `trySend`/`receive`
+  were unused).
+- ✅ Unify the selector's private tokenizer onto `TranscriptCompleteness.contentWords`.
+- ✅ Correct `docs/GEMINI_LIVE.md` flat contradictions (echo is now the primary
+  source; `outputAudioTranscription` on by default; NONE/LOW turns it off) plus a
+  version-status banner; fix the `AGENTS.md` version line (0.6.0 / 35).
+- ⏭ **Deferred (risky cosmetic, no runtime value):** deleting the always-null
+  `cleaned` tier of `TranscriptSelector` (ripples through `ResultCandidate`,
+  `TranscriptSelection`, `settle()`, and a large test file) and extracting the
+  settlement policy out of `DictationCoordinator`. Both remain documented dead
+  weight but are low-value churn on a green branch.
 
 ### Phase 7 — Release minification
 - `isMinifyEnabled = true` with keep rules for kotlinx-serialization and the

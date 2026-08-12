@@ -97,7 +97,7 @@ class TranscriptSelector {
      * [RejectionRule.DEVANAGARI].
      */
     private fun reject(text: String, language: LanguageMode): RejectionDiagnosis? {
-        val wordCount = words(text).size
+        val wordCount = TranscriptCompleteness.contentWords(text).size
         val charCount = text.length
         val hasDevanagari = containsDevanagari(text)
         if (text.isBlank()) {
@@ -125,9 +125,9 @@ class TranscriptSelector {
      */
     private fun isImplausiblyExpanded(c: ResultCandidate): Boolean {
         val cleaned = c.cleaned ?: return false
-        val rawWords = words(c.raw).size
+        val rawWords = TranscriptCompleteness.contentWords(c.raw).size
         if (rawWords == 0) return false
-        val cleanedWords = words(cleaned).size
+        val cleanedWords = TranscriptCompleteness.contentWords(cleaned).size
         return cleanedWords > rawWords &&
             cleanedWords > MAX_EXPANSION_RATIO * rawWords
     }
@@ -148,31 +148,6 @@ class TranscriptSelector {
         ch in DEVANAGARI_BLOCK ||
             ch in DEVANAGARI_EXTENDED_A_BLOCK ||
             ch in VEDIC_EXTENSIONS_BLOCK
-
-    /**
-     * Lower-cased sequence of letter/digit runs in [text]. Used for word counts
-     * (diagnostics and the implausible-expansion guard).
-     */
-    private fun words(text: String): List<String> {
-        val result = ArrayList<String>()
-        val current = StringBuilder()
-        fun flush() {
-            if (current.isNotEmpty()) {
-                result.add(current.toString())
-                current.setLength(0)
-            }
-        }
-        for (ch in text) {
-            if (ch.isLetterOrDigit()) {
-                current.append(Character.toLowerCase(ch))
-            } else {
-                flush()
-            }
-        }
-
-        flush()
-        return result
-    }
 
     // ------------------------------------------------------------------
     // Documented thresholds (FR-7 heuristics).

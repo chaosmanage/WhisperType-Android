@@ -50,7 +50,7 @@ Layer rules:
 ## Conventions
 
 - **Version bump in the same commit** as any behavior change: `versionCode` +1 and
-  `versionName` bump in `app/build.gradle.kts` (currently 0.5.0 / 26). Add a
+  `versionName` bump in `app/build.gradle.kts` (currently 0.6.0 / 35). Add a
   `CHANGELOG.md` entry for user-visible changes. The README version line lags the real
   version — trust `app/build.gradle.kts`.
 - Commit style: scope-qualified, imperative, lowercase —

@@ -1,5 +1,21 @@
 # Gemini Live Voice Engine — Transcription & Wire Reference
 
+> **Version status.** This document was consolidated at `0.4.2`; the app is now
+> `0.6.0`. The wire reference (Part 2) remains accurate. Since 0.4.2 the
+> following changed:
+> - **The echo is the primary dictation source.** `outputTranscription` is **on
+>   by default** and `inputTranscription` is the fast fallback — the exact
+>   reverse of the 0.4.2-era "output is never a candidate source" note. See the
+>   "0.4.1 echo" section.
+> - **Hard deadline is 20 s, settle debounce is 250 ms** (not 3 s / 250 ms as
+>   some 0.4.2 sections state; the doc later self-corrects to 20 s / 600 ms).
+> - **0.6.0**: NONE/LOW polish turns `outputAudioTranscription` **off** and
+>   settles on the raw ASR in ~0.7 s flat (no echo wait). The warm pool is
+>   profile-aware (a changed polish/language/echo setting never reuses a stale
+>   session). Experimental segmented activities (Settings → "Segment at pauses")
+>   split the recording at silence with `activityHandling = NO_INTERRUPTION`;
+>   device-pending.
+
 This document is the consolidated reference for the **Gemini Live dictation
 engine** as it exists at `0.4.2`: how it was built, what is sent and read on the
 wire, the exact prompt, how the modules connect, the session/settlement state
@@ -167,18 +183,20 @@ with "Okay…", "Yes…", "Of course…", "Note that…". Changes:
 | Concern | Result |
 | --- | --- |
 | Server returns user speech as text | **Working** — `inputTranscription` arrives in nearly every session (the manual activity boundary + continuous real-time pacing fixed delivery). |
-| No greetings / acknowledgments inserted | **Working** — output transcription is never a candidate source. |
+| No greetings / acknowledgments inserted | **Working** — the `systemInstruction` forces a verbatim echo, so the model never ad-libs. |
 | Short sentences with natural openers ("Okay so…", "Yes…") | **Working** — selector trusts user speech (0.3.1). |
-| Long English sentences | **Working** — same trust policy; settlement is debounce + 3 s hard deadline. |
+| Long English sentences | **Working** — same trust policy; settlement is debounce + 20 s hard deadline. |
 | Hinglish (Hindi+English, Latin output) | **Working** — Hinglish `systemInstruction` produces Latin-script romanized Hinglish. |
-| Stop-to-insert latency | Fast — typically ~0.5–1.6 s (debounce path), never waiting on `turnComplete` (which the server rarely sends). |
+| Stop-to-insert latency | Fast — typically ~0.5–1.6 s (debounce path), never waiting on `turnComplete` (which the server rarely sends). NONE/LOW polish settles on the raw ASR in ~0.7 s flat (0.6.0). |
 | Retry / failsafe on genuine failures | **Working** — Retry button + persistent retryable errors + lenient fallback. |
 | Known server behavior | The preview Live model's `inputTranscription` is still fundamentally intermittent; if it returns nothing within the hard deadline the app reports `gemini_no_transcript` with a Retry affordance. |
 
 > **Not used / rejected on the wire**: `languageCode` inside
-> `inputAudioTranscription` is rejected by the Live API. `outputAudioTranscription`
-> is off by default. `modelTurn` text is impossible (voice-only model rejects
-> TEXT modality). `clientContent.turnComplete` is never used for realtime audio.
+> `inputAudioTranscription` is rejected by the Live API. `modelTurn` text is
+> impossible (voice-only model rejects TEXT modality). `clientContent.turnComplete`
+> is never used for realtime audio. `outputAudioTranscription` is **on by
+> default** since 0.4.1 (the echo channel) and is **off** only for NONE/LOW
+> polish since 0.6.0.
 
 ---
 
