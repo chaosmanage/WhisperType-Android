@@ -282,7 +282,9 @@ class AudioCaptureOrderlyShutdownTest {
 
             assertIs<AudioStartResult.Started>(capture.start())
             assertTrue(source.readStarted.await(2, TimeUnit.SECONDS), "capture read did not start")
-            assertEquals("capture-read-test", readThread.get())
+            // Coroutine dispatchers append " @coroutine#N"; assert the dispatcher's
+            // thread is the one driving the read.
+            assertTrue(readThread.get()?.startsWith("capture-read-test") == true)
             capture.requestStop()
             assertTrue(capture.awaitQuiescence(timeoutMs = 2_000))
         } finally {
