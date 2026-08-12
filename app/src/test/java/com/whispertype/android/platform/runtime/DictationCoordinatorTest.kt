@@ -481,11 +481,12 @@ class DictationCoordinatorTest {
         runCurrent()
 
         sendEcho(host, "hello world")
+        host.session.events.send(GeminiEvent.GenerationComplete)
         runCurrent()
-        advanceTimeBy(200)
+        advanceTimeBy(500)
         sendEcho(host, "hello world")
         runCurrent()
-        advanceTimeBy(101)
+        advanceTimeBy(401)
         runCurrent()
 
         assertEquals(listOf("hello world"), host.insertions.map { it.second })
@@ -546,7 +547,7 @@ class DictationCoordinatorTest {
         runCurrent()
         advanceTimeBy(249)
         assertTrue(host.insertions.isEmpty(), "the echo revision must restart global quiet")
-        advanceTimeBy(2)
+        advanceTimeBy(651)
         runCurrent()
 
         assertEquals("We should meet.", host.insertions.single().second)
@@ -576,7 +577,7 @@ class DictationCoordinatorTest {
 
         host.session.endGate!!.complete(Unit)
         runCurrent()
-        advanceTimeBy(249)
+        advanceTimeBy(899)
         assertTrue(host.insertions.isEmpty())
         advanceTimeBy(2)
         runCurrent()
@@ -1094,7 +1095,9 @@ class DictationCoordinatorTest {
 
         sendTranscript(host, "um we should like meet") // raw input arrives first
         sendEcho(host, "We should meet.") // styled echo covers the raw content
-        advanceTimeBy(700) // past the 600ms settle debounce
+        host.session.events.send(GeminiEvent.GenerationComplete)
+        runCurrent()
+        advanceTimeBy(901) // past the 900ms echo quiet window
 
         assertEquals(1, host.insertions.size)
         assertEquals("We should meet.", host.insertions[0].second)
@@ -1243,10 +1246,11 @@ class DictationCoordinatorTest {
         runCurrent()
 
         // Tiny Latin echo + Devanagari raw; the repair fails, leaving only a
-        // fragment. Never inserted.
+        // fragment. Never inserted. (Echo settlement waits for the stall backstop
+        // when no completion signal arrives.)
         sendEcho(host, "yes")
         sendTranscript(host, "हाँ")
-        advanceTimeBy(300)
+        advanceTimeBy(2_500)
         runCurrent()
 
         assertTrue(host.insertions.isEmpty(), "a Hinglish fragment must never be inserted")
@@ -1291,10 +1295,115 @@ class DictationCoordinatorTest {
         advanceTimeBy(500)
         sendEcho(host, "We should meet tomorrow.")
         advanceTimeBy(2_500) // well past the echo-fallback window
+        runCurrent() // the stall backstop fires exactly on the advance boundary
 
         assertEquals(1, host.insertions.size)
         assertEquals("We should meet tomorrow.", host.insertions[0].second, "a complete echo must win over raw")
         coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    // ------------------------------------------------------------------
+    // 0.6.2: never settle while the echo generation is still in flight
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `the actual regression - an echo with 600ms gaps is fully transcribed`() = runTest {
+        // The real device failure: the echo streams with 300-600ms gaps; the old
+        // 250ms debounce settled mid-reply and truncated long dictations. A
+        // completion signal must arrive and the 900ms echo quiet must elapse
+        // before settlement, so ALL echo content is captured.
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        sendEcho(host, "main aaj bazaar gaya tha")
+        advanceTimeBy(600)
+        sendEcho(host, "aur sabzi khareedi")
+        advanceTimeBy(600)
+        sendEcho(host, "phir ghar aaya")
+        host.session.events.send(GeminiEvent.GenerationComplete)
+        runCurrent()
+        advanceTimeBy(901)
+        runCurrent()
+
+        assertEquals(
+            "main aaj bazaar gaya tha aur sabzi khareedi phir ghar aaya",
+            host.insertions.single().second,
+        )
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `no completion signal settles only after the stall backstop`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        sendEcho(host, "hello world")
+        runCurrent()
+        advanceTimeBy(899)
+        assertTrue(host.insertions.isEmpty(), "the 900ms echo quiet must not settle without a completion signal")
+        advanceTimeBy(1_700) // crosses 2500ms stall backstop from the echo
+        runCurrent()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("hello world", host.insertions[0].second)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `completion signal settles after the echo quiet window`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        sendEcho(host, "hello world")
+        host.session.events.send(GeminiEvent.GenerationComplete)
+        runCurrent()
+        advanceTimeBy(899)
+        assertTrue(host.insertions.isEmpty())
+        advanceTimeBy(2)
+        runCurrent()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("hello world", host.insertions[0].second)
+        assertEquals(SettlementReason.GENERATION_COMPLETE_QUIET, coordinator.activeMetrics()!!.settlementReason)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `interrupted generation cannot settle on a gap`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        sendEcho(host, "hello world")
+        host.session.events.send(GeminiEvent.Interrupted)
+        runCurrent()
+        advanceTimeBy(900)
+        assertTrue(host.insertions.isEmpty(), "an interrupted generation is still in flight")
+        advanceTimeBy(1_700) // stall backstop re-armed by the interruption
+        runCurrent()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("hello world", host.insertions[0].second)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
         advanceUntilIdle()
     }
 
@@ -1383,11 +1492,17 @@ class DictationCoordinatorTest {
         coordinator.stop()
         runCurrent()
 
-        // Echo deltas stop for longer than the debounce; settlement happens with
-        // only the first delta, so the complete raw must be salvaged.
+        // Echo deltas stop for longer than the old debounce. 0.6.2: an echo gap
+        // must NOT settle the session mid-reply — only the stall backstop ends it,
+        // and then the complete raw is salvaged over the partial echo.
         sendEcho(host, "The quick brown")
         sendTranscript(host, "The quick brown fox jumps over the lazy dog")
-        advanceTimeBy(700)
+        advanceTimeBy(901)
+        runCurrent()
+        assertTrue(host.insertions.isEmpty(), "an echo gap must not settle mid-reply")
+
+        advanceTimeBy(1_700) // crosses the 2500ms stall backstop from the echo
+        runCurrent()
         assertEquals(1, host.insertions.size)
         assertEquals("The quick brown fox jumps over the lazy dog", host.insertions[0].second)
         coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)

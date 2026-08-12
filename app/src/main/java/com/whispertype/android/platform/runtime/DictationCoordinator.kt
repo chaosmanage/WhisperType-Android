@@ -162,6 +162,21 @@ private class ActiveLiveSession(
     /** Retains an absolute deadline that fired before activity-end could be queued. */
     var hardDeadlineReached: Boolean = false
 
+    /**
+     * 0.6.2: true from the activity-end boundary until the server confirms the
+     * generation ended (`generationComplete` / `turnComplete`). While the model
+     * may still be speaking, a gap in the echo stream must NOT be mistaken for
+     * the end of the reply — that truncated long dictations.
+     */
+    var generationInFlight: Boolean = false
+
+    /** 0.6.2: the echo has been silent for [Config.echoStallMs] with no
+     *  completion signal, so the reply is assumed finished. */
+    var echoStalled: Boolean = false
+
+    /** 0.6.2: rearmed on every echo revision; fires the stall backstop. */
+    var echoStallJob: Job? = null
+
     /** Exact duration represented by captured frames, used for echo-only plausibility. */
     var capturedAudioDurationMs: Long = 0L
 }
@@ -206,12 +221,20 @@ class DictationCoordinator(
          *  instead of waiting. Measured from activity end so the raw is always
          *  final (never a provisional mid-activity revision). */
         val echoFallbackWaitMs: Long = 2_000,
-        /** Short settle debounce after the last transcript revision / turn
-         *  complete. 0.6.0: reduced from 600 ms to 250 ms — still above the
-         *  measured ~90-300 ms inter-delta gaps of a streaming echo so
-         *  settlement never lands mid-delta-stream, but ~350 ms faster on every
-         *  dictation. */
+        /** Quiet required after a RAW-only transcript revision. The raw ASR is
+         *  delivered as one final text (measured: 2 messages, 0-2 ms apart), so a
+         *  short window is safe here. */
         val settleDebounceMs: Long = 250,
+        /** 0.6.2: quiet required after an ECHO revision once generation is known
+         *  to be finished. The model's spoken reply streams with natural gaps of
+         *  300-600 ms (measured on device), so the old 250 ms window settled
+         *  mid-reply and truncated long dictations. */
+        val echoQuietMs: Long = 900,
+        /** 0.6.2: backstop for a streaming echo when the server never sends a
+         *  completion signal (measured: `turnComplete` never arrives and
+         *  `generationComplete` only ~4 of 7 sessions). Settlement waits for this
+         *  much echo silence before assuming the reply ended. */
+        val echoStallMs: Long = 2_500,
         /** 0.4.2: the polished echo is only accepted as the dictation source
          *  when it plausibly covers the raw ASR (see [TranscriptCompleteness]). */
         val minEchoRatio: Double = TranscriptCompleteness.DEFAULT_MIN_RATIO,
@@ -690,7 +713,7 @@ class DictationCoordinator(
                         } else {
                             holder.metrics.recordInputRevision()
                         }
-                        onTranscriptRevision(holder)
+                        onTranscriptRevision(holder, isEcho)
                     }
                 }
             }
@@ -771,11 +794,30 @@ class DictationCoordinator(
      * barrier. Exact duplicates are filtered by [TranscriptAccumulator] and do
      * not extend settlement.
      */
-    private fun onTranscriptRevision(holder: ActiveLiveSession) {
+    private fun onTranscriptRevision(holder: ActiveLiveSession, isEcho: Boolean) {
         if (active !== holder) return
         if (!isFinalizing(holder)) return
         holder.transcriptQuiet = false
+        // 0.6.2: an echo revision proves the model is still speaking. Rearm the
+        // stall backstop so a mid-reply gap can never settle the session.
+        if (isEcho) {
+            holder.echoStalled = false
+            restartEchoStallBackstop(holder)
+        }
         if (holder.activityEndQueued) restartQuietDebounce(holder)
+    }
+
+    /** 0.6.2: after [Config.echoStallMs] of echo silence the reply is treated as
+     *  finished even without a server completion signal. */
+    private fun restartEchoStallBackstop(holder: ActiveLiveSession) {
+        holder.echoStallJob?.cancel()
+        holder.echoStallJob = scope.launch {
+            delay(config.echoStallMs)
+            if (active === holder && isFinalizing(holder) && holder.activityEndQueued) {
+                holder.echoStalled = true
+                reevaluateSettlement(holder)
+            }
+        }
     }
 
     /** Server lifecycle events are hints; transcript quiet is still mandatory. */
@@ -783,6 +825,9 @@ class DictationCoordinator(
         if (active !== holder) return
         holder.turnCompleteSeen = true
         holder.metrics.recordTurnComplete()
+        // 0.6.2: the server confirmed the reply ended.
+        holder.generationInFlight = false
+        holder.echoStallJob?.cancel()
         onLifecycleHint(holder)
     }
 
@@ -790,6 +835,9 @@ class DictationCoordinator(
         if (active !== holder) return
         holder.generationCompleteSeen = true
         holder.metrics.recordGenerationComplete()
+        // 0.6.2: the server confirmed the reply ended.
+        holder.generationInFlight = false
+        holder.echoStallJob?.cancel()
         onLifecycleHint(holder)
     }
 
@@ -799,6 +847,12 @@ class DictationCoordinator(
         // the current audio activity. Aggregate metrics remain historical.
         holder.generationCompleteSeen = false
         holder.turnCompleteSeen = false
+        // 0.6.2: a cut generation may restart; treat it as in-flight again so a
+        // post-interruption gap cannot settle the session, and rearm the stall
+        // backstop in case the generation never resumes.
+        holder.generationInFlight = true
+        holder.echoStalled = false
+        restartEchoStallBackstop(holder)
     }
 
     private fun onLifecycleHint(holder: ActiveLiveSession) {
@@ -817,6 +871,10 @@ class DictationCoordinator(
             reevaluateSettlement(holder)
             return
         }
+        // 0.6.2: the model's reply starts at the activity-end boundary; it is
+        // "in flight" until the server confirms completion.
+        holder.generationInFlight = true
+        holder.echoStalled = false
         holder.sourceMissingGraceElapsed = false
         holder.echoFallbackJob?.cancel()
         holder.echoFallbackJob = scope.launch {
@@ -831,12 +889,21 @@ class DictationCoordinator(
         }
     }
 
-    /** Resets the global revision quiet debounce; never extends the deadline. */
+    /** Resets the global revision quiet debounce; never extends the deadline.
+     *  0.6.2: an in-progress echo uses the longer [Config.echoQuietMs] window so a
+     *  natural speech gap cannot settle the session mid-reply; the raw ASR (which
+     *  is delivered as one final text) keeps the short [Config.settleDebounceMs]. */
     private fun restartQuietDebounce(holder: ActiveLiveSession) {
         holder.settleJob?.cancel()
         holder.transcriptQuiet = false
+        val quietMs =
+            if (holder.echoEnabled && holder.echoAccumulator.settledText()?.isNotBlank() == true) {
+                config.echoQuietMs
+            } else {
+                config.settleDebounceMs
+            }
         holder.settleJob = scope.launch {
-            delay(config.settleDebounceMs)
+            delay(quietMs)
             if (active === holder && isFinalizing(holder) && holder.activityEndQueued) {
                 holder.transcriptQuiet = true
                 reevaluateSettlement(holder)
@@ -855,7 +922,14 @@ class DictationCoordinator(
             holder.turnCompleteSeen -> SettlementReason.TURN_COMPLETE_QUIET
             holder.generationCompleteSeen -> SettlementReason.GENERATION_COMPLETE_QUIET
             holder.echoAccumulator.settledText()?.isNotBlank() == true ->
-                SettlementReason.ECHO_DEBOUNCE
+                // 0.6.2: never treat an echo gap as the end of the reply while the
+                // model may still be speaking (no completion signal yet). Only the
+                // stall backstop or a confirmed completion ends an echo settlement.
+                if (!holder.generationInFlight || holder.echoStalled) {
+                    SettlementReason.ECHO_DEBOUNCE
+                } else {
+                    null
+                }
             // NONE/LOW polish runs without the echo; settle on the raw ASR as
             // soon as quiet elapses (0.6.0).
             !holder.echoEnabled && holder.accumulator.settledText()?.isNotBlank() == true ->
@@ -1192,6 +1266,7 @@ class DictationCoordinator(
         holder.settleJob?.cancel()
         holder.deadlineJob?.cancel()
         holder.echoFallbackJob?.cancel()
+        holder.echoStallJob?.cancel()
         holder.finalizationJob?.cancel()
         holder.audioJob?.cancel()
         holder.amplitudeJob?.cancel()

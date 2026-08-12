@@ -52,6 +52,9 @@ object GeminiLiveWire {
                             config.responseModalities.forEach { add(JsonPrimitive(it)) }
                         },
                     )
+                    // 0.6.2: explicit output budget so a long spoken reply cannot
+                    // be truncated by an unknown server-side cap.
+                    config.maxOutputTokens?.let { put("maxOutputTokens", it) }
                 },
             )
             // Voice-to-text: enable transcription of the user's speech so the

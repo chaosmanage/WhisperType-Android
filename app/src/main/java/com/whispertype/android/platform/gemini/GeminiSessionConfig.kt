@@ -16,6 +16,9 @@ class GeminiSessionConfig(
      *  voice-only Live models); the dictation text is read from the server's
      *  `inputTranscription`, not from the model's own (audio) output. */
     val responseModalities: List<String> = listOf("AUDIO"),
+    /** 0.6.2: explicit output token budget so an unknown server-side cap cannot
+     *  silently truncate a long spoken reply. Null omits the field. */
+    val maxOutputTokens: Int? = 8192,
     /** When true, the setup enables `inputAudioTranscription` so the server
      *  returns `serverContent.inputTranscription.text` for the user's speech. */
     val inputAudioTranscription: Boolean = true,

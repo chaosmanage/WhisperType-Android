@@ -47,6 +47,21 @@ class GeminiLiveWireTest {
     }
 
     @Test
+    fun `buildSetup sends an explicit maxOutputTokens budget by default`() {
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(config)).jsonObject
+        val generationConfig = root["setup"]!!.jsonObject["generationConfig"]!!.jsonObject
+        assertEquals(8192, generationConfig["maxOutputTokens"]!!.jsonPrimitive.content.toInt())
+    }
+
+    @Test
+    fun `buildSetup omits maxOutputTokens when null`() {
+        val unbounded = GeminiSessionConfig(model = "m", maxOutputTokens = null)
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(unbounded)).jsonObject
+        val generationConfig = root["setup"]!!.jsonObject["generationConfig"]!!.jsonObject
+        assertFalse(generationConfig.containsKey("maxOutputTokens"))
+    }
+
+    @Test
     fun `buildSetup enables inputAudioTranscription by default`() {
         val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(config)).jsonObject
         val setup = root["setup"]!!.jsonObject
