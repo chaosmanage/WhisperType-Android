@@ -319,4 +319,31 @@ class TranscriptAccumulatorTest {
             assertEquals(expected, accumulator.accept(message), "overlap=$overlap")
         }
     }
+
+    @Test
+    fun `user-reported duplicate tail - long correction replaces instead of appending`() {
+        // Regression for the reported "a segment of my utterance appended to the
+        // end": a cumulative revision that corrects the first word of a long
+        // utterance was appended whole, duplicating the tail. The overlap merge
+        // must treat it as a revision.
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        accumulator.accept("I want to order a pizza for delivery tonight")
+
+        assertEquals(
+            "I need to order a pizza for delivery tonight around eight",
+            accumulator.accept("I need to order a pizza for delivery tonight around eight"),
+        )
+    }
+
+    @Test
+    fun `user-reported dropped word - repeated connector in a delta stream is kept`() {
+        // Regression for the "word transposed/lost" variant: a delta whose leading
+        // word repeats a recent connector must still be appended, never dropped.
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        for (message in listOf("I", "want", "to", "go", "to", "the", "store")) {
+            accumulator.accept(message)
+        }
+
+        assertEquals("I want to go to the store", accumulator.current)
+    }
 }
