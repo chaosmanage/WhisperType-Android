@@ -5,8 +5,10 @@ import com.whispertype.android.data.secrets.BlobStore
 import com.whispertype.android.data.secrets.KeystoreKeyStore
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -32,33 +34,42 @@ class EncryptedHistoryRepository(
         flow { emit(currentEntries()) }
 
     override suspend fun record(entry: HistoryRepository.HistoryEntry): Boolean =
-        synchronized(lock) {
-            try {
-                val id = entry.id.ifBlank { idFactory() }
-                val resolved = entry.copy(id = id, charCount = entry.text.length)
-                val current = readEntries() ?: emptyList()
-                val merged = prune(listOf(resolved) + current)
-                write(merged)
-            } catch (_: Throwable) {
-                false
+        // Blob read + AES-GCM decrypt + JSON re-encode + re-encrypt + write must
+        // never block the caller's thread (the main dispatcher from
+        // onSessionFinished); hoist the whole read-modify-write to IO (0.6.0).
+        withContext(Dispatchers.IO) {
+            synchronized(lock) {
+                try {
+                    val id = entry.id.ifBlank { idFactory() }
+                    val resolved = entry.copy(id = id, charCount = entry.text.length)
+                    val current = readEntries() ?: emptyList()
+                    val merged = prune(listOf(resolved) + current)
+                    write(merged)
+                } catch (_: Throwable) {
+                    false
+                }
             }
         }
 
     override suspend fun delete(id: String): Boolean =
-        synchronized(lock) {
-            try {
-                val current = readEntries() ?: return@synchronized true
-                write(current.filterNot { it.id == id })
-            } catch (_: Throwable) {
-                false
+        withContext(Dispatchers.IO) {
+            synchronized(lock) {
+                try {
+                    val current = readEntries() ?: return@synchronized true
+                    write(current.filterNot { it.id == id })
+                } catch (_: Throwable) {
+                    false
+                }
             }
         }
 
     override suspend fun clear(): Boolean =
-        try {
-            blobStore.delete()
-        } catch (_: Throwable) {
-            false
+        withContext(Dispatchers.IO) {
+            try {
+                blobStore.delete()
+            } catch (_: Throwable) {
+                false
+            }
         }
 
     private fun currentEntries(): List<HistoryRepository.HistoryEntry> =

@@ -29,11 +29,14 @@ import com.whispertype.android.core.transcript.TranscriptSelector
 import com.whispertype.android.platform.gemini.GeminiLiveException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -194,15 +197,21 @@ class DictationCoordinator(
          *  final (never a provisional mid-activity revision). */
         val echoFallbackWaitMs: Long = 2_000,
         /** Short settle debounce after the last transcript revision / turn
-         *  complete. Calibrated above the measured ~90-300 ms inter-delta gaps
-         *  of a streaming echo so settlement never lands mid-delta-stream
-         *  (0.4.2). */
-        val settleDebounceMs: Long = 600,
+         *  complete. 0.6.0: reduced from 600 ms to 250 ms — still above the
+         *  measured ~90-300 ms inter-delta gaps of a streaming echo so
+         *  settlement never lands mid-delta-stream, but ~350 ms faster on every
+         *  dictation. */
+        val settleDebounceMs: Long = 250,
         /** 0.4.2: the polished echo is only accepted as the dictation source
          *  when it plausibly covers the raw ASR (see [TranscriptCompleteness]). */
         val minEchoRatio: Double = TranscriptCompleteness.DEFAULT_MIN_RATIO,
         val returnToIdleMs: Long = 1_200,
         val captureShutdownTimeoutMs: Long = 1_500,
+        /** Dispatcher for the blocking AudioRecord stop/release calls during
+         *  finalization/teardown so they never run on the main dispatcher
+         *  (0.6.0). Injected so virtual-time host tests can keep everything on
+         *  the test scheduler. */
+        val captureShutdownDispatcher: CoroutineDispatcher = Dispatchers.IO,
         /** Maximum wait after STOP closes capture while a cold session is still
          * connecting. This preserves activityStart -> buffered audio ->
          * activityEnd ordering without allowing finalization to hang forever. */
@@ -235,11 +244,22 @@ class DictationCoordinator(
     /** Test visibility: metrics of the currently active session, or null. */
     internal fun activeMetrics(): MutableSessionMetrics? = active?.metrics
 
-    /** Starts a new dictation session. Returns false (and does nothing) when one
-     *  is already active — duplicate START is rejected synchronously. */
+    /** Starts a new dictation session. Returns false (and does nothing) when a
+     *  session is still in flight (Starting/Listening/Finalizing/Inserting) —
+     *  duplicate START is rejected synchronously. A lingering terminal state
+     *  (Success/CopiedToClipboard/Error/Cancelled) is cleared so a fresh tap can
+     *  start immediately instead of waiting out the UI feedback timer. */
     fun start(): Boolean {
         val existing = active
-        if (existing != null) return false
+        if (existing != null) {
+            val state = lastPublished
+            val inFlight = state is DictationState.Starting ||
+                state is DictationState.Listening ||
+                state is DictationState.Finalizing ||
+                state is DictationState.Inserting
+            if (inFlight) return false
+            resetToIdle(existing)
+        }
         val sessionId = SessionId.new()
         val metrics = metricsFactory(sessionId)
         metrics.mark(MutableSessionMetrics.Event.Tap)
@@ -675,9 +695,18 @@ class DictationCoordinator(
         // let the producer flush its final partial frame and close the channel,
         // join the ordered sender, then send the boundary.
         holder.finalizationJob = scope.launch {
-            capture?.requestStop()
-            val quiesced = capture?.awaitQuiescence(config.captureShutdownTimeoutMs) ?: true
-            if (!quiesced) capture.stop()
+            // AudioRecord stop/release are blocking native calls; never run them
+            // on the main dispatcher at STOP time (0.6.0).
+            val quiesced = withContext(config.captureShutdownDispatcher) {
+                capture?.requestStop()
+                val done = capture?.awaitQuiescence(config.captureShutdownTimeoutMs) ?: true
+                if (!done) capture.stop()
+                done
+            }
+            // streamAudio terminates in every case (capture close while connected,
+            // or a bounded readyAfterStopTimeout wait while cold), so joining it
+            // cannot hang finalization; the join preserves the activityStart ->
+            // audio -> activityEnd wire order before the completion boundary.
             holder.audioJob?.join()
             holder.metrics.mark(MutableSessionMetrics.Event.CaptureQuiesced)
             when (val result = session.endActivity()) {
@@ -1074,9 +1103,13 @@ class DictationCoordinator(
         holder.insertionResultJob?.cancel()
         holder.capture?.let { capture ->
             scope.launch {
-                capture.requestStop()
-                capture.awaitQuiescence(config.captureShutdownTimeoutMs)
-                capture.stop()
+                // AudioRecord stop/release are blocking native calls; never run
+                // them on the main dispatcher (0.6.0).
+                withContext(config.captureShutdownDispatcher) {
+                    capture.requestStop()
+                    capture.awaitQuiescence(config.captureShutdownTimeoutMs)
+                    capture.stop()
+                }
             }
         }
         holder.session?.let { session ->

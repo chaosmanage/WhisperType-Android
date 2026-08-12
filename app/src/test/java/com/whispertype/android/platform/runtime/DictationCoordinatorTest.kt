@@ -16,6 +16,8 @@ import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.SettlePath
 import com.whispertype.android.core.model.SettlementReason
 import com.whispertype.android.core.model.TerminalOutcome
+import kotlin.coroutines.ContinuationInterceptor
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -181,7 +183,8 @@ class DictationCoordinatorTest {
         DictationCoordinator(
             scope = scope,
             host = host,
-            config = DictationCoordinator.Config(insertionResultTimeoutMs = 0),
+            config = DictationCoordinator.Config(insertionResultTimeoutMs = 0)
+                .withTestShutdownDispatcher(scope),
             metricsFactory = { sessionId ->
                 MutableSessionMetrics(sessionId) { scope.testScheduler.currentTime * 1_000_000L }
             },
@@ -195,11 +198,24 @@ class DictationCoordinatorTest {
         DictationCoordinator(
             scope = scope,
             host = host,
-            config = config.copy(insertionResultTimeoutMs = 0),
+            config = config.copy(insertionResultTimeoutMs = 0).withTestShutdownDispatcher(scope),
             metricsFactory = { sessionId ->
                 MutableSessionMetrics(sessionId) { scope.testScheduler.currentTime * 1_000_000L }
             },
         )
+
+    /** Keeps the capture-shutdown dispatcher on the virtual scheduler so the
+     *  host tests stay deterministic instead of hopping to Dispatchers.IO. */
+    private fun DictationCoordinator.Config.withTestShutdownDispatcher(
+        scope: kotlinx.coroutines.test.TestScope,
+    ): DictationCoordinator.Config {
+        val interceptor = scope.coroutineContext[ContinuationInterceptor]
+        return if (interceptor is CoroutineDispatcher) {
+            copy(captureShutdownDispatcher = interceptor)
+        } else {
+            this
+        }
+    }
 
     private fun chunk(
         seq: Long,
@@ -466,7 +482,7 @@ class DictationCoordinatorTest {
 
         sendEcho(host, "hello world")
         runCurrent()
-        advanceTimeBy(500)
+        advanceTimeBy(200)
         sendEcho(host, "hello world")
         runCurrent()
         advanceTimeBy(101)
@@ -523,12 +539,12 @@ class DictationCoordinatorTest {
         sendTranscript(host, "we should meet")
         host.session.events.send(GeminiEvent.GenerationComplete)
         runCurrent()
-        advanceTimeBy(500)
+        advanceTimeBy(200)
         assertTrue(host.insertions.isEmpty(), "the lifecycle hint cannot bypass transcript quiet")
 
         sendEcho(host, "We should meet.")
         runCurrent()
-        advanceTimeBy(599)
+        advanceTimeBy(249)
         assertTrue(host.insertions.isEmpty(), "the echo revision must restart global quiet")
         advanceTimeBy(2)
         runCurrent()
@@ -560,7 +576,7 @@ class DictationCoordinatorTest {
 
         host.session.endGate!!.complete(Unit)
         runCurrent()
-        advanceTimeBy(599)
+        advanceTimeBy(249)
         assertTrue(host.insertions.isEmpty())
         advanceTimeBy(2)
         runCurrent()
@@ -899,7 +915,7 @@ class DictationCoordinatorTest {
             config = DictationCoordinator.Config(
                 autoStopSeconds = { autoStopSeconds },
                 maxRecordingSeconds = { maxRecordingSeconds },
-            ),
+            ).withTestShutdownDispatcher(scope),
             metricsFactory = { sessionId -> MutableSessionMetrics(sessionId) { 0L } },
         )
 
