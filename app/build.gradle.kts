@@ -68,7 +68,10 @@ android {
             applicationIdSuffix = null
         }
         release {
-            isMinifyEnabled = false
+            // 0.6.0: R8 minification enabled for the release APK. Compose and
+            // kotlinx-serialization keep rules ship via consumer rules and
+            // proguard-rules.pro.
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
