@@ -4,6 +4,31 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-08-12
+
+> **Long-dictation reliability + finalization fixes** — a long dictation whose
+> echo condensed to a few words is no longer silently inserted as a fragment; the
+> model's echo restart (the first words replaying at the end) is suppressed; and
+> the recording waveform animates at ~20 Hz instead of 60 fps (battery + logcat).
+
+- **Fragment guard (`runtime`)** — when a long recording settles on a text far
+  too short to be the whole dictation (the echo condensed and the repair could
+  not recover it), the app now shows a retryable "too long to transcribe fully"
+  error instead of inserting a two-word fragment. Short genuine utterances are
+  unaffected.
+- **Echo restart guard (`transcript`)** — a long echo that re-emits the
+  accumulated text plus a replay of its own beginning no longer duplicates the
+  first words at the end; the replayed tail is suppressed until new content
+  diverges.
+- **Waveform (`ui`)** — the live waveform phase advances at ~20 Hz instead of a
+  60 fps infinite animation: lower battery use, and no more
+  `View.setRequestedFrameRate` logcat flood during recording (which was wiping
+  the `SESSION DONE` diagnostics out of the buffer).
+
+> **Device-pending:** the fragment and restart guards are JVM-verified; confirm
+> on a physical device per `docs/TESTING.md` with a long dictation and read the
+> `SESSION DONE` line.
+
 ## [0.6.0] - 2026-08-12
 
 > **Instant recording start + latency overhaul** — tapping the bubble starts
