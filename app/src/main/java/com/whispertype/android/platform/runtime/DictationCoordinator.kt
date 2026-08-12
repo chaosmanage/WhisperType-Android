@@ -348,6 +348,25 @@ class DictationCoordinator(
     private suspend fun runSession(holder: ActiveLiveSession) {
         val sessionId = holder.sessionId
         try {
+            // Release F4 (tap-to-recording fix): capture starts immediately on the
+            // accepted tap, BEFORE session resolution. The overlay flips to
+            // Listening as soon as the mic is hot; key load and socket connect
+            // happen afterwards, and cold-session PCM is buffered in the bounded
+            // pre-ready buffer until the session is ready.
+            when (val outcome = host.startCapture(holder.metrics)) {
+                is CaptureStart.Failed -> {
+                    fail(holder, outcome.failure)
+                    return
+                }
+                is CaptureStart.Started -> {
+                    holder.capture = outcome.capture
+                    holder.captureFailureJob = scope.launch {
+                        outcome.capture.failures.collect { failure -> onCaptureFailure(holder, failure) }
+                    }
+                }
+            }
+            if (active !== holder) return
+            publish(DictationState.Listening(sessionId, connecting = true))
             val resolution = when (val resolved = host.resolveSession(holder.metrics)) {
                 is SessionResolve.Failed -> {
                     fail(holder, resolved.failure)
@@ -366,23 +385,12 @@ class DictationCoordinator(
                     throw e
                 }
             }
-            // Release F4: capture starts immediately on the accepted tap, before
-            // network readiness; cold-session PCM goes into a bounded pre-ready
-            // buffer until the session is ready.
-            when (val outcome = host.startCapture(holder.metrics)) {
-                is CaptureStart.Failed -> {
-                    fail(holder, outcome.failure)
-                    return
-                }
-                is CaptureStart.Started -> {
-                    holder.capture = outcome.capture
-                    holder.captureFailureJob = scope.launch {
-                        outcome.capture.failures.collect { failure -> onCaptureFailure(holder, failure) }
-                    }
-                }
-            }
             if (active !== holder) return
-            publish(DictationState.Listening(sessionId, connecting = !resolution.ready))
+            // A warm (already connected) session is not "connecting".
+            val state = lastPublished
+            if (state is DictationState.Listening && state.sessionId == holder.sessionId) {
+                publish(state.copy(connecting = !resolution.ready))
+            }
             val ready = CompletableDeferred<Unit>()
             holder.readyJob = scope.launch { awaitReadyAndStart(holder, ready) }
             holder.audioJob = scope.launch { streamAudio(holder, ready) }

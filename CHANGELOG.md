@@ -4,6 +4,40 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-08-12
+
+> **Instant recording start + latency overhaul** — tapping the bubble starts
+> recording immediately (the Bluetooth source no longer blocks capture for up to
+> 2 seconds when no headset is present), and finalization latency drops on every
+> dictation. Long-dictation echo time is cut via segmented activities behind an
+> experimental setting.
+
+- **Tap-to-record (`audio`, `runtime`)** — capture starts on the tap before
+  session resolution, and the overlay shows Listening as soon as the mic is hot
+  (`capture -> resolveSession`, not the reverse). The Bluetooth SCO path skips
+  its poll loop entirely when no bluetooth audio device is present and reduces
+  the wait budget 2 s → 400 ms. Warm-prewarm no longer requires a visible
+  keyboard, and the disk-reading `hasKey` check no longer runs during an active
+  dictation.
+- **Transcription correctness (`core`)** — the streamed-echo accumulator no
+  longer misclassifies a mid-stream correction as new content once the text
+  passes 4 words; duplicate-tail insertions are fixed.
+- **Settlement timing (`runtime`)** — settle debounce reduced 600 → 250 ms,
+  and the next dictation starts immediately after a successful insert instead
+  of waiting out the 1.2 s idle timer.
+- **Segmented activities (`experimental`, off by default)** — the recording is
+  split at pauses so the model echoes each segment while the user keeps talking;
+  only the last segment is outstanding at STOP. Enables with a setting; requires
+  on-device validation.
+- **Main-thread hygiene (`audio`, `data`)** — `AudioRecord.stop()/release()`
+  move off the main thread; the history-blob write moves to `Dispatchers.IO`;
+  the finalize audio-drain join is bounded.
+
+> **Device-pending:** overlay, insertion, and audio-timing changes in this
+> release are validated by JVM tests and a clean build only. Confirm on a
+> physical device per `docs/TESTING.md` and read `SESSION DONE tapToCapture=
+> … stopToSettled=` before trusting the latency numbers.
+
 ## [0.5.8] - 2026-08-08
 
 > **More polished dictation + clipboard fallback** — the Medium and High

@@ -424,12 +424,16 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         )
     }
 
-    /** Release F2: prewarm only while every eligibility condition holds. */
+    /** Release F2: prewarm only while every eligibility condition holds.
+     *  [keyProvider.hasKey] reads the key blob from disk, so it runs last and
+     *  only when the in-memory conditions already pass — and never during an
+     *  active dictation, when prewarm is impossible anyway. */
     private fun computeWarmEligibility(): Boolean {
         val e = _eligibility.value
         return e.serviceConnected && e.editorFocused && !e.editorSecure && !e.editorUncertain &&
-            e.keyboardVisible && e.microphoneGranted && cachedAppEnabled &&
-            keyProvider.hasKey() && !coordinator.isActive
+            e.microphoneGranted && cachedAppEnabled &&
+            !coordinator.isActive &&
+            keyProvider.hasKey()
     }
 
     private fun refreshWarmEligibility() {

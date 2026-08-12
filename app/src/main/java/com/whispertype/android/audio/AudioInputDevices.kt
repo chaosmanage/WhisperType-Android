@@ -33,6 +33,13 @@ class AudioInputDevices(private val audioManager: AudioManager) {
         return inputDevices().firstOrNull { it.id == chosen.id }
     }
 
+    /** True when any bluetooth audio device (input or output) is currently present.
+     *  Used to skip the SCO bring-up entirely when no headset exists at all. */
+    fun hasBluetoothAudioDevice(): Boolean =
+        listAll().any {
+            it.type == InputDeviceType.BLUETOOTH_SCO || it.type == InputDeviceType.BLUETOOTH_A2DP
+        }
+
     private fun inputDevices(): List<AudioDeviceInfo> =
         audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).toList()
 
@@ -106,6 +113,14 @@ private class ScoCaptureSource(
 
     /** Activates SCO and returns [this] when the headset mic is ready, else null. */
     fun build(): PcmSource? {
+        // Tap-to-recording fix (0.6.x): with no bluetooth audio device present
+        // there is nothing to connect to, so fall back to the phone mic
+        // immediately instead of waiting out the SCO poll loop (which previously
+        // blocked capture start for up to 2 s when no headset was connected).
+        if (!AudioInputDevices(audioManager).hasBluetoothAudioDevice()) {
+            Log.i(TAG, "Bluetooth source: no bluetooth audio device present; using phone mic")
+            return null
+        }
         val modeOk = runCatching { audioManager.mode = AudioManager.MODE_IN_COMMUNICATION }.isSuccess
         if (!modeOk) return null
         val scoRequested = runCatching { audioManager.startBluetoothSco() }.isSuccess
@@ -160,6 +175,6 @@ private class ScoCaptureSource(
     private companion object {
         const val TAG = "AudioInput"
         const val SCO_POLL_MS = 100L
-        const val SCO_MAX_WAIT_MS = 2_000L
+        const val SCO_MAX_WAIT_MS = 400L
     }
 }
