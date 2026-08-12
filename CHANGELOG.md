@@ -4,6 +4,26 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-08-12
+
+> **Long-dictation truncation fix** — the app was settling before the model
+> finished speaking its reply, cutting long dictations down to a fragment. It now
+> waits for the generation to actually end.
+
+- **No settlement while generation is in flight (`runtime`)** — settlement no
+  longer fires after a short echo gap. The echo quiet window is 900 ms (above the
+  measured 300–600 ms gaps of the streaming reply) and, when the server sends no
+  completion signal, a 2500 ms stall backstop ends the reply. `turnComplete` /
+  `generationComplete` end the wait early; an interrupted generation re-arms it.
+  This is the fix for "long texts randomly become two words": the reply is never
+  cut off mid-sentence again.
+- **Explicit output budget (`gemini`)** — `maxOutputTokens = 8192` is sent in the
+  setup so an unknown server-side output cap cannot truncate a long spoken reply.
+
+> **Trade-off:** finalization is ~650 ms slower when a completion signal arrives
+> and up to ~2.5 s when the server sends none — the deliberate price of never
+> truncating. **Settings → Segment at pauses** is what buys the latency back.
+
 ## [0.6.1] - 2026-08-12
 
 > **Long-dictation reliability + finalization fixes** — a long dictation whose
