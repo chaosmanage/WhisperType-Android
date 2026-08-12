@@ -1056,6 +1056,56 @@ class DictationCoordinatorTest {
     }
 
     @Test
+    fun `echo-disabled session settles on the raw ASR right after quiet elapses`() = runTest {
+        // 0.6.0 NONE/LOW instant path: no output echo is configured, so the raw
+        // ASR is the dictation source and settlement needs no echo-fallback wait.
+        val host = FakeHost()
+        host.resolveResult = SessionResolve.Ok(
+            SessionResolution(host.session, LanguageMode.ENGLISH, echoEnabled = false),
+        )
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "the birch canoe slid on the smooth planks")
+        advanceTimeBy(249)
+        assertTrue(host.insertions.isEmpty(), "must still wait for the quiet debounce")
+        advanceTimeBy(2)
+        runCurrent()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("the birch canoe slid on the smooth planks", host.insertions[0].second)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `echo-disabled session inserts raw even when no echo will ever arrive`() = runTest {
+        val host = FakeHost()
+        host.resolveResult = SessionResolve.Ok(
+            SessionResolution(host.session, LanguageMode.ENGLISH, echoEnabled = false),
+        )
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        // The server sends only inputTranscription (echo channel disabled).
+        sendTranscript(host, "please order a large pepperoni")
+        advanceTimeBy(300)
+        runCurrent()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("please order a large pepperoni", host.insertions[0].second)
+        assertEquals(SettlePath.RAW_ONLY, coordinator.activeMetrics()!!.settlePath)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
     fun `echo absent falls back to raw input after the echo-fallback window`() = runTest {
         val host = FakeHost()
         val coordinator = coordinator(this, host) // echoFallbackWaitMs default 2000

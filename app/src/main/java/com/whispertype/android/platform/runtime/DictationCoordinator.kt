@@ -86,11 +86,14 @@ sealed interface SessionResolve {
 }
 
 /** A created Live session plus the language it should stamp on candidates.
- *  [ready] is true when the session was already connected (warm claim). */
+ *  [ready] is true when the session was already connected (warm claim).
+ *  [echoEnabled] is false when the session was configured without the output
+ *  echo (NONE/LOW polish), in which case settlement uses the raw ASR only. */
 data class SessionResolution(
     val session: GeminiLiveSession,
     val language: LanguageMode,
     val ready: Boolean = false,
+    val echoEnabled: Boolean = true,
 )
 
 /** Outcome of [DictationHost.startCapture]. */
@@ -114,6 +117,10 @@ private class ActiveLiveSession(
 ) {
     var session: GeminiLiveSession? = null
     var capture: AudioPipeline? = null
+
+    /** True when the session is configured to emit the output echo. NONE/LOW
+     *  polish turns the echo off and settles on the raw ASR (0.6.0). */
+    var echoEnabled: Boolean = true
     var sessionJob: Job? = null
     var eventJob: Job? = null
     var readyJob: Job? = null
@@ -396,6 +403,7 @@ class DictationCoordinator(
             }
             holder.session = resolution.session
             holder.language = resolution.language
+            holder.echoEnabled = resolution.echoEnabled
             // Event collector installed as soon as the session exists, before
             // awaiting readiness, so setup failures/closure are processed promptly.
             holder.eventJob = scope.launch {
@@ -813,6 +821,10 @@ class DictationCoordinator(
             holder.generationCompleteSeen -> SettlementReason.GENERATION_COMPLETE_QUIET
             holder.echoAccumulator.settledText()?.isNotBlank() == true ->
                 SettlementReason.ECHO_DEBOUNCE
+            // NONE/LOW polish runs without the echo; settle on the raw ASR as
+            // soon as quiet elapses (0.6.0).
+            !holder.echoEnabled && holder.accumulator.settledText()?.isNotBlank() == true ->
+                SettlementReason.RAW_FALLBACK_TIMEOUT
             holder.sourceMissingGraceElapsed &&
                 holder.accumulator.settledText()?.isNotBlank() == true ->
                 SettlementReason.RAW_FALLBACK_TIMEOUT
@@ -843,6 +855,12 @@ class DictationCoordinator(
      *   - nothing -> null.
      */
     private fun selectSettledText(holder: ActiveLiveSession): Pair<String, SettlePath>? {
+        // NONE/LOW polish: no echo channel exists, so the raw ASR is the source.
+        if (!holder.echoEnabled) {
+            return holder.accumulator.settledText()
+                ?.takeIf { it.isNotBlank() }
+                ?.let { it to SettlePath.RAW_ONLY }
+        }
         val echo = holder.echoAccumulator.settledText()?.takeIf { it.isNotBlank() }
         val raw = holder.accumulator.settledText()?.takeIf { it.isNotBlank() }
         // 0.5.0 Hinglish: the raw ASR for Hindi is always Devanagari (never

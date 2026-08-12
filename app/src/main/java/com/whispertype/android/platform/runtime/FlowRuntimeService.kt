@@ -56,9 +56,12 @@ import com.whispertype.android.platform.gemini.GeminiLiveException
 import com.whispertype.android.platform.gemini.GeminiSessionConfig
 import com.whispertype.android.platform.gemini.GeminiSessionFactory
 import com.whispertype.android.platform.gemini.WarmLiveSessionManager
+import com.whispertype.android.platform.gemini.WarmSessionClaim
+import com.whispertype.android.platform.gemini.WarmSessionProfile
 import com.whispertype.android.platform.ipc.RuntimeIpc
 import com.whispertype.android.platform.overlay.OverlayOwners
 import com.whispertype.android.platform.overlay.PersistentOverlayHost
+import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -141,8 +144,13 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         ),
     )
 
-    /** Eligibility-driven warm Live session pool (Release F). */
-    private val warmManager = WarmLiveSessionManager(scope, createSession = { createColdSession() })
+    /** Eligibility- and profile-driven warm Live session pool (Release F3). A
+     *  profile mismatch (polish level, language, or echo setting changed) never
+     *  reuses a stale warm session. */
+    private val warmManager = WarmLiveSessionManager.profiled(
+        scope,
+        createSession = { profile -> createColdSession(profile) },
+    )
 
     // Eager in-memory runtime-settings snapshot (Release D2): collected once at
     // service scope so the tap path never does sequential DataStore first() reads.
@@ -361,13 +369,26 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
 
     override suspend fun resolveSession(metrics: MutableSessionMetrics): SessionResolve {
         metrics.mark(MutableSessionMetrics.Event.KeyLoadStarted)
-        // Prefer a warm (preconnected) session so the tap skips cold setup.
-        val warm = warmManager.claim()
-        if (warm != null) {
-            metrics.mark(MutableSessionMetrics.Event.KeyLoaded)
-            metrics.mark(MutableSessionMetrics.Event.SettingsReady)
-            metrics.mark(MutableSessionMetrics.Event.SocketCreated)
-            return SessionResolve.Ok(SessionResolution(session = warm, language = cachedSpeechMode, ready = true))
+        val profile = warmProfile()
+        // Prefer a warm (preconnected) session whose exact profile matches the
+        // current settings; a stale polish/language/echo warm session is never
+        // reused (0.6.0).
+        when (val claim = warmManager.claim(profile)) {
+            is WarmSessionClaim.Hit -> {
+                metrics.mark(MutableSessionMetrics.Event.KeyLoaded)
+                metrics.mark(MutableSessionMetrics.Event.SettingsReady)
+                metrics.mark(MutableSessionMetrics.Event.SocketCreated)
+                val lease = claim.lease
+                return SessionResolve.Ok(
+                    SessionResolution(
+                        session = lease.session,
+                        language = lease.profile.language,
+                        ready = true,
+                        echoEnabled = lease.profile.outputAudioTranscription,
+                    ),
+                )
+            }
+            is WarmSessionClaim.Miss -> Unit // cold connect below
         }
         val key = withContext(Dispatchers.IO) { keyProvider.provideKey() }
         metrics.mark(MutableSessionMetrics.Event.KeyLoaded)
@@ -380,16 +401,20 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                 ),
             )
         }
-        val language = cachedSpeechMode
-        val model = GeminiSessionFactory.DEFAULT_MODEL
+        val language = profile.language
+        val model = profile.model
         metrics.mark(MutableSessionMetrics.Event.SettingsReady)
         metrics.mark(MutableSessionMetrics.Event.SocketCreated)
         val session = GeminiSessionFactory.create(
             apiKey = key,
             config = GeminiSessionConfig(
                 model = model,
+                apiVersion = profile.apiVersion,
                 language = language,
                 systemInstruction = language.liveInstruction(cachedPolishLevel),
+                automaticActivityDetectionDisabled = profile.automaticActivityDetectionDisabled,
+                inputAudioTranscription = profile.inputAudioTranscription,
+                outputAudioTranscription = profile.outputAudioTranscription,
                 // Release B production protocol: manual activity signaling
                 // (automaticActivityDetection disabled by default) and no text
                 // prime. The systemInstruction carries the polish level and (for
@@ -398,11 +423,20 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             client = sharedOkHttpClient,
             metrics = metrics,
         )
-        return SessionResolve.Ok(SessionResolution(session = session, language = language, ready = false))
+        return SessionResolve.Ok(
+            SessionResolution(
+                session = session,
+                language = language,
+                ready = false,
+                echoEnabled = profile.outputAudioTranscription,
+            ),
+        )
     }
 
-    /** Cold session construction shared by the live path and the warm pool. */
-    private suspend fun createColdSession(): com.whispertype.android.core.contracts.GeminiLiveSession {
+    /** Cold session construction shared by the live path and the warm pool.
+     *  The exact [profile] (language, echo setting, activity signaling) shapes
+     *  the session so a warm session is never reused under different settings. */
+    private suspend fun createColdSession(profile: WarmSessionProfile): com.whispertype.android.core.contracts.GeminiLiveSession {
         val key = withContext(Dispatchers.IO) { keyProvider.provideKey() }
             ?: throw GeminiLiveException(
                 DictationFailure(
@@ -411,17 +445,49 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                     recoverable = true,
                 ),
             )
-        val language = cachedSpeechMode
-        val model = GeminiSessionFactory.DEFAULT_MODEL
         return GeminiSessionFactory.create(
             apiKey = key,
             config = GeminiSessionConfig(
-                model = model,
-                language = language,
-                systemInstruction = language.liveInstruction(cachedPolishLevel),
+                model = profile.model,
+                apiVersion = profile.apiVersion,
+                language = profile.language,
+                systemInstruction = profile.language.liveInstruction(cachedPolishLevel),
+                automaticActivityDetectionDisabled = profile.automaticActivityDetectionDisabled,
+                inputAudioTranscription = profile.inputAudioTranscription,
+                outputAudioTranscription = profile.outputAudioTranscription,
             ),
             client = sharedOkHttpClient,
         )
+    }
+
+    /** The exact session configuration a warm pool entry must match. */
+    private fun warmProfile(): WarmSessionProfile {
+        val language = cachedSpeechMode
+        val style = cachedPolishLevel
+        return WarmSessionProfile(
+            model = GeminiSessionFactory.DEFAULT_MODEL,
+            apiVersion = GeminiSessionConfig.DEFAULT_API_VERSION,
+            language = language,
+            polishInstructionHash = stableInstructionHash(language, style),
+            automaticActivityDetectionDisabled = true,
+            inputAudioTranscription = true,
+            outputAudioTranscription = echoEnabledFor(language, style),
+            credentialRevision = 0L,
+        )
+    }
+
+    /** The echo (outputTranscription) is the polish pipeline for MEDIUM/HIGH and
+     *  for Hinglish (Latin script). NONE/LOW get the raw ASR directly (0.6.0),
+     *  which the Live ASR already punctuates — settling it is ~0.7 s flat. */
+    private fun echoEnabledFor(language: LanguageMode, style: TranscriptionStyle): Boolean =
+        language == LanguageMode.HINGLISH ||
+            (style != TranscriptionStyle.NONE && style != TranscriptionStyle.LOW)
+
+    /** Stable, non-secret digest of the systemInstruction for warm-profile match. */
+    private fun stableInstructionHash(language: LanguageMode, style: TranscriptionStyle): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(language.liveInstruction(style).toByteArray())
+        return digest.joinToString("") { "%02x".format(it) }
     }
 
     /** Release F2: prewarm only while every eligibility condition holds.
@@ -437,7 +503,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     }
 
     private fun refreshWarmEligibility() {
-        warmManager.onEligibilityChanged(computeWarmEligibility())
+        warmManager.onEligibilityChanged(computeWarmEligibility(), warmProfile())
     }
 
     override suspend fun startCapture(metrics: MutableSessionMetrics): CaptureStart {
