@@ -1152,6 +1152,110 @@ class DictationCoordinatorTest {
         advanceUntilIdle()
     }
 
+    // ------------------------------------------------------------------
+    // 0.6.1: long-dictation fragment guard
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `long recording with a tiny transcript fails with a fragment error instead of inserting`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        // One 30 s "frame" drives the captured duration to 30 s.
+        host.capture.chunksChannel.send(chunk(0, frameMillis = 30_000))
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        // A 2-word transcript for a 30 s recording is a condensed echo fragment.
+        // Echo never arrives, so the raw fallback settles after the 2 s grace.
+        sendTranscript(host, "yes okay")
+        advanceTimeBy(2_500)
+        runCurrent()
+
+        assertTrue(host.insertions.isEmpty(), "a fragment must never be inserted")
+        val error = states(host).filterIsInstance<DictationState.Error>().last()
+        assertEquals("gemini_transcript_fragment", error.failure.code)
+        assertTrue(error.failure.retryAllowed)
+        coordinator.dismiss()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `short recording with a short transcript inserts normally`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        host.capture.chunksChannel.send(chunk(0, frameMillis = 1_000))
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "yes okay")
+        advanceTimeBy(2_500)
+        runCurrent()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("yes okay", host.insertions[0].second)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `long recording that settles on a genuinely long transcript still inserts`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        host.capture.chunksChannel.send(chunk(0, frameMillis = 30_000))
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        // A complete, appropriately long transcript passes the fragment guard.
+        val full = "the quick brown fox jumps over the lazy dog and runs to the river " +
+            "where it drinks water and rests under a tall tree for a while"
+        sendTranscript(host, full)
+        advanceTimeBy(2_500)
+        runCurrent()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals(full, host.insertions[0].second)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `hinglish repair failure on a long recording surfaces a fragment error`() = runTest {
+        val host = FakeHost()
+        host.resolveResult = SessionResolve.Ok(
+            SessionResolution(host.session, LanguageMode.HINGLISH),
+        )
+        host.transliterateResult = null // the Devanagari -> Latin repair fails
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        host.capture.chunksChannel.send(chunk(0, frameMillis = 30_000))
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        // Tiny Latin echo + Devanagari raw; the repair fails, leaving only a
+        // fragment. Never inserted.
+        sendEcho(host, "yes")
+        sendTranscript(host, "हाँ")
+        advanceTimeBy(300)
+        runCurrent()
+
+        assertTrue(host.insertions.isEmpty(), "a Hinglish fragment must never be inserted")
+        val error = states(host).filterIsInstance<DictationState.Error>().last()
+        assertEquals("gemini_transcript_fragment", error.failure.code)
+        coordinator.dismiss()
+        advanceUntilIdle()
+    }
+
     @Test
     fun `echo absent falls back to raw input after the echo-fallback window`() = runTest {
         val host = FakeHost()

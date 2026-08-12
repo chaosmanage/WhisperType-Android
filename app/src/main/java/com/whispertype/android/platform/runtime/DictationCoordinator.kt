@@ -953,12 +953,19 @@ class DictationCoordinator(
                 // provisional fragment at the hard deadline).
                 val diagnosis = candidate?.let { selector.diagnose(listOf(it)) }
                 holder.metrics.lastRejection = diagnosis?.rule?.name
-                if (candidate != null && lenientAccept(holder, candidate, diagnosis)) {
+                if (candidate != null &&
+                    lenientAccept(holder, candidate, diagnosis) &&
+                    !isFragmentForDuration(holder, candidate.raw)
+                ) {
                     holder.metrics.usedLenientFallback = true
                     holder.settledText = candidate.raw
                     insertSettled(holder, candidate.raw)
                 } else {
-                    failNoTranscript(holder)
+                    if (candidate != null && isFragmentForDuration(holder, candidate.raw)) {
+                        failFragment(holder)
+                    } else {
+                        failNoTranscript(holder)
+                    }
                 }
             }
             is TranscriptSelection.Cleaned, is TranscriptSelection.Raw -> {
@@ -966,6 +973,13 @@ class DictationCoordinator(
                 // rejected rather than silently inserted.
                 if (holder.metrics.usedHardDeadline && isClearlyProvisional(selection.text)) {
                     failNoTranscript(holder)
+                    return
+                }
+                // 0.6.1: a long recording that settled on a tiny transcript is a
+                // failed dictation (the echo condensed and could not be recovered);
+                // never insert the fragment silently.
+                if (isFragmentForDuration(holder, selection.text)) {
+                    failFragment(holder)
                     return
                 }
                 holder.settledText = selection.text
@@ -996,6 +1010,11 @@ class DictationCoordinator(
             echoComplete -> {
                 holder.metrics.settlePath =
                     if (raw != null) SettlePath.ECHO_COMPLETE else SettlePath.ECHO_ONLY
+                // 0.6.1: never silently insert a fragment for a long recording.
+                if (isFragmentForDuration(holder, echo)) {
+                    failFragment(holder)
+                    return
+                }
                 holder.settledText = echo
                 insertSettled(holder, echo)
             }
@@ -1015,11 +1034,15 @@ class DictationCoordinator(
                     }
                     if (active !== holder) return@launch
                     val final = latin?.takeIf { it.isNotBlank() } ?: echo
-                    if (final == null) {
-                        failNoTranscript(holder)
-                    } else {
-                        holder.settledText = final
-                        insertSettled(holder, final)
+                    when {
+                        final == null -> failNoTranscript(holder)
+                        // 0.6.1: the repair failed and all that remains is a
+                        // fragment — surface a retry instead of inserting it.
+                        isFragmentForDuration(holder, final) -> failFragment(holder)
+                        else -> {
+                            holder.settledText = final
+                            insertSettled(holder, final)
+                        }
                     }
                 }
             }
@@ -1083,6 +1106,29 @@ class DictationCoordinator(
             DictationFailure(
                 code = "gemini_no_transcript",
                 message = "No transcript could be recognized. Try again.",
+                recoverable = true,
+                retryAllowed = true,
+            ),
+        )
+    }
+
+    /** 0.6.1: a long recording whose settled text is far too short to be the
+     *  whole dictation (the echo condensed and the repair could not recover it).
+     *  Such a fragment is never inserted — the user retries instead. */
+    private fun isFragmentForDuration(holder: ActiveLiveSession, text: String): Boolean {
+        if (holder.capturedAudioDurationMs < FRAGMENT_MIN_RECORDING_MS) return false
+        val words = TranscriptCompleteness.contentWords(text).size
+        val expected = TranscriptCompleteness.expectedWords(holder.capturedAudioDurationMs)
+        return expected > 0 && words < expected * FRAGMENT_MIN_RATIO
+    }
+
+    private fun failFragment(holder: ActiveLiveSession) {
+        holder.metrics.recordTerminalOutcome(TerminalOutcome.NO_RELIABLE_TRANSCRIPT)
+        fail(
+            holder,
+            DictationFailure(
+                code = "gemini_transcript_fragment",
+                message = "The dictation was too long to transcribe fully. Try again.",
                 recoverable = true,
                 retryAllowed = true,
             ),
@@ -1249,6 +1295,14 @@ class DictationCoordinator(
     companion object {
         /** Auto-stop watcher sampling interval (pure elapsed-time tick). */
         const val AUTO_STOP_CHECK_MS = 200L
+
+        /** 0.6.1: recordings under this are never judged as "fragments" — short
+         *  genuine utterances always pass. */
+        const val FRAGMENT_MIN_RECORDING_MS = 5_000L
+
+        /** 0.6.1: a settled transcript below this fraction of the words expected
+         *  from the captured duration is a failed long dictation, never inserted. */
+        const val FRAGMENT_MIN_RATIO = 0.3
 
         /** Placeholder target used while the accessibility process resolves the real one. */
         fun EMPTY_TARGET(sessionId: SessionId): TargetSnapshot = TargetSnapshot(
