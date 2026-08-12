@@ -339,6 +339,27 @@ class OkHttpGeminiLiveSessionTest {
     }
 
     @Test
+    fun `a completed activity can be reopened for the next segment`() = runBlocking {
+        // 0.6.0 experimental segmentation: endActivity is followed by a second
+        // startActivity (manual activity signaling is a repeated cycle), after
+        // which audio flows again.
+        val session = newSession()
+        session.awaitReady()
+        session.startActivity()
+        session.endActivity()
+        awaitMessages { countMessages(serverSocket.clientMessages, "activityEnd") == 1 }
+
+        assertEquals(SendResult.Accepted, session.startActivity())
+        awaitMessages { countMessages(serverSocket.clientMessages, "activityStart") == 2 }
+
+        val chunk = AudioChunk(3, byteArrayOf(1, 2), sampleRateHz = 16_000)
+        assertEquals(SendResult.Accepted, session.sendAudio(chunk))
+        assertEquals(SendResult.Accepted, session.endActivity())
+        awaitMessages { countMessages(serverSocket.clientMessages, "activityEnd") == 2 }
+        session.close()
+    }
+
+    @Test
     fun `automatic VAD session uses audioStreamEnd completion instead of activity boundaries`() = runBlocking {
         val session = newSession(GeminiSessionConfig(model = "test-model", automaticActivityDetectionDisabled = false))
         session.awaitReady()

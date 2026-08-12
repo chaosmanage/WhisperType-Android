@@ -990,6 +990,53 @@ class DictationCoordinatorTest {
     }
 
     @Test
+    fun `segmentation closes and reopens the activity at a pause`() = runTest {
+        // 0.6.0 experimental: with segmentAtSilence on, a quiet pause closes the
+        // current activity and reopens it so the model echoes the segment while
+        // the user keeps talking.
+        val host = FakeHost()
+        val coordinator = coordinator(
+            this,
+            host,
+            DictationCoordinator.Config(segmentAtSilence = { true }, segmentSilenceMs = 700),
+        )
+        coordinator.start()
+        runCurrent()
+        advanceTimeBy(1)
+        assertIs<DictationState.Listening>(states(host).last())
+        assertEquals(listOf("start"), host.session.wireCalls)
+
+        // Speak (no silence), then pause for >= 700ms.
+        host.capture.setAmplitude(0.5f)
+        advanceTimeBy(1_000)
+        host.capture.setAmplitude(0f)
+        advanceTimeBy(800)
+        runCurrent()
+
+        assertEquals(listOf("start", "end", "start"), host.session.wireCalls)
+        coordinator.cancel()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `segmentation does not fire without the setting or during speech`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host) // segmentAtSilence default false
+        coordinator.start()
+        runCurrent()
+        advanceTimeBy(1)
+        assertIs<DictationState.Listening>(states(host).last())
+
+        host.capture.setAmplitude(0f)
+        advanceTimeBy(2_000)
+        runCurrent()
+
+        assertEquals(listOf("start"), host.session.wireCalls, "no activity reopen without the setting")
+        coordinator.cancel()
+        advanceUntilIdle()
+    }
+
+    @Test
     fun `onSessionFinished carries the settled transcript`() = runTest {
         val host = FakeHost()
         val coordinator = coordinator(this, host)
@@ -1407,7 +1454,7 @@ class DictationCoordinatorTest {
             config = DictationCoordinator.Config(
                 insertionResultTimeoutMs = 500,
                 returnToIdleMs = 1_000,
-            ),
+            ).withTestShutdownDispatcher(this),
             metricsFactory = { sessionId ->
                 MutableSessionMetrics(sessionId) { testScheduler.currentTime * 1_000_000L }
             },

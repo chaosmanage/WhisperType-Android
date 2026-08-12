@@ -31,6 +31,10 @@ class GeminiSessionConfig(
      *  push-to-talk, so manual activity signaling is the preferred production
      *  design. */
     val automaticActivityDetectionDisabled: Boolean = true,
+    /** 0.6.0 experimental: when true, setup declares
+     *  `realtimeInputConfig.activityHandling = NO_INTERRUPTION` so a new activity
+     *  (segment) does not cut off the model echoing the previous segment. */
+    val activityHandlingNoInterruption: Boolean = false,
     /** Optional instruction the model applies for the whole session. */
     val systemInstruction: String? = null,
     /** Input PCM16 sample rate advertised in the audio mime type. */

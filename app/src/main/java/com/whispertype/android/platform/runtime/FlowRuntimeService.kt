@@ -141,6 +141,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         config = DictationCoordinator.Config(
             autoStopSeconds = { cachedAutoStopSeconds.toLong() },
             maxRecordingSeconds = { cachedAutoStopSeconds.toLong() },
+            segmentAtSilence = { cachedSegmentAtSilence },
         ),
     )
 
@@ -168,6 +169,10 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
 
     @Volatile
     private var cachedAutoStopSeconds: Int = SettingsRepository.DEFAULT_AUTO_STOP_SECONDS
+
+    /** 0.6.0 experimental: split the recording at pauses (off by default). */
+    @Volatile
+    private var cachedSegmentAtSilence: Boolean = false
 
     /** 0.6.0: recording input device (phone mic unless Bluetooth is selected). */
     @Volatile
@@ -251,6 +256,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         scope.launch { settings.historyRetentionDays.collect { cachedHistoryRetentionDays = it } }
         scope.launch { settings.polishLevel.collect { cachedPolishLevel = it } }
         scope.launch { settings.autoStopSeconds.collect { cachedAutoStopSeconds = it } }
+        scope.launch { settings.segmentAtSilence.collect { cachedSegmentAtSilence = it } }
         scope.launch { settings.audioSourcePreference.collect { cachedAudioSourcePreference = it } }
         scope.launch { settings.dictionary.collect { cachedDictionary = it } }
         scope.launch { settings.bubbleX.collect { cachedBubbleX = it } }
@@ -413,6 +419,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                 language = language,
                 systemInstruction = language.liveInstruction(cachedPolishLevel),
                 automaticActivityDetectionDisabled = profile.automaticActivityDetectionDisabled,
+                activityHandlingNoInterruption = profile.activityHandlingNoInterruption,
                 inputAudioTranscription = profile.inputAudioTranscription,
                 outputAudioTranscription = profile.outputAudioTranscription,
                 // Release B production protocol: manual activity signaling
@@ -453,6 +460,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                 language = profile.language,
                 systemInstruction = profile.language.liveInstruction(cachedPolishLevel),
                 automaticActivityDetectionDisabled = profile.automaticActivityDetectionDisabled,
+                activityHandlingNoInterruption = profile.activityHandlingNoInterruption,
                 inputAudioTranscription = profile.inputAudioTranscription,
                 outputAudioTranscription = profile.outputAudioTranscription,
             ),
@@ -470,6 +478,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             language = language,
             polishInstructionHash = stableInstructionHash(language, style),
             automaticActivityDetectionDisabled = true,
+            activityHandlingNoInterruption = cachedSegmentAtSilence,
             inputAudioTranscription = true,
             outputAudioTranscription = echoEnabledFor(language, style),
             credentialRevision = 0L,

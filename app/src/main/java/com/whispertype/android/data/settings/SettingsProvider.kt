@@ -36,6 +36,11 @@ interface SettingsProvider {
     /** 0.4.2: seconds of idle before the bubble auto-minimizes to the mini dot. */
     val miniDotDelaySeconds: Flow<Int>
 
+    /** 0.6.0 experimental: split the recording at pauses so the model echoes
+     *  each segment while the user keeps talking. Default off; requires
+     *  on-device validation. */
+    val segmentAtSilence: Flow<Boolean>
+
     /**
      * 0.5.2: records that the accessibility service has connected at least once.
      * Internal watchdog gate so the "service dropped" notification is never shown

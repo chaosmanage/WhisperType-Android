@@ -136,6 +136,8 @@
     <!-- 0.4.0 settings: auto-stop, polish, dictionary, history, bubble -->
     <string name="settings_auto_stop">Auto-stop timeout</string>
     <string name="settings_auto_stop_desc">Stop automatically after silence or the maximum recording time.</string>
+    <string name="settings_segment_at_silence">Segment at pauses</string>
+    <string name="settings_segment_at_silence_desc">Experimental. Ends the utterance at each pause so the model echoes that segment while you keep talking. Faster finalization for long dictations; verify on device before relying on it.</string>
     <string name="auto_stop_15s">15 seconds</string>
     <string name="auto_stop_30s">30 seconds</string>
     <string name="auto_stop_60s">60 seconds</string>

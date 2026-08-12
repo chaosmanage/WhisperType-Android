@@ -69,6 +69,24 @@ class GeminiLiveWireTest {
     }
 
     @Test
+    fun `buildSetup declares activityHandling NO_INTERRUPTION for segmentation`() {
+        val segmented = GeminiSessionConfig(model = "m", activityHandlingNoInterruption = true)
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(segmented)).jsonObject
+        val realtime = root["setup"]!!.jsonObject["realtimeInputConfig"]!!.jsonObject
+        assertEquals(
+            "NO_INTERRUPTION",
+            realtime["activityHandling"]!!.jsonPrimitive.content,
+        )
+    }
+
+    @Test
+    fun `buildSetup omits activityHandling when segmentation is off`() {
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(GeminiSessionConfig(model = "m"))).jsonObject
+        val realtime = root["setup"]!!.jsonObject["realtimeInputConfig"]!!.jsonObject
+        assertFalse(realtime.containsKey("activityHandling"))
+    }
+
+    @Test
     fun `buildSetup includes outputAudioTranscription by default`() {
         val bare = GeminiSessionConfig(model = "m")
         val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(bare)).jsonObject

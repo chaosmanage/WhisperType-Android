@@ -118,7 +118,29 @@ class OkHttpGeminiLiveSession(
                 SendResult.Accepted
             }
             State.ActivityStarted -> SendResult.Accepted // duplicate start: no second wire message
-            State.ActivityEnded -> SendResult.Rejected(REASON_ACTIVITY_ENDED)
+            // 0.6.0 experimental segmentation: a completed activity is reopened
+            // for the next segment (manual activity signaling is a repeated
+            // start/end cycle, not single-shot).
+            State.ActivityEnded -> {
+                val ws = socket
+                if (ws == null) {
+                    state.compareAndSet(State.ActivityEnded, State.Closed)
+                    return@synchronized SendResult.Rejected(REASON_CLOSED)
+                }
+                if (config.automaticActivityDetectionDisabled) {
+                    if (!sendTextFrame(ws, GeminiLiveWire.buildActivityStart())) {
+                        state.set(State.Closed)
+                        return@synchronized SendResult.Rejected(REASON_CLOSED)
+                    }
+                }
+                if (!state.compareAndSet(State.ActivityEnded, State.ActivityStarted)) {
+                    return@synchronized sendResultFor(state.get())
+                }
+                if (config.automaticActivityDetectionDisabled) {
+                    metrics?.mark(MutableSessionMetrics.Event.ActivityStartQueued)
+                }
+                SendResult.Accepted
+            }
             State.Closed -> SendResult.Rejected(REASON_CLOSED)
         }
     }

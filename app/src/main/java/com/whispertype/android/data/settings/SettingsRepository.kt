@@ -50,6 +50,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         val bubbleOpacityPercent = intPreferencesKey("bubble_opacity_percent")
         val miniDotEnabled = booleanPreferencesKey("mini_dot_enabled")
         val miniDotDelaySeconds = intPreferencesKey("mini_dot_delay_seconds")
+        val segmentAtSilence = booleanPreferencesKey("segment_at_silence")
         val a11yHasConnectedOnce = booleanPreferencesKey("a11y_has_connected_once")
         val darkMode = booleanPreferencesKey("dark_mode")
         val hotkeyKeycode = intPreferencesKey(SettingsRepository.KEY_HOTKEY_KEYCODE)
@@ -109,6 +110,9 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     override val miniDotDelaySeconds: Flow<Int> =
         dataStore.data.map { (it[Keys.miniDotDelaySeconds] ?: DEFAULT_MINI_DOT_DELAY_SECONDS).coerceIn(MIN_MINI_DOT_DELAY_SECONDS, MAX_MINI_DOT_DELAY_SECONDS) }
+
+    override val segmentAtSilence: Flow<Boolean> =
+        dataStore.data.map { it[Keys.segmentAtSilence] ?: false }
 
     override val darkMode: Flow<Boolean> =
         dataStore.data.map { it[Keys.darkMode] ?: false }
@@ -200,6 +204,10 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     suspend fun setMiniDotEnabled(enabled: Boolean) {
         dataStore.edit { it[Keys.miniDotEnabled] = enabled }
+    }
+
+    suspend fun setSegmentAtSilence(enabled: Boolean) {
+        dataStore.edit { it[Keys.segmentAtSilence] = enabled }
     }
 
     suspend fun setMiniDotDelaySeconds(seconds: Int) {

@@ -37,6 +37,7 @@ data class WarmSessionProfile(
     val language: LanguageMode,
     val polishInstructionHash: String,
     val automaticActivityDetectionDisabled: Boolean,
+    val activityHandlingNoInterruption: Boolean = false,
     val inputAudioTranscription: Boolean,
     val outputAudioTranscription: Boolean,
     val credentialRevision: Long,

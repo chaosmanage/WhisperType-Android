@@ -81,6 +81,11 @@ object GeminiLiveWire {
                             "automaticActivityDetection",
                             buildJsonObject { put("disabled", true) },
                         )
+                        // 0.6.0 experimental segmentation: a new activity must
+                        // not interrupt the model echoing the previous segment.
+                        if (config.activityHandlingNoInterruption) {
+                            put("activityHandling", "NO_INTERRUPTION")
+                        }
                     },
                 )
             }

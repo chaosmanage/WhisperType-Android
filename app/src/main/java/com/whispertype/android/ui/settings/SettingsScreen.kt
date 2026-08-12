@@ -90,6 +90,7 @@ fun SettingsScreen(
     val speechMode by settings.speechMode.collectAsStateWithLifecycle(initialValue = LanguageMode.ENGLISH)
     val autoStopSeconds by settings.autoStopSeconds
         .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_AUTO_STOP_SECONDS)
+    val segmentAtSilence by settings.segmentAtSilence.collectAsStateWithLifecycle(initialValue = false)
     val polishLevel by settings.polishLevel
         .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_POLISH_LEVEL)
     val audioSourcePreference by settings.audioSourcePreference
@@ -205,6 +206,16 @@ fun SettingsScreen(
                             }
                         }
                     }
+                }
+
+                SettingRow(
+                    title = stringResource(R.string.settings_segment_at_silence),
+                    description = stringResource(R.string.settings_segment_at_silence_desc),
+                ) {
+                    Switch(
+                        checked = segmentAtSilence,
+                        onCheckedChange = { scope.launch { settings.setSegmentAtSilence(it) } },
+                    )
                 }
 
                 SettingRow(

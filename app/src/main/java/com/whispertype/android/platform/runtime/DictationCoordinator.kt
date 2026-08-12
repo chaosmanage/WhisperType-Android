@@ -121,6 +121,9 @@ private class ActiveLiveSession(
     /** True when the session is configured to emit the output echo. NONE/LOW
      *  polish turns the echo off and settles on the raw ASR (0.6.0). */
     var echoEnabled: Boolean = true
+
+    /** True once activityStart was accepted (segmentation only acts mid-turn). */
+    var activityStarted: Boolean = false
     var sessionJob: Job? = null
     var eventJob: Job? = null
     var readyJob: Job? = null
@@ -238,6 +241,12 @@ class DictationCoordinator(
          *  share the configured value ("both combined"). Kept as a separate knob
          *  so each arm is independently testable and can diverge later. */
         val maxRecordingSeconds: () -> Long = { 0L },
+        /** 0.6.0 experimental (off by default): when true, the recording is
+         *  split at pauses of [segmentSilenceMs] so the model echoes each segment
+         *  while the user keeps talking. Requires on-device validation. */
+        val segmentAtSilence: () -> Boolean = { false },
+        /** Minimum quiet before the current activity is closed and reopened. */
+        val segmentSilenceMs: Long = 700,
         /** Mic amplitude (0..1) above which the user is considered speaking. */
         val speechAmplitudeThreshold: Float = 0.02f,
     )
@@ -461,7 +470,10 @@ class DictationCoordinator(
                 fail(holder, transportFailure(start.reason))
                 return
             }
-            SendResult.Accepted -> holder.metrics.mark(MutableSessionMetrics.Event.ActivityStartQueued)
+            SendResult.Accepted -> {
+                holder.activityStarted = true
+                holder.metrics.mark(MutableSessionMetrics.Event.ActivityStartQueued)
+            }
         }
         val current = lastPublished
         if (current is DictationState.Listening && current.sessionId == holder.sessionId) {
@@ -616,22 +628,46 @@ class DictationCoordinator(
     private suspend fun runAutoStop(holder: ActiveLiveSession) {
         val silenceTimeoutMs = config.autoStopSeconds() * 1000L
         val maxTimeoutMs = config.maxRecordingSeconds() * 1000L
-        if (silenceTimeoutMs <= 0 && maxTimeoutMs <= 0) return
+        val segmentEnabled = config.segmentAtSilence()
+        if (silenceTimeoutMs <= 0 && maxTimeoutMs <= 0 && !segmentEnabled) return
         val capture = holder.capture ?: return
         var elapsedMs = 0L
         var silenceMs = 0L
+        var segmentSilenceMs = 0L
         while (active === holder && isListening(holder)) {
             delay(AUTO_STOP_CHECK_MS)
             elapsedMs += AUTO_STOP_CHECK_MS
-            silenceMs += AUTO_STOP_CHECK_MS
-            if (capture.amplitude.value >= config.speechAmplitudeThreshold) silenceMs = 0L
+            val speaking = capture.amplitude.value >= config.speechAmplitudeThreshold
+            silenceMs = if (speaking) 0L else silenceMs + AUTO_STOP_CHECK_MS
+            segmentSilenceMs = if (speaking) 0L else segmentSilenceMs + AUTO_STOP_CHECK_MS
             val capHit = maxTimeoutMs > 0 && elapsedMs >= maxTimeoutMs
             val silenceHit = silenceTimeoutMs > 0 && silenceMs >= silenceTimeoutMs
             if (capHit || silenceHit) {
                 stop()
                 break
             }
+            // 0.6.0 experimental segmentation: close the current activity at a
+            // pause and reopen it, so the model echoes the finished segment
+            // while the user keeps speaking the next one.
+            if (segmentEnabled && holder.activityStarted && segmentSilenceMs >= config.segmentSilenceMs) {
+                segment(holder)
+                segmentSilenceMs = 0L
+            }
         }
+    }
+
+    /**
+     * 0.6.0 experimental: ends the current activity and immediately reopens it.
+     * Both calls are suspension-free in the manual-activity path, so the reopen
+     * lands before the next audio frame. Device-pending: only valid when
+     * `activityHandling = NO_INTERRUPTION` lets the previous segment's echo
+     * continue generating.
+     */
+    private suspend fun segment(holder: ActiveLiveSession) {
+        val session = holder.session ?: return
+        if (!holder.activityStarted) return
+        if (session.endActivity() !is SendResult.Accepted) return
+        holder.activityStarted = session.startActivity() is SendResult.Accepted
     }
 
     // ------------------------------------------------------------------
