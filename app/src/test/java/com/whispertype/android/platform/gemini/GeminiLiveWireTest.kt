@@ -11,7 +11,6 @@ import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.contentOrNull
 
 class GeminiLiveWireTest {
 
@@ -99,6 +98,13 @@ class GeminiLiveWireTest {
     }
 
     @Test
+    fun `buildRealtimeText uses realtimeInput text and no clientContent`() {
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildRealtimeText("ongoing text")).jsonObject
+        assertEquals("ongoing text", root["realtimeInput"]!!.jsonObject["text"]!!.jsonPrimitive.content)
+        assertFalse(root.containsKey("clientContent"))
+    }
+
+    @Test
     fun `buildTurnComplete sets clientContent turnComplete true`() {
         val root = Json.parseToJsonElement(GeminiLiveWire.buildTurnComplete()).jsonObject
         val clientContent = root["clientContent"]!!.jsonObject
@@ -171,6 +177,13 @@ class GeminiLiveWireTest {
     }
 
     @Test
+    fun `setupError redacts credentials from server detail`() {
+        val raw = """{"setupError":{"error":{"message":"request rejected: key=not-a-real-credential"}}}"""
+        val msg = GeminiLiveWire.parseServerMessage(raw) as GeminiLiveWire.ServerMessage.SetupError
+        assertEquals("request rejected: key=[REDACTED]", msg.message)
+    }
+
+    @Test
     fun `top-level error parses to SetupError`() {
         val raw = """{"error":{"code":404,"message":"models/gemini-2.5-flash-live-preview not found","status":"NOT_FOUND"}}"""
         val msg = GeminiLiveWire.parseServerMessage(raw) as GeminiLiveWire.ServerMessage.SetupError
@@ -183,6 +196,7 @@ class GeminiLiveWireTest {
         val msg = GeminiLiveWire.parseServerMessage(raw) as GeminiLiveWire.ServerMessage.ServerContent
         assertEquals(listOf("first", "second"), msg.textParts)
         assertNull(msg.inputTranscription)
+        assertFalse(msg.generationComplete)
         assertFalse(msg.turnComplete)
         assertFalse(msg.interrupted)
     }
@@ -204,26 +218,61 @@ class GeminiLiveWireTest {
     }
 
     @Test
-    fun `serverContent lifecycle flags parse`() {
-        val raw = """{"serverContent":{"interrupted":false,"turnComplete":true}}"""
+    fun `input and output transcription remain independent and unsupported finality is ignored`() {
+        val raw = """
+            {
+              "serverContent": {
+                "inputTranscription": {"text": "user speech", "finished": true},
+                "outputTranscription": {"text": "model echo", "finished": false}
+              }
+            }
+        """.trimIndent()
         val msg = GeminiLiveWire.parseServerMessage(raw) as GeminiLiveWire.ServerMessage.ServerContent
-        assertTrue(msg.turnComplete)
-        assertFalse(msg.interrupted)
+        assertEquals("user speech", msg.inputTranscription)
+        assertEquals("model echo", msg.outputTranscription)
+        assertFalse(msg.generationComplete)
+        assertFalse(msg.turnComplete)
     }
 
     @Test
-    fun `goAway parses`() {
+    fun `serverContent generationComplete parses independently from turnComplete`() {
+        val raw = """{"serverContent":{"generationComplete":true,"turnComplete":false}}"""
+        val msg = GeminiLiveWire.parseServerMessage(raw) as GeminiLiveWire.ServerMessage.ServerContent
+        assertTrue(msg.generationComplete)
+        assertFalse(msg.turnComplete)
+    }
+
+    @Test
+    fun `serverContent interrupted and turnComplete lifecycle flags parse`() {
+        val raw = """{"serverContent":{"interrupted":true,"turnComplete":true}}"""
+        val msg = GeminiLiveWire.parseServerMessage(raw) as GeminiLiveWire.ServerMessage.ServerContent
+        assertTrue(msg.turnComplete)
+        assertTrue(msg.interrupted)
+    }
+
+    @Test
+    fun `goAway parses protobuf duration timeLeft`() {
         assertEquals(
-            GeminiLiveWire.ServerMessage.GoAway,
-            GeminiLiveWire.parseServerMessage("""{"goAway":{"reconnect":false}}"""),
+            GeminiLiveWire.ServerMessage.GoAway(timeLeft = "17.250s"),
+            GeminiLiveWire.parseServerMessage("""{"goAway":{"timeLeft":"17.250s"}}"""),
         )
     }
 
     @Test
-    fun `unknown and malformed messages parse to Unknown`() {
+    fun `goAway without timeLeft remains a typed notice`() {
+        assertEquals(
+            GeminiLiveWire.ServerMessage.GoAway(timeLeft = null),
+            GeminiLiveWire.parseServerMessage("""{"goAway":{}}"""),
+        )
+    }
+
+    @Test
+    fun `unknown and malformed messages expose no raw server payload`() {
         val tool = """{"toolCall":{"id":"1","functionCalls":[]}}"""
-        assertTrue(GeminiLiveWire.parseServerMessage(tool) is GeminiLiveWire.ServerMessage.Unknown)
-        assertTrue(GeminiLiveWire.parseServerMessage("not json") is GeminiLiveWire.ServerMessage.Unknown)
+        val unknown = GeminiLiveWire.parseServerMessage(tool) as GeminiLiveWire.ServerMessage.Unknown
+        val malformed = GeminiLiveWire.parseServerMessage("not json") as GeminiLiveWire.ServerMessage.Unknown
+        assertEquals("[REDACTED]", unknown.raw)
+        assertEquals("[REDACTED]", malformed.raw)
     }
 
     @Test

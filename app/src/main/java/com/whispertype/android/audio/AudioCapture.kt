@@ -8,10 +8,15 @@ import com.whispertype.android.core.audio.GemAudioFormat
 import com.whispertype.android.core.model.AudioChunk
 import com.whispertype.android.core.model.DictationFailure
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.sqrt
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.DisposableHandle
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.ReceiveChannel
@@ -24,7 +29,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
-/** Low-level PCM16 producer. Implementations are not required to be thread-safe. */
+/** Low-level PCM16 producer. Reads are serialized and [release] is called exactly once. */
 interface PcmSource {
     /** Reads up to [out].size bytes; returns the count read, 0 if none, or < 0 on error. */
     fun read(out: ByteArray): Int
@@ -33,9 +38,22 @@ interface PcmSource {
     fun release()
 }
 
+/**
+ * A [PcmSource] whose blocking [PcmSource.read] can be unblocked without
+ * releasing it. [requestStop] may race an active read, must be idempotent, and
+ * must not release the source; [AudioCapture] performs the one final [release].
+ */
+interface InterruptiblePcmSource : PcmSource {
+    fun requestStop()
+}
+
 sealed interface AudioStartResult {
     data object Started : AudioStartResult
     data class Failed(val failure: DictationFailure) : AudioStartResult
+}
+
+private object DefaultAudioCaptureScope : CoroutineScope {
+    override val coroutineContext = Dispatchers.IO
 }
 
 /**
@@ -47,7 +65,8 @@ sealed interface AudioStartResult {
  * lets it process already-returned bytes, emit all complete frames, emit the
  * zero-padded partial frame from `remaining()`, and close the chunk channel.
  * [awaitQuiescence] joins that orderly drain with a bounded timeout; [stop] is
- * the hard-cancel fallback.
+ * the idempotent hard-cancel fallback. A timed-out join triggers that fallback
+ * automatically.
  *
  * Read/permission/init failures surface as typed failures on [failures], never
  * as raw throws.
@@ -55,12 +74,33 @@ sealed interface AudioStartResult {
 class AudioCapture(
     private val sampleRateHz: Int = GemAudioFormat.SAMPLE_RATE_HZ,
     private val sourceFactory: () -> PcmSource? = { createDefaultSource() },
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    scope: CoroutineScope = DefaultAudioCaptureScope,
+    readDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : AudioPipeline {
+    /*
+     * Do not make a possibly-blocked microphone read a structural child of a
+     * service scope: a broken source must not keep that service's Job joining
+     * forever. We still mirror caller cancellation into this owned job below.
+     */
+    private val lifecycleJob = SupervisorJob()
+    private val captureScope = CoroutineScope(lifecycleJob + readDispatcher)
     private val queue = BoundedAudioQueue<AudioChunk>(QUEUE_CAPACITY)
 
     /** Bounded FIFO of 20 ms frames (capacity 64). Closed by the producer on shutdown. */
     override val chunks: ReceiveChannel<AudioChunk> = queue.channel
+
+    override val frameQueueCapacity: Int = QUEUE_CAPACITY
+
+    private val latestQueuedSequence = AtomicLong(NO_SEQUENCE)
+
+    override fun queuedFrameDepth(chunk: AudioChunk): Int {
+        val latestSequence = latestQueuedSequence.get()
+        return if (latestSequence == NO_SEQUENCE) {
+            0
+        } else {
+            chunk.depthBehind(latestSequence, QUEUE_CAPACITY)
+        }
+    }
 
     private val _amplitude = MutableStateFlow(0f)
 
@@ -73,10 +113,16 @@ class AudioCapture(
     override val failures: SharedFlow<DictationFailure> = _failures.asSharedFlow()
 
     private val chunker = Chunker(sampleRateHz)
+    private val readBufferBytes =
+        GemAudioFormat.FRAME_MILLIS * sampleRateHz * GemAudioFormat.CHAR_BYTES / 1000
 
     private val started = AtomicBoolean(false)
+    private val startupCompleted = CompletableDeferred<Unit>()
     private val stopRequested = AtomicBoolean(false)
-    private val released = AtomicBoolean(false)
+    private val hardStopped = AtomicBoolean(false)
+    private val sourceLifecycleLock = Any()
+    private var sourceStopSignalled = false
+    private var sourceReleased = false
 
     @Volatile
     private var source: PcmSource? = null
@@ -84,90 +130,193 @@ class AudioCapture(
     @Volatile
     private var producerJob: Job? = null
 
+    @Volatile
+    private var callerCancellationHandle: DisposableHandle? = null
+
+    init {
+        val handle = scope.coroutineContext[Job]?.invokeOnCompletion { stop() }
+        callerCancellationHandle = handle
+        if (hardStopped.get()) detachCallerCancellation()
+    }
+
     /** Starts capture. Safe to call once; subsequent calls return [AudioStartResult.Started]. */
     override fun start(): AudioStartResult {
         if (!started.compareAndSet(false, true)) return AudioStartResult.Started
-        val acquired = sourceFactory()
-        if (acquired == null) {
-            val failure = DictationFailure(MIC_INIT, "Microphone could not start", recoverable = true)
-            _failures.tryEmit(failure)
-            return AudioStartResult.Failed(failure)
+        try {
+            if (stopRequested.get()) {
+                finishWithoutProducer()
+                return AudioStartResult.Started
+            }
+
+            val acquired = runCatching(sourceFactory).getOrNull()
+            if (acquired == null) {
+                val failure = DictationFailure(MIC_INIT, "Microphone could not start", recoverable = true)
+                _failures.tryEmit(failure)
+                finishWithoutProducer()
+                return AudioStartResult.Failed(failure)
+            }
+            source = acquired
+            if (stopRequested.get()) {
+                signalSourceStop(acquired)
+                releaseSourceOnce(acquired)
+                finishWithoutProducer()
+                return AudioStartResult.Started
+            }
+
+            val job = captureScope.launch(start = CoroutineStart.LAZY) { producerLoop(acquired) }
+            producerJob = job
+            job.invokeOnCompletion { finishProducer(acquired) }
+            job.start()
+            return AudioStartResult.Started
+        } finally {
+            startupCompleted.complete(Unit)
         }
-        source = acquired
-        producerJob = scope.launch { producerLoop(acquired) }
-        return AudioStartResult.Started
     }
 
-    /** Marks stop requested and releases the source so the blocking read unblocks. Idempotent. */
+    /**
+     * Requests an orderly stop and unblocks the active read. Interruptible
+     * sources are stopped without being released; legacy sources are released
+     * once as the compatibility fallback.
+     */
     override fun requestStop() {
         if (!stopRequested.compareAndSet(false, true)) return
-        source?.release()
+        val current = source
+        if (current != null) {
+            signalSourceStop(current)
+        } else if (!started.get()) {
+            finishWithoutProducer()
+        }
     }
 
-    /** Joins the orderly producer drain with a bounded timeout. Returns true when quiesced. */
+    /**
+     * Joins the orderly producer drain with a bounded timeout. A timeout
+     * immediately invokes [stop], so no caller can accidentally retain this
+     * capture as an unbounded child join.
+     */
     override suspend fun awaitQuiescence(timeoutMs: Long): Boolean {
-        val job = producerJob ?: return true
-        return withTimeoutOrNull(timeoutMs) { job.join() } != null
+        require(timeoutMs >= 0) { "timeoutMs must be >= 0, was $timeoutMs" }
+        if (!started.get()) return true
+        val quiesced = withTimeoutOrNull(timeoutMs) {
+            startupCompleted.await()
+            producerJob?.join()
+            true
+        } ?: false
+        if (!quiesced) stop()
+        return quiesced
     }
 
-    /** Idempotent hard stop: cancels the producer, releases the source, closes the queue. */
+    /** Idempotent hard stop: cancels ownership, closes the queue, and releases once. */
     override fun stop() {
+        if (!hardStopped.compareAndSet(false, true)) return
         stopRequested.set(true)
-        producerJob?.cancel()
-        if (released.compareAndSet(false, true)) source?.release()
+        lifecycleJob.cancel()
         queue.close()
+        releaseSourceOnce(source)
+        detachCallerCancellation()
     }
 
     private suspend fun producerLoop(source: PcmSource) {
-        val buffer = ByteArray(READ_BUFFER_BYTES)
+        val buffer = ByteArray(readBufferBytes)
         var amplitudeTick = 0
         try {
-            while (!stopRequested.get()) {
-                val read = source.read(buffer)
-                if (read < 0) {
-                    _failures.tryEmit(DictationFailure(MIC_READ, "Microphone read failed", recoverable = true))
-                    break
-                }
-                if (read > 0) {
-                    val valid = if (read < buffer.size) buffer.copyOf(read) else buffer
-                    for (chunk in chunker.push(valid)) {
-                        queue.send(chunk)
+            try {
+                while (!stopRequested.get()) {
+                    val read = source.read(buffer)
+                    if (read < 0 || read > buffer.size) {
+                        if (!stopRequested.get()) emitReadFailure()
+                        break
                     }
-                    // UI amplitude is sampled at ~16.7 Hz (every 3rd 20 ms frame);
-                    // capture and transmission stay at the full 50 Hz cadence.
-                    if (++amplitudeTick % AMPLITUDE_SAMPLE_EVERY == 0) {
-                        _amplitude.value = smoothedAmplitude(valid)
+                    if (read > 0) {
+                        for (chunk in chunker.push(buffer, read)) {
+                            enqueue(chunk)
+                            // UI amplitude is sampled at ~16.7 Hz (every 3rd 20 ms frame);
+                            // capture and transmission stay at the full 50 Hz cadence.
+                            if (++amplitudeTick % AMPLITUDE_SAMPLE_EVERY == 0) {
+                                _amplitude.value =
+                                    smoothedAmplitude(chunk.pcm16Bytes, chunk.byteCount)
+                            }
+                        }
                     }
+                    // No artificial delay: AudioRecord's blocking read paces the stream
+                    // at exactly real time. Any gap here would reach the Gemini Live
+                    // ASR as choppy audio and break its voice-activity detection
+                    // (inputTranscription silently never fires).
                 }
-                // No artificial delay: AudioRecord's blocking read paces the stream
-                // at exactly real time. Any gap here would reach the Gemini Live
-                // ASR as choppy audio and break its voice-activity detection
-                // (inputTranscription silently never fires).
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (!stopRequested.get()) emitReadFailure()
             }
+
             // Orderly shutdown: emit the zero-padded partial frame exactly once,
             // then close the channel so the ordered sender drains and stops.
-            if (stopRequested.get()) {
-                chunker.remaining()?.let { queue.send(it) }
+            if (stopRequested.get() && !hardStopped.get()) {
+                chunker.remaining()?.let { enqueue(it) }
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            _failures.tryEmit(DictationFailure(MIC_READ, "Microphone read failed", recoverable = true))
         } finally {
             queue.close()
-            if (released.compareAndSet(false, true)) source.release()
+            releaseSourceOnce(source)
         }
     }
 
-    private fun smoothedAmplitude(pcm16: ByteArray): Float {
+    private fun emitReadFailure() {
+        _failures.tryEmit(DictationFailure(MIC_READ, "Microphone read failed", recoverable = true))
+    }
+
+    private suspend fun enqueue(chunk: AudioChunk) {
+        latestQueuedSequence.set(chunk.sequence)
+        queue.send(chunk)
+    }
+
+    private fun signalSourceStop(source: PcmSource) {
+        synchronized(sourceLifecycleLock) {
+            if (sourceStopSignalled || sourceReleased) return
+            sourceStopSignalled = true
+            if (source is InterruptiblePcmSource) {
+                if (runCatching { source.requestStop() }.isSuccess) return
+            }
+            sourceReleased = true
+            runCatching { source.release() }
+        }
+    }
+
+    private fun releaseSourceOnce(source: PcmSource?) {
+        if (source == null) return
+        synchronized(sourceLifecycleLock) {
+            if (sourceReleased) return
+            sourceReleased = true
+            runCatching { source.release() }
+        }
+    }
+
+    private fun finishProducer(source: PcmSource) {
+        queue.close()
+        releaseSourceOnce(source)
+        detachCallerCancellation()
+        lifecycleJob.complete()
+    }
+
+    private fun finishWithoutProducer() {
+        queue.close()
+        detachCallerCancellation()
+        lifecycleJob.complete()
+    }
+
+    private fun detachCallerCancellation() {
+        val handle = callerCancellationHandle
+        callerCancellationHandle = null
+        handle?.dispose()
+    }
+
+    private fun smoothedAmplitude(pcm16: ByteArray, byteCount: Int): Float {
         val current = _amplitude.value
-        val raw = amplitudeOf(pcm16)
+        val raw = amplitudeOf(pcm16, byteCount)
         return current + AMPLITUDE_ALPHA * (raw - current)
     }
 
     /** RMS over a small slice of the frame, normalized to [0, 1]. */
-    private fun amplitudeOf(pcm16: ByteArray): Float {
-        val maxSamples = minOf(AMPLITUDE_SLICE_SAMPLES, pcm16.size / 2)
+    private fun amplitudeOf(pcm16: ByteArray, byteCount: Int): Float {
+        val maxSamples = minOf(AMPLITUDE_SLICE_SAMPLES, byteCount / 2)
         var sum = 0.0
         var i = 0
         while (i < maxSamples) {
@@ -237,7 +386,7 @@ class AudioCapture(
             }.getOrNull() ?: return null
             val preferred = runCatching { record.setPreferredDevice(device) }.getOrDefault(false)
             if (!preferred) {
-                record.release()
+                runCatching { record.release() }
                 return null
             }
             return initializedRecordSource(record)
@@ -246,29 +395,40 @@ class AudioCapture(
         /** Shared state/start validation and [PcmSource] adapter for a built record. */
         private fun initializedRecordSource(record: AudioRecord): PcmSource? {
             if (record.state != AudioRecord.STATE_INITIALIZED) {
-                record.release()
+                runCatching { record.release() }
                 return null
             }
-            record.startRecording()
-            if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-                record.release()
+            val recording = runCatching {
+                record.startRecording()
+                record.recordingState == AudioRecord.RECORDSTATE_RECORDING
+            }.getOrDefault(false)
+            if (!recording) {
+                runCatching { record.release() }
                 return null
             }
-            return object : PcmSource {
+            return object : InterruptiblePcmSource {
+                private val stopped = AtomicBoolean(false)
+
                 override fun read(out: ByteArray): Int =
                     record.read(out, 0, out.size, AudioRecord.READ_BLOCKING)
 
+                override fun requestStop() {
+                    if (stopped.compareAndSet(false, true)) {
+                        record.stop()
+                    }
+                }
+
                 override fun release() {
-                    runCatching { record.stop() }
-                    record.release()
+                    try {
+                        requestStop()
+                    } finally {
+                        record.release()
+                    }
                 }
             }
         }
 
         private const val QUEUE_CAPACITY = 64
-        /** One 20 ms frame (640 bytes at 16 kHz mono PCM16): reads are blocking and
-         *  pace the stream at exactly real time. */
-        private const val READ_BUFFER_BYTES = 640
         private const val AMPLITUDE_SLICE_SAMPLES = 256
         private const val AMPLITUDE_ALPHA = 0.5f
         /** Publish the waveform state every Nth 20 ms frame (~16.7 Hz at 50 Hz reads). */
@@ -277,5 +437,6 @@ class AudioCapture(
         private const val DEFAULT_BUFFER_BYTES = 4096
         private const val MIC_INIT = "MIC_INIT"
         private const val MIC_READ = "MIC_READ"
+        private const val NO_SEQUENCE = -1L
     }
 }

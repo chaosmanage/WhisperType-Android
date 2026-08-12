@@ -1,68 +1,89 @@
 package com.whispertype.android.core.transcript
 
 /**
- * Session-local accumulator for a streamed transcript (remediation plan
- * Release E1/E2, hardened in 0.4.2 for reliability).
+ * Session-local accumulator for streamed transcript messages.
  *
- * The Gemini Live server may deliver independent deltas, cumulative revisions,
- * corrected revisions, or a mixture, so this tracks ONE current cumulative
- * revision with content-preserving merge rules (longer content always wins):
+ * A stream may mix cumulative revisions with independent deltas. Cumulative
+ * extensions and related corrections replace the provisional value. In
+ * [appendDeltas] mode, all other messages are joined using the maximal
+ * normalized-token overlap between the current suffix and the message prefix.
+ * This makes repeated connector words deterministic and prevents an overlap
+ * from being either duplicated or dropped.
  *
- *  1. Empty/blank message: ignored (no change, no revision bump).
- *  2. Exact duplicate of [current]: ignored.
- *  3. No current value yet: accepted as-is.
- *  4. Cumulative extension (message starts with [current] on a word boundary):
- *     merged, so the longer cumulative value wins.
- *  5. Reverse prefix (message is a shorter/partial revision of [current]):
- *     ignored; the longer cumulative value wins.
- *  6. [appendDeltas] only — a delta-style message whose leading content word
- *     does not overlap the current tail (observed for `outputTranscription`,
- *     where the server streams the model's spoken reply as word deltas):
- *     appended on a word boundary, so the full reply is reconstructed instead
- *     of each delta replacing the last one.
- *  7. A strictly shorter revision (fewer content words, whatever the wording):
- *     ignored — a mid-stream condense can never permanently shrink the text
- *     that later gets settled.
- *  8. Otherwise (same-or-longer correction/replacement): replaced.
- *
- * Every accepted change bumps [revisionCount].
+ * Every actual text change bumps [revisionCount].
  */
 class TranscriptAccumulator(
-    /** When true, accepts delta-style streamed messages (see rule 6). Use for
-     *  the echo source; keep false for the ASR source where revisions replace. */
+    /** True for a source that can emit independent delta messages. */
     private val appendDeltas: Boolean = false,
 ) {
+    /** Result for callers that need to distinguish a duplicate from a revision. */
+    data class AcceptResult(
+        val text: String?,
+        val changed: Boolean,
+    )
+
     var current: String? = null
         private set
 
     var revisionCount: Int = 0
         private set
 
-    /** Accepts one streamed [message]; returns the new (or unchanged) current. */
-    fun accept(message: String): String? {
-        if (message.trim().isEmpty()) return current
+    /**
+     * Accepts one streamed [message], preserving the original nullable-text API.
+     * Call [acceptWithResult] when the caller also needs the change signal.
+     */
+    fun accept(message: String): String? = acceptWithResult(message).text
+
+    /** Accepts [message] and reports whether it changed the accumulated text. */
+    fun acceptWithResult(message: String): AcceptResult {
+        if (message.isBlank()) return unchanged()
         val existing = current
         if (existing == null) {
-            current = message
-            revisionCount += 1
-            return current
+            return update(message)
         }
-        if (message == existing) return current
-        if (isCumulativeExtension(existing, message)) {
-            current = message
-            revisionCount += 1
-            return current
+        if (message == existing) return unchanged()
+
+        val existingTokens = tokens(existing)
+        val messageTokens = tokens(message)
+        if (sameTokens(existingTokens, messageTokens)) {
+            return update(message)
         }
-        if (existing.startsWith(message)) return current
-        if (appendDeltas && isAppendableDelta(existing, message)) {
-            current = join(existing, message)
-            revisionCount += 1
-            return current
+        if (existing.startsWith(message)) return unchanged()
+        if (extendsFinalToken(existingTokens, messageTokens)) {
+            return update(message)
         }
-        if (contentWords(message).size < contentWords(existing).size) return current
-        current = message
-        revisionCount += 1
-        return current
+        if (isStrictPrefix(existingTokens, messageTokens)) {
+            return update(message)
+        }
+        if (isStrictPrefix(messageTokens, existingTokens)) {
+            return unchanged()
+        }
+
+        val likelyRevision = isLikelyRevision(existingTokens, messageTokens)
+        if (appendDeltas) {
+            // A cumulative correction can happen to begin with a token repeated
+            // at the current tail. Prefer the well-supported revision before
+            // interpreting that repeated token as a delta overlap.
+            if (likelyRevision && commonPrefixLength(existingTokens, messageTokens) > 0) {
+                return update(message)
+            }
+
+            val overlap = maximalSuffixPrefixOverlap(existingTokens, messageTokens)
+            if (overlap > 0) {
+                return update(mergeOverlap(existing, message, existingTokens, overlap))
+            }
+
+            if (likelyRevision) {
+                return update(message)
+            }
+            return update(join(existing, message))
+        }
+
+        if (likelyRevision) {
+            return update(message)
+        }
+        if (messageTokens.size < existingTokens.size) return unchanged()
+        return update(message)
     }
 
     /** Returns the current settled transcript, or null if none exists yet. */
@@ -74,44 +95,189 @@ class TranscriptAccumulator(
         revisionCount = 0
     }
 
-    /**
-     * True when [message] is a streamed delta: its leading content word does
-     * not overlap the tail of [existing], i.e. it continues the speech rather
-     * than revising it. [OVERLAP_TAIL] recent content words are consulted so a
-     * repeated connector word ("for the", "and") still reads as new content.
-     */
-    private fun isAppendableDelta(existing: String, message: String): Boolean {
-        val head = contentWords(message).firstOrNull() ?: return false
-        val tail = contentWords(existing).takeLast(OVERLAP_TAIL)
-        return head !in tail
+    private fun update(candidate: String): AcceptResult {
+        if (candidate == current) return unchanged()
+        current = candidate
+        revisionCount += 1
+        return AcceptResult(text = current, changed = true)
     }
 
-    /** Joins a delta onto [existing] on a word boundary. */
+    private fun unchanged(): AcceptResult = AcceptResult(text = current, changed = false)
+
+    /**
+     * Replaces the overlapping suffix with the incoming spelling/punctuation
+     * and keeps only the non-overlapping continuation.
+     */
+    private fun mergeOverlap(
+        existing: String,
+        message: String,
+        existingTokens: List<Token>,
+        overlap: Int,
+    ): String {
+        val overlapStart = existingTokens[existingTokens.size - overlap].start
+        return join(existing.substring(0, overlapStart), message)
+    }
+
+    /**
+     * Largest `k` for which the final `k` tokens of [existing] equal the first
+     * `k` tokens of [message]. Looking at the complete suffix removes any
+     * arbitrary tail window and remains deterministic for repeated words.
+     */
+    private fun maximalSuffixPrefixOverlap(
+        existing: List<Token>,
+        message: List<Token>,
+    ): Int {
+        val limit = minOf(existing.size, message.size)
+        for (size in limit downTo 1) {
+            val existingStart = existing.size - size
+            var matches = true
+            for (offset in 0 until size) {
+                if (existing[existingStart + offset].normalized != message[offset].normalized) {
+                    matches = false
+                    break
+                }
+            }
+            if (matches) return size
+        }
+        return 0
+    }
+
+    /**
+     * Related, similarly sized messages are revisions rather than independent
+     * deltas. Requiring ordered similarity plus a shared edge avoids treating
+     * an unrelated equal-length message as a correction.
+     */
+    private fun isLikelyRevision(
+        existing: List<Token>,
+        message: List<Token>,
+    ): Boolean {
+        if (existing.isEmpty() || message.isEmpty()) return false
+        val sharesEdge = commonPrefixLength(existing, message) > 0 ||
+            commonSuffixLength(existing, message) > 0
+        if (!sharesEdge) return false
+        val shared = longestCommonSubsequenceLength(existing, message)
+        if (shared < MIN_REVISION_SHARED_TOKENS) return false
+        val similarity = shared.toDouble() / maxOf(existing.size, message.size)
+        return similarity >= MIN_REVISION_SIMILARITY
+    }
+
+    private fun longestCommonSubsequenceLength(
+        first: List<Token>,
+        second: List<Token>,
+    ): Int {
+        var previous = IntArray(second.size + 1)
+        for (firstToken in first) {
+            val currentRow = IntArray(second.size + 1)
+            for (secondIndex in second.indices) {
+                currentRow[secondIndex + 1] =
+                    if (firstToken.normalized == second[secondIndex].normalized) {
+                        previous[secondIndex] + 1
+                    } else {
+                        maxOf(previous[secondIndex + 1], currentRow[secondIndex])
+                    }
+            }
+            previous = currentRow
+        }
+        return previous[second.size]
+    }
+
+    private fun commonPrefixLength(first: List<Token>, second: List<Token>): Int {
+        val limit = minOf(first.size, second.size)
+        var count = 0
+        while (count < limit && first[count].normalized == second[count].normalized) {
+            count += 1
+        }
+        return count
+    }
+
+    private fun commonSuffixLength(first: List<Token>, second: List<Token>): Int {
+        val limit = minOf(first.size, second.size)
+        var count = 0
+        while (
+            count < limit &&
+            first[first.lastIndex - count].normalized == second[second.lastIndex - count].normalized
+        ) {
+            count += 1
+        }
+        return count
+    }
+
+    private fun sameTokens(first: List<Token>, second: List<Token>): Boolean =
+        first.size == second.size && first.indices.all {
+            first[it].normalized == second[it].normalized
+        }
+
+    private fun extendsFinalToken(existing: List<Token>, message: List<Token>): Boolean {
+        if (existing.size != message.size || existing.isEmpty()) return false
+        if (existing.last().normalized.length < MIN_CORRECTABLE_FRAGMENT_LENGTH) return false
+        for (index in 0 until existing.lastIndex) {
+            if (existing[index].normalized != message[index].normalized) return false
+        }
+        val existingFinal = existing.last().normalized
+        val messageFinal = message.last().normalized
+        return messageFinal.length > existingFinal.length &&
+            messageFinal.startsWith(existingFinal)
+    }
+
+    private fun isStrictPrefix(prefix: List<Token>, full: List<Token>): Boolean =
+        prefix.isNotEmpty() &&
+            prefix.size < full.size &&
+            prefix.indices.all { prefix[it].normalized == full[it].normalized }
+
+    /** Joins a delta on a natural text boundary. */
     private fun join(existing: String, message: String): String {
-        val delta = message.trim()
-        return if (delta.isEmpty()) existing
-        else if (existing.endsWith(" ")) existing + delta
-        else "$existing $delta"
+        val continuation = message.trim()
+        if (continuation.isEmpty()) return existing
+        if (existing.isEmpty()) return continuation
+        if (continuation.first() in ATTACHED_PUNCTUATION) {
+            return existing.trimEnd() + continuation
+        }
+        if (existing.last().isWhitespace()) {
+            return existing + continuation
+        }
+        return "$existing $continuation"
     }
 
-    /**
-     * True when [message] cumulatively extends [current] on a word boundary:
-     * [message] starts with [current] and either the character directly after
-     * [current] is whitespace or [current] itself already ends on a trailing
-     * whitespace boundary. Fragments are never trimmed before this check
-     * because internal spaces can carry word boundaries.
-     */
-    private fun isCumulativeExtension(current: String, message: String): Boolean {
-        if (!message.startsWith(current)) return false
-        if (message.length == current.length) return false
-        return message[current.length].isWhitespace() || current.last().isWhitespace()
+    private fun tokens(text: String): List<Token> {
+        val result = ArrayList<Token>()
+        var tokenStart = -1
+        val normalized = StringBuilder()
+
+        fun flush() {
+            if (tokenStart >= 0) {
+                result.add(
+                    Token(
+                        normalized = normalized.toString(),
+                        start = tokenStart,
+                    ),
+                )
+                tokenStart = -1
+                normalized.setLength(0)
+            }
+        }
+
+        for (index in text.indices) {
+            val character = text[index]
+            if (character.isLetterOrDigit()) {
+                if (tokenStart < 0) tokenStart = index
+                normalized.append(character.lowercaseChar())
+            } else {
+                flush()
+            }
+        }
+        flush()
+        return result
     }
 
-    /** Lower-cased sequence of letter/digit runs in [text]. */
-    private fun contentWords(text: String): List<String> = TranscriptCompleteness.contentWords(text)
+    private data class Token(
+        val normalized: String,
+        val start: Int,
+    )
 
     private companion object {
-        /** Recent content words of the current value consulted for delta overlap. */
-        const val OVERLAP_TAIL: Int = 4
+        const val MIN_REVISION_SHARED_TOKENS: Int = 2
+        const val MIN_REVISION_SIMILARITY: Double = 0.5
+        const val MIN_CORRECTABLE_FRAGMENT_LENGTH: Int = 3
+        val ATTACHED_PUNCTUATION: Set<Char> = setOf('.', ',', '!', '?', ';', ':', '%', ')', ']', '}')
     }
 }

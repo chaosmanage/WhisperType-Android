@@ -16,7 +16,9 @@ import com.whispertype.android.core.model.ResultCandidate
 import com.whispertype.android.core.model.SendResult
 import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.SettlePath
+import com.whispertype.android.core.model.SettlementReason
 import com.whispertype.android.core.model.TargetSnapshot
+import com.whispertype.android.core.model.TerminalOutcome
 import com.whispertype.android.core.model.isClipboardFallback
 import com.whispertype.android.core.transcript.RejectionDiagnosis
 import com.whispertype.android.core.transcript.RejectionRule
@@ -32,6 +34,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Host services the [DictationCoordinator] needs. Implemented by
@@ -119,6 +122,7 @@ private class ActiveLiveSession(
     var deadlineJob: Job? = null
     var echoFallbackJob: Job? = null
     var transliterationJob: Job? = null
+    var insertionResultJob: Job? = null
     var inserted: Boolean = false
 
     /** The settled dictation text when one existed (opt-in history hook). */
@@ -129,6 +133,31 @@ private class ActiveLiveSession(
 
     /** Retained even when the server sends it before STOP (Release E7). */
     var turnCompleteSeen: Boolean = false
+
+    /** Model generation completion is only a lifecycle hint, never transcript finality. */
+    var generationCompleteSeen: Boolean = false
+
+    /** True only after an accepted activity-end send for this holder. */
+    var activityEndQueued: Boolean = false
+
+    /** Global quiet barrier across both raw and echo transcript sources. */
+    var transcriptQuiet: Boolean = false
+
+    /** Raw-only settlement may proceed once the echo preference grace expires. */
+    var sourceMissingGraceElapsed: Boolean = false
+
+    /** Retains an absolute deadline that fired before activity-end could be queued. */
+    var hardDeadlineReached: Boolean = false
+
+    /** Exact duration represented by captured frames, used for echo-only plausibility. */
+    var capturedAudioDurationMs: Long = 0L
+}
+
+/** A closed capture channel must never be mistaken for Live-session readiness. */
+private sealed interface AudioStreamSignal {
+    data class Frame(val chunk: AudioChunk) : AudioStreamSignal
+    data object Ready : AudioStreamSignal
+    data object CaptureClosed : AudioStreamSignal
 }
 
 /**
@@ -174,6 +203,14 @@ class DictationCoordinator(
         val minEchoRatio: Double = TranscriptCompleteness.DEFAULT_MIN_RATIO,
         val returnToIdleMs: Long = 1_200,
         val captureShutdownTimeoutMs: Long = 1_500,
+        /** Maximum wait after STOP closes capture while a cold session is still
+         * connecting. This preserves activityStart -> buffered audio ->
+         * activityEnd ordering without allowing finalization to hang forever. */
+        val readyAfterStopTimeoutMs: Long = 5_000,
+        /** Commit is exactly-once. A missing IPC result becomes an explicit,
+         * non-retryable ambiguity instead of leaving Inserting stuck forever.
+         * Set to 0 only in deterministic tests that complete insertion manually. */
+        val insertionResultTimeoutMs: Long = 2_000,
         /** Bounded pre-ready PCM frames buffered while a cold session connects (F5). */
         val preReadyMaxFrames: Int = 150,
         /** Auto-stop: stop after this many seconds of silence (0 disables). The
@@ -234,6 +271,7 @@ class DictationCoordinator(
         val holder = active ?: return
         publish(DictationState.Cancelled(holder.sessionId, CancelReason.USER))
         holder.metrics.mark(MutableSessionMetrics.Event.Stop)
+        holder.metrics.recordTerminalOutcome(TerminalOutcome.CANCELLED)
         teardown(holder)
         scope.launch {
             delay(config.returnToIdleMs)
@@ -246,6 +284,9 @@ class DictationCoordinator(
         val holder = active ?: return
         if (holder.sessionId != sessionId) return
         if (!holder.inserted) return
+        if (!isInserting(holder)) return
+        holder.insertionResultJob?.cancel()
+        holder.metrics.mark(MutableSessionMetrics.Event.InsertionReplyReceived)
         holder.metrics.mark(MutableSessionMetrics.Event.InsertionResult)
         // 0.5.8: the transcript could not be committed to a focused field
         // (no field, no input connection, or a field change) — copy it to the
@@ -258,8 +299,10 @@ class DictationCoordinator(
                     if (active !== holder) return@launch
                     if (copied) {
                         holder.metrics.mark(MutableSessionMetrics.Event.CopiedToClipboard)
+                        holder.metrics.recordTerminalOutcome(TerminalOutcome.COPIED_TO_CLIPBOARD)
                         publish(DictationState.CopiedToClipboard(sessionId))
                     } else {
+                        holder.metrics.recordTerminalOutcome(TerminalOutcome.TARGET_REJECTED)
                         publish(DictationState.Error(sessionId, result.failure))
                     }
                     delay(config.returnToIdleMs)
@@ -270,17 +313,26 @@ class DictationCoordinator(
         }
         publish(
             when (result) {
-                InsertionResult.Inserted -> DictationState.Success(sessionId)
-                InsertionResult.Ambiguous -> DictationState.Error(
-                    sessionId,
-                    DictationFailure(
-                        code = "insert_ambiguous",
-                        message = "Could not confirm the text was inserted. Use Copy to grab it.",
-                        recoverable = true,
-                        retryAllowed = false,
-                    ),
-                )
-                is InsertionResult.Failed -> DictationState.Error(sessionId, result.failure)
+                InsertionResult.Inserted -> {
+                    holder.metrics.recordTerminalOutcome(TerminalOutcome.INSERTED)
+                    DictationState.Success(sessionId)
+                }
+                InsertionResult.Ambiguous -> {
+                    holder.metrics.recordTerminalOutcome(TerminalOutcome.AMBIGUOUS_COMMIT)
+                    DictationState.Error(
+                        sessionId,
+                        DictationFailure(
+                            code = "insert_ambiguous",
+                            message = "Could not confirm the text was inserted. Use Copy to grab it.",
+                            recoverable = true,
+                            retryAllowed = false,
+                        ),
+                    )
+                }
+                is InsertionResult.Failed -> {
+                    holder.metrics.recordTerminalOutcome(TerminalOutcome.TARGET_REJECTED)
+                    DictationState.Error(sessionId, result.failure)
+                }
             },
         )
         scope.launch {
@@ -397,53 +449,116 @@ class DictationCoordinator(
         while (true) {
             // Select on both the capture channel and the readiness signal so the
             // drain is not deferred to a later microphone frame.
-            val chunk = select<AudioChunk?> {
-                capture.chunks.onReceiveCatching { result -> result.getOrNull() }
-                if (!connected) ready.onAwait { null }
+            val signal = select<AudioStreamSignal> {
+                capture.chunks.onReceiveCatching { result ->
+                    result.getOrNull()?.let(AudioStreamSignal::Frame)
+                        ?: AudioStreamSignal.CaptureClosed
+                }
+                if (!connected) ready.onAwait { AudioStreamSignal.Ready }
             }
-            if (chunk == null) {
-                if (!connected) {
+            when (signal) {
+                AudioStreamSignal.Ready -> {
                     // The session became ready while we were blocked: drain the
                     // bounded pre-ready buffer in strict order, then stream live.
-                    for (buffered in preReady.drain()) {
-                        sendChunk(holder, session, buffered)
-                    }
+                    if (!drainPreReady(holder, session, preReady)) return
                     connected = true
-                    continue
                 }
-                break // capture channel closed
-            }
-            holder.metrics.capturedFrames++
-            if (connected) {
-                sendChunk(holder, session, chunk)
-            } else {
-                when (preReady.offer(chunk)) {
-                    PreReadyOffer.Accepted -> Unit
-                    PreReadyOffer.Overflow -> {
-                        fail(holder, connectionTooSlow())
-                        return
+
+                AudioStreamSignal.CaptureClosed -> {
+                    if (!connected) {
+                        // STOP can close capture before a cold session is ready.
+                        // Wait a bounded interval for awaitReadyAndStart() to
+                        // queue activityStart, then drain all retained audio.
+                        val started = withTimeoutOrNull(config.readyAfterStopTimeoutMs) {
+                            ready.await()
+                            true
+                        } ?: false
+                        if (!started) {
+                            fail(holder, setupReadinessTimeout())
+                            return
+                        }
+                        if (active !== holder) return
+                        if (!drainPreReady(holder, session, preReady)) return
                     }
-                    PreReadyOffer.Closed -> return
+                    break
+                }
+
+                is AudioStreamSignal.Frame -> {
+                    val chunk = signal.chunk
+                    recordCapturedFrame(holder, capture, chunk)
+                    if (connected) {
+                        if (!sendChunk(holder, session, chunk)) return
+                    } else {
+                        when (preReady.offer(chunk)) {
+                            PreReadyOffer.Accepted ->
+                                holder.metrics.recordFrameQueueDepth(preReady.size)
+                            PreReadyOffer.Overflow -> {
+                                holder.metrics.audioBufferOverflow = true
+                                fail(holder, connectionTooSlow())
+                                return
+                            }
+                            PreReadyOffer.Closed -> return
+                        }
+                    }
                 }
             }
         }
         holder.metrics.mark(MutableSessionMetrics.Event.LastAudioQueued)
     }
 
+    private fun recordCapturedFrame(
+        holder: ActiveLiveSession,
+        capture: AudioPipeline,
+        chunk: AudioChunk,
+    ) {
+        holder.metrics.incrementCapturedFrames()
+        holder.capturedAudioDurationMs = saturatingAdd(
+            holder.capturedAudioDurationMs,
+            chunk.frameMillis.toLong().coerceAtLeast(0L),
+        )
+        val reportedDepth = capture.queuedFrameDepth(chunk).coerceAtLeast(0)
+        val boundedDepth = capture.frameQueueCapacity.takeIf { it > 0 }
+            ?.let { reportedDepth.coerceAtMost(it) }
+            ?: reportedDepth
+        holder.metrics.recordFrameDequeued(
+            depthFrames = boundedDepth,
+            capturedAtMonotonicNanos = chunk.capturedAtMonotonicNanos,
+        )
+    }
+
+    private suspend fun drainPreReady(
+        holder: ActiveLiveSession,
+        session: GeminiLiveSession,
+        preReady: PreReadyAudioBuffer,
+    ): Boolean {
+        val buffered = preReady.drain()
+        for ((index, chunk) in buffered.withIndex()) {
+            holder.metrics.recordFrameDequeued(
+                depthFrames = buffered.lastIndex - index,
+                capturedAtMonotonicNanos = chunk.capturedAtMonotonicNanos,
+            )
+            if (!sendChunk(holder, session, chunk)) return false
+        }
+        return true
+    }
+
     private suspend fun sendChunk(
         holder: ActiveLiveSession,
         session: GeminiLiveSession,
         chunk: AudioChunk,
-    ) {
-        if (session.sendAudio(chunk) is SendResult.Accepted) {
-            holder.metrics.acceptedFrames++
-            if (holder.metrics.firstAudioQueuedAt == null) {
+    ): Boolean =
+        when (val result = session.sendAudio(chunk)) {
+            SendResult.Accepted -> {
+                holder.metrics.incrementAcceptedFrames()
                 holder.metrics.mark(MutableSessionMetrics.Event.FirstAudioQueued)
+                true
             }
-        } else {
-            holder.metrics.rejectedFrames++
+            is SendResult.Rejected -> {
+                holder.metrics.incrementRejectedFrames()
+                fail(holder, transportFailure(result.reason))
+                false
+            }
         }
-    }
 
     private suspend fun publishAmplitude(holder: ActiveLiveSession) {
         val capture = holder.capture ?: return
@@ -498,11 +613,20 @@ class DictationCoordinator(
                 val isEcho = event.source == GeminiEvent.TranscriptSource.ECHO
                 val target = if (isEcho) holder.echoAccumulator else holder.accumulator
                 event.candidates.forEach { candidate ->
-                    target.accept(candidate.raw)
+                    if (target.acceptWithResult(candidate.raw).changed) {
+                        if (isEcho) {
+                            holder.metrics.recordEchoRevision()
+                        } else {
+                            holder.metrics.recordInputRevision()
+                        }
+                        onTranscriptRevision(holder)
+                    }
                 }
-                onTranscriptUpdate(holder, isEcho)
             }
             GeminiEvent.TurnComplete -> onTurnComplete(holder)
+            GeminiEvent.GenerationComplete -> onGenerationComplete(holder)
+            GeminiEvent.Interrupted -> onInterrupted(holder)
+            is GeminiEvent.GoAway -> Unit // advance notice; not a terminal event
             is GeminiEvent.Failed -> fail(holder, event.failure)
             GeminiEvent.SessionEnd -> if (!isInserting(holder)) {
                 fail(
@@ -535,8 +659,8 @@ class DictationCoordinator(
         holder.deadlineJob = scope.launch {
             delay(config.hardDeadlineMs)
             if (active === holder && isFinalizing(holder)) {
-                holder.metrics.usedHardDeadline = true
-                settle(holder)
+                holder.hardDeadlineReached = true
+                reevaluateSettlement(holder)
             }
         }
         // Orderly producer drain before the completion boundary: request stop,
@@ -555,6 +679,7 @@ class DictationCoordinator(
                 }
                 SendResult.Accepted -> {
                     holder.metrics.mark(MutableSessionMetrics.Event.ActivityEndQueued)
+                    holder.activityEndQueued = true
                     afterActivityEnd(holder)
                 }
             }
@@ -562,63 +687,114 @@ class DictationCoordinator(
     }
 
     /**
-     * A new transcript revision arrived while finalizing. Only the echo
-     * (instruction-controlled) resets the settle debounce — the raw input is the
-     * fallback and is settled by the echo-fallback watchdog or the hard deadline,
-     * so it never cuts short a pending echo (0.4.1).
+     * Every actual raw or echo text change invalidates the one global quiet
+     * barrier. Exact duplicates are filtered by [TranscriptAccumulator] and do
+     * not extend settlement.
      */
-    private fun onTranscriptUpdate(holder: ActiveLiveSession, isEcho: Boolean) {
+    private fun onTranscriptRevision(holder: ActiveLiveSession) {
         if (active !== holder) return
         if (!isFinalizing(holder)) return
-        if (isEcho) restartSettleDebounce(holder)
+        holder.transcriptQuiet = false
+        if (holder.activityEndQueued) restartQuietDebounce(holder)
     }
 
-    /** The server completed the turn; retained even when it precedes STOP (E7). */
+    /** Server lifecycle events are hints; transcript quiet is still mandatory. */
     private fun onTurnComplete(holder: ActiveLiveSession) {
         if (active !== holder) return
         holder.turnCompleteSeen = true
-        if (isFinalizing(holder) && hasValidTranscript(holder)) {
-            restartSettleDebounce(holder)
+        holder.metrics.recordTurnComplete()
+        onLifecycleHint(holder)
+    }
+
+    private fun onGenerationComplete(holder: ActiveLiveSession) {
+        if (active !== holder) return
+        holder.generationCompleteSeen = true
+        holder.metrics.recordGenerationComplete()
+        onLifecycleHint(holder)
+    }
+
+    private fun onInterrupted(holder: ActiveLiveSession) {
+        if (active !== holder) return
+        // A hint from an interrupted generation cannot establish finality for
+        // the current audio activity. Aggregate metrics remain historical.
+        holder.generationCompleteSeen = false
+        holder.turnCompleteSeen = false
+    }
+
+    private fun onLifecycleHint(holder: ActiveLiveSession) {
+        if (!isFinalizing(holder) || !holder.activityEndQueued) return
+        if (holder.transcriptQuiet) {
+            reevaluateSettlement(holder)
+        } else if (hasTranscriptEvidence(holder) && holder.settleJob?.isActive != true) {
+            restartQuietDebounce(holder)
         }
     }
 
-    /** After the completion boundary: settle promptly when turn completion and a
-     *  transcript are both present (E5), and start the echo-fallback watchdog
-     *  (0.4.1 reworked): if no echo arrives within a grace window AFTER the raw
-     *  is final, settle on the fast raw transcript instead of waiting up to the
-     *  20 s deadline. Starting the watchdog here (not at STOP) guarantees the
-     *  raw is the final post-activity ASR, never a provisional mid-activity
-     *  revision. */
+    /** Starts post-boundary quiet and source-missing grace barriers. */
     private fun afterActivityEnd(holder: ActiveLiveSession) {
         if (active !== holder) return
+        if (holder.hardDeadlineReached) {
+            reevaluateSettlement(holder)
+            return
+        }
+        holder.sourceMissingGraceElapsed = false
         holder.echoFallbackJob?.cancel()
         holder.echoFallbackJob = scope.launch {
             delay(config.echoFallbackWaitMs)
-            if (active === holder && isFinalizing(holder) &&
-                holder.echoAccumulator.settledText().isNullOrBlank() &&
-                holder.accumulator.settledText()?.isNotBlank() == true
-            ) {
-                settle(holder)
+            if (active === holder && isFinalizing(holder) && holder.activityEndQueued) {
+                holder.sourceMissingGraceElapsed = true
+                reevaluateSettlement(holder)
             }
         }
-        if (holder.turnCompleteSeen && hasValidTranscript(holder)) {
-            restartSettleDebounce(holder)
+        if (hasTranscriptEvidence(holder)) {
+            restartQuietDebounce(holder)
         }
     }
 
-    /** Resets the short settle debounce; never extends the absolute deadline. */
-    private fun restartSettleDebounce(holder: ActiveLiveSession) {
+    /** Resets the global revision quiet debounce; never extends the deadline. */
+    private fun restartQuietDebounce(holder: ActiveLiveSession) {
         holder.settleJob?.cancel()
+        holder.transcriptQuiet = false
         holder.settleJob = scope.launch {
             delay(config.settleDebounceMs)
-            if (active === holder && isFinalizing(holder)) {
-                settle(holder)
+            if (active === holder && isFinalizing(holder) && holder.activityEndQueued) {
+                holder.transcriptQuiet = true
+                reevaluateSettlement(holder)
             }
         }
     }
 
-    private fun hasValidTranscript(holder: ActiveLiveSession): Boolean =
-        selectSettledText(holder) != null
+    private fun reevaluateSettlement(holder: ActiveLiveSession) {
+        if (active !== holder || !isFinalizing(holder) || !holder.activityEndQueued) return
+        if (holder.hardDeadlineReached) {
+            settle(holder, SettlementReason.HARD_DEADLINE)
+            return
+        }
+        if (!holder.transcriptQuiet || !hasUsableSettlementEvidence(holder)) return
+        val reason = when {
+            holder.turnCompleteSeen -> SettlementReason.TURN_COMPLETE_QUIET
+            holder.generationCompleteSeen -> SettlementReason.GENERATION_COMPLETE_QUIET
+            holder.echoAccumulator.settledText()?.isNotBlank() == true ->
+                SettlementReason.ECHO_DEBOUNCE
+            holder.sourceMissingGraceElapsed &&
+                holder.accumulator.settledText()?.isNotBlank() == true ->
+                SettlementReason.RAW_FALLBACK_TIMEOUT
+            else -> null
+        } ?: return
+        holder.metrics.recordQuietBarrierSatisfied()
+        settle(holder, reason)
+    }
+
+    private fun hasTranscriptEvidence(holder: ActiveLiveSession): Boolean =
+        holder.accumulator.settledText()?.isNotBlank() == true ||
+            holder.echoAccumulator.settledText()?.isNotBlank() == true
+
+    private fun hasUsableSettlementEvidence(holder: ActiveLiveSession): Boolean =
+        selectSettledText(holder) != null ||
+            (
+                holder.language == LanguageMode.HINGLISH &&
+                    holder.accumulator.settledText()?.isNotBlank() == true
+                )
 
     /**
      * 0.4.2 settlement policy — the user's words are never lost to a partial
@@ -636,7 +812,9 @@ class DictationCoordinator(
         // instruction-influenced), so it is never a dictation source; only the
         // instructed Latin echo is usable.
         if (holder.language == LanguageMode.HINGLISH) {
-            return echo?.let { it to SettlePath.ECHO_ONLY }
+            return echo
+                ?.takeIf { isPlausibleEchoOnly(holder, it) }
+                ?.let { it to SettlePath.ECHO_ONLY }
         }
         return when {
             echo != null && raw != null &&
@@ -647,18 +825,25 @@ class DictationCoordinator(
 
             raw != null -> raw to SettlePath.ECHO_PARTIAL_RAW
 
-            echo != null -> echo to SettlePath.ECHO_ONLY
+            echo != null && isPlausibleEchoOnly(holder, echo) ->
+                echo to SettlePath.ECHO_ONLY
 
             else -> null
         }
     }
 
-    private fun settle(holder: ActiveLiveSession) {
-        if (active !== holder) return
+    private fun isPlausibleEchoOnly(holder: ActiveLiveSession, echo: String): Boolean =
+        TranscriptCompleteness.isPlausibleForDuration(
+            transcript = echo,
+            durationMs = holder.capturedAudioDurationMs,
+        )
+
+    private fun settle(holder: ActiveLiveSession, reason: SettlementReason) {
+        if (active !== holder || !isFinalizing(holder) || !holder.activityEndQueued) return
         holder.settleJob?.cancel()
         holder.deadlineJob?.cancel()
         holder.echoFallbackJob?.cancel()
-        holder.metrics.mark(MutableSessionMetrics.Event.TranscriptSettled)
+        holder.metrics.recordSettlement(reason)
         if (holder.language == LanguageMode.HINGLISH) {
             settleHinglish(holder)
             return
@@ -710,7 +895,13 @@ class DictationCoordinator(
         val echo = holder.echoAccumulator.settledText()?.takeIf { it.isNotBlank() }
         val raw = holder.accumulator.settledText()?.takeIf { it.isNotBlank() }
         val echoComplete = echo != null &&
-            (raw == null || TranscriptCompleteness.covers(echo, raw, config.minEchoRatio))
+            (
+                if (raw == null) {
+                    isPlausibleEchoOnly(holder, echo)
+                } else {
+                    isCompleteHinglishEcho(holder, echo, raw)
+                }
+                )
         when {
             echoComplete -> {
                 holder.metrics.settlePath =
@@ -722,12 +913,15 @@ class DictationCoordinator(
                 holder.metrics.settlePath = SettlePath.ECHO_PARTIAL_RAW
                 holder.transliterationJob?.cancel()
                 holder.transliterationJob = scope.launch {
+                    holder.metrics.recordRepairStarted()
                     val latin = try {
                         host.transliterateToLatin(holder.sessionId, raw)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
                         null
+                    } finally {
+                        holder.metrics.recordRepairEnded()
                     }
                     if (active !== holder) return@launch
                     val final = latin?.takeIf { it.isNotBlank() } ?: echo
@@ -739,13 +933,23 @@ class DictationCoordinator(
                     }
                 }
             }
-            echo != null -> {
-                holder.metrics.settlePath = SettlePath.ECHO_ONLY
-                holder.settledText = echo
-                insertSettled(holder, echo)
-            }
             else -> failNoTranscript(holder)
         }
+    }
+
+    /**
+     * Hindi input and Latin-script echo cannot share normalized tokens. Keep the
+     * cross-script length guard, augmented by captured-duration plausibility.
+     */
+    private fun isCompleteHinglishEcho(
+        holder: ActiveLiveSession,
+        echo: String,
+        raw: String,
+    ): Boolean {
+        val rawWords = TranscriptCompleteness.contentWords(raw).size
+        val echoWords = TranscriptCompleteness.contentWords(echo).size
+        val lengthRatio = if (rawWords == 0) 0.0 else echoWords.toDouble() / rawWords
+        return lengthRatio >= config.minEchoRatio && isPlausibleEchoOnly(holder, echo)
     }
 
     /** Lenient failsafe acceptance for user speech rejected by strict validation. */
@@ -762,17 +966,28 @@ class DictationCoordinator(
     }
 
     private fun insertSettled(holder: ActiveLiveSession, text: String) {
+        holder.metrics.mark(MutableSessionMetrics.Event.InsertionRequested)
         if (!host.sendInsertion(holder.sessionId, text)) {
+            holder.metrics.recordTerminalOutcome(TerminalOutcome.TARGET_REJECTED)
             fail(holder, accessibilityUnavailable())
             return
         }
         holder.inserted = true
-        holder.metrics.mark(MutableSessionMetrics.Event.InsertionRequested)
         publish(DictationState.Inserting(holder.sessionId))
         teardown(holder)
+        if (config.insertionResultTimeoutMs > 0L) {
+            holder.insertionResultJob = scope.launch {
+                delay(config.insertionResultTimeoutMs)
+                if (active === holder && holder.inserted && isInserting(holder)) {
+                    holder.metrics.recordTerminalOutcome(TerminalOutcome.TIMED_OUT)
+                    fail(holder, insertionResultTimeout())
+                }
+            }
+        }
     }
 
     private fun failNoTranscript(holder: ActiveLiveSession) {
+        holder.metrics.recordTerminalOutcome(TerminalOutcome.NO_RELIABLE_TRANSCRIPT)
         fail(
             holder,
             DictationFailure(
@@ -794,6 +1009,14 @@ class DictationCoordinator(
 
     private fun fail(holder: ActiveLiveSession, failure: DictationFailure) {
         if (active !== holder) return
+        holder.metrics.recordTerminalOutcome(
+            when {
+                failure.code.startsWith("gemini_") -> TerminalOutcome.TRANSPORT_FAILURE
+                failure.code.startsWith("insert_") ||
+                    failure.code == "runtime_no_accessibility" -> TerminalOutcome.TARGET_REJECTED
+                else -> TerminalOutcome.ERROR
+            },
+        )
         publish(DictationState.Error(holder.sessionId, failure))
         teardown(holder)
         if (failure.retryAllowed) return // error persists until Retry/Dismiss
@@ -812,7 +1035,7 @@ class DictationCoordinator(
         val holder = active
         if (holder != null) {
             val state = lastPublished
-            if (state !is DictationState.Error) return false
+            if (state !is DictationState.Error || !state.failure.retryAllowed) return false
             resetToIdle(holder)
         }
         return start()
@@ -840,6 +1063,7 @@ class DictationCoordinator(
         holder.captureFailureJob?.cancel()
         holder.eventJob?.cancel()
         holder.transliterationJob?.cancel()
+        holder.insertionResultJob?.cancel()
         holder.capture?.let { capture ->
             scope.launch {
                 capture.requestStop()
@@ -891,9 +1115,23 @@ class DictationCoordinator(
 
     private fun transportFailure(reason: String): DictationFailure = DictationFailure(
         code = "gemini_transport",
-        message = "Gemini rejected the activity boundary ($reason).",
+        message = "Gemini rejected a realtime send ($reason).",
         recoverable = true,
         retryAllowed = true,
+    )
+
+    private fun setupReadinessTimeout(): DictationFailure = DictationFailure(
+        code = "gemini_setup_timeout",
+        message = "Gemini did not become ready in time.",
+        recoverable = true,
+        retryAllowed = true,
+    )
+
+    private fun insertionResultTimeout(): DictationFailure = DictationFailure(
+        code = "insert_result_timeout",
+        message = "Could not confirm whether the text was inserted. It will not be sent again.",
+        recoverable = true,
+        retryAllowed = false,
     )
 
     private fun accessibilityUnavailable(): DictationFailure = DictationFailure(
@@ -910,6 +1148,9 @@ class DictationCoordinator(
         recoverable = true,
         retryAllowed = true,
     )
+
+    private fun saturatingAdd(current: Long, increment: Long): Long =
+        if (increment > Long.MAX_VALUE - current) Long.MAX_VALUE else current + increment
 
     companion object {
         /** Auto-stop watcher sampling interval (pure elapsed-time tick). */

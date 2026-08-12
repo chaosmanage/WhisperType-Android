@@ -70,6 +70,18 @@ class InsertionDecisionTest {
     }
 
     @Test
+    fun `secure target wins over missing connection to prevent clipboard fallback`() {
+        val result = InsertionDecision.evaluate(
+            connectionPresent = false,
+            targetCurrent = false,
+            targetSecureOrUncertain = true,
+            commitAccepted = null,
+        ) as InsertionResult.Failed
+
+        assertEquals("insert_target_not_safe", result.failure.code)
+    }
+
+    @Test
     fun `ambiguous failure forbids retry`() {
         val failure = InsertionDecision.ambiguous()
         assertEquals("insert_ambiguous", failure.code)

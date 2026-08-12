@@ -1,8 +1,7 @@
 package com.whispertype.android.platform.accessibility
 
 import android.accessibilityservice.InputMethod
-import android.os.Bundle
-import android.view.accessibility.AccessibilityNodeInfo
+import android.os.SystemClock
 import android.view.inputmethod.SurroundingText
 import com.whispertype.android.core.contracts.TargetGateway
 import com.whispertype.android.core.model.InsertionResult
@@ -12,15 +11,18 @@ import com.whispertype.android.core.model.TargetSnapshot
 import kotlinx.coroutines.flow.Flow
 
 /**
- * A live accessibility insertion handle for the target window: the focused
- * editable [node] plus the identity WhisperType needs to validate that the
- * captured target is still current before committing text.
+ * Content-free identity of the live accessibility insertion target. It carries
+ * every field needed to reject a changed or newly protected editor immediately
+ * before committing text.
  */
 data class LiveTarget(
     val packageName: String,
+    val displayId: Int,
     val windowId: Int,
+    val editorIdentity: String,
     val generation: Long,
-    val node: AccessibilityNodeInfo,
+    val isSecure: Boolean,
+    val isUncertain: Boolean,
 )
 
 /**
@@ -68,7 +70,7 @@ class AccessibilityTargetGateway(
             isUncertain = focus.isUncertain,
             selectionStart = focus.selectionStart,
             selectionEnd = focus.selectionEnd,
-            capturedAtMillis = System.currentTimeMillis(),
+            capturedAtMillis = SystemClock.elapsedRealtime(),
         )
     }
 
@@ -79,9 +81,12 @@ class AccessibilityTargetGateway(
         val connectionPresent = ic != null
         val targetCurrent = live != null &&
             live.packageName == target.packageName &&
+            live.displayId == target.displayId &&
             live.windowId == target.windowId &&
+            live.editorIdentity == target.editorIdentity &&
             live.generation == target.generation
-        val targetSecureOrUncertain = target.isSecure || target.isUncertain
+        val liveTargetUnsafe = live?.let { it.isSecure || it.isUncertain } == true
+        val targetSecureOrUncertain = target.isSecure || target.isUncertain || liveTargetUnsafe
 
         var commitVerified: Boolean? = null
         if (ic != null && live != null && targetCurrent && !targetSecureOrUncertain) {

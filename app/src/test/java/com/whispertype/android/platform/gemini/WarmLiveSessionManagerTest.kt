@@ -3,12 +3,18 @@ package com.whispertype.android.platform.gemini
 import com.whispertype.android.core.contracts.GeminiLiveSession
 import com.whispertype.android.core.model.AudioChunk
 import com.whispertype.android.core.model.GeminiEvent
+import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.core.model.SendResult
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -16,135 +22,309 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
- * Warm-session pool state machine (Release F3): eligibility-driven prewarm,
- * atomic claim, replacement prewarm, bounded backoff, conservative idle timeout.
+ * Warm-session lifecycle tests use the coroutine test scheduler for both delay
+ * and monotonic age, so no assertion depends on wall-clock timing.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class WarmLiveSessionManagerTest {
 
-    private class FakeWarmSession : GeminiLiveSession {
-        var readyError: Throwable? = null
-        var closed = false
-        override suspend fun awaitReady() {
-            readyError?.let { throw it }
-        }
+    private class FakeWarmSession(
+        private val awaitReadyAction: suspend () -> Unit = {},
+    ) : GeminiLiveSession {
+        private val eventChannel = Channel<GeminiEvent>(Channel.UNLIMITED)
 
+        var closeCalls = 0
+            private set
+
+        val closed: Boolean
+            get() = closeCalls > 0
+
+        override suspend fun awaitReady() = awaitReadyAction()
         override suspend fun startActivity(): SendResult = SendResult.Accepted
         override suspend fun sendAudio(chunk: AudioChunk): SendResult = SendResult.Accepted
         override suspend fun endActivity(): SendResult = SendResult.Accepted
-        override fun events(): Flow<GeminiEvent> = flow {}
+        override fun events(): Flow<GeminiEvent> = eventChannel.receiveAsFlow()
+
+        fun emit(event: GeminiEvent) {
+            check(eventChannel.trySend(event).isSuccess)
+        }
+
         override suspend fun close() {
-            closed = true
+            closeCalls++
+            eventChannel.close()
         }
     }
 
-    private class Harness {
+    private class Harness(
+        private val sessionFactory: (Int, WarmSessionProfile) -> FakeWarmSession =
+            { _, _ -> FakeWarmSession() },
+    ) {
         val sessions = mutableListOf<FakeWarmSession>()
-        var created = 0
-        /** Sessions created up to and including this call count fail readiness. */
-        var failUpToCall = 0
+        val createdProfiles = mutableListOf<WarmSessionProfile>()
 
-        fun managerFor(scope: TestScope, config: WarmLiveSessionManager.Config = WarmLiveSessionManager.Config()) =
-            WarmLiveSessionManager(
+        fun managerFor(
+            scope: CoroutineScope,
+            nowMs: () -> Long,
+            config: WarmLiveSessionManager.Config = WarmLiveSessionManager.Config(),
+        ): WarmLiveSessionManager =
+            WarmLiveSessionManager.profiled(
                 scope = scope,
-                createSession = {
-                    created++
-                    val s = FakeWarmSession()
-                    if (created <= failUpToCall) s.readyError = IllegalStateException("intentional prewarm failure")
-                    sessions += s
-                    s
+                createSession = { profile ->
+                    createdProfiles += profile
+                    sessionFactory(createdProfiles.size, profile).also(sessions::add)
                 },
                 config = config,
+                monotonicTimeMs = nowMs,
             )
     }
 
     @Test
-    fun `prewarms a ready session when eligible and claims it`() = runTest {
+    fun `exact claim reports mismatch age and profile change replaces stale session`() = runTest {
+        val firstProfile = profile(instructionHash = "instruction-a")
+        val secondProfile = profile(instructionHash = "instruction-b")
         val h = Harness()
-        val manager = h.managerFor(this)
-        assertIs<WarmSessionState.None>(manager.state.value)
+        val manager = h.managerFor(
+            scope = backgroundScope,
+            nowMs = { testScheduler.currentTime },
+        )
 
-        manager.onEligibilityChanged(true)
+        manager.onEligibilityChanged(isEligible = true, profile = firstProfile)
+        runCurrent()
+        assertIs<WarmSessionState.Ready>(manager.state.value)
+
+        advanceTimeBy(25L)
+        runCurrent()
+        val mismatch = assertIs<WarmSessionClaim.Miss>(manager.claim(secondProfile))
+        assertEquals(WarmSessionClaimMissReason.PROFILE_MISMATCH, mismatch.reason)
+        assertEquals(25L, mismatch.ageMs)
+        assertFalse(h.sessions[0].closed)
+
+        manager.onProfileChanged(secondProfile)
         assertIs<WarmSessionState.Connecting>(manager.state.value)
-        advanceTimeBy(1)
-        assertIs<WarmSessionState.Ready>(manager.state.value)
-        assertEquals(1, h.created)
+        runCurrent()
+        assertEquals(1, h.sessions[0].closeCalls)
+        assertEquals(listOf(firstProfile, secondProfile), h.createdProfiles)
 
-        val claimed = manager.claim()
-        assertNotNull(claimed)
-
-        // A replacement prewarm starts immediately so the pool stays warm.
-        assertIs<WarmSessionState.Connecting>(manager.state.value)
-        advanceTimeBy(1)
-        assertIs<WarmSessionState.Ready>(manager.state.value)
-        assertEquals(2, h.created)
-    }
-
-    @Test
-    fun `claim returns null while connecting or disabled`() = runTest {
-        val h = Harness()
-        val manager = h.managerFor(this)
-        assertNull(manager.claim())
-
-        manager.onEligibilityChanged(true)
-        assertIs<WarmSessionState.Connecting>(manager.state.value)
-        assertNull(manager.claim())
-    }
-
-    @Test
-    fun `idle timeout closes the warm session`() = runTest {
-        val h = Harness()
-        val manager = h.managerFor(this, WarmLiveSessionManager.Config(warmIdleTimeoutMs = 30_000))
-        manager.onEligibilityChanged(true)
-        advanceTimeBy(1)
-        assertIs<WarmSessionState.Ready>(manager.state.value)
-
-        advanceTimeBy(30_000)
-        assertIs<WarmSessionState.None>(manager.state.value)
-        assertTrue(h.sessions[0].closed)
-    }
-
-    @Test
-    fun `losing eligibility closes the warm session`() = runTest {
-        val h = Harness()
-        val manager = h.managerFor(this)
-        manager.onEligibilityChanged(true)
-        advanceTimeBy(1)
-        assertIs<WarmSessionState.Ready>(manager.state.value)
+        val hit = assertIs<WarmSessionClaim.Hit>(manager.claim(secondProfile))
+        assertEquals(secondProfile, hit.lease.profile)
+        assertEquals(0L, hit.ageMs)
 
         manager.onEligibilityChanged(false)
-        advanceTimeBy(1)
-        assertIs<WarmSessionState.None>(manager.state.value)
-        assertTrue(h.sessions[0].closed)
+        runCurrent()
+        assertEquals(0, h.sessions[1].closeCalls, "claimed exact-profile session must stay caller-owned")
+        hit.lease.session.close()
     }
 
     @Test
-    fun `a claimed session is never closed by losing eligibility`() = runTest {
-        val h = Harness()
-        val manager = h.managerFor(this)
-        manager.onEligibilityChanged(true)
-        advanceTimeBy(1)
-        val claimed = manager.claim()!! as FakeWarmSession
+    fun `eligibility cancellation closes a stored connecting session`() = runTest {
+        val readyGate = CompletableDeferred<Unit>()
+        val connecting = FakeWarmSession { readyGate.await() }
+        val h = Harness { _, _ -> connecting }
+        val manager = h.managerFor(
+            scope = backgroundScope,
+            nowMs = { testScheduler.currentTime },
+        )
+
+        manager.onEligibilityChanged(isEligible = true, profile = profile())
+        runCurrent()
+        assertIs<WarmSessionState.Connecting>(manager.state.value)
+        assertSame(connecting, manager.warmSessionForTest())
 
         manager.onEligibilityChanged(false)
-        advanceTimeBy(1)
-        assertFalse(claimed.closed, "a claimed session belongs to the active dictation")
+        runCurrent()
+        assertIs<WarmSessionState.None>(manager.state.value)
+        assertEquals(1, connecting.closeCalls)
     }
 
     @Test
-    fun `backoff retries after failure and recovers`() = runTest {
-        val h = Harness().apply { failUpToCall = 1 } // first attempt fails
-        val manager = h.managerFor(this)
-        manager.onEligibilityChanged(true)
-        advanceTimeBy(1)
+    fun `setup error closes connecting session before bounded retry`() = runTest {
+        val failed = FakeWarmSession {
+            throw IllegalStateException("intentional readiness failure")
+        }
+        val recovered = FakeWarmSession()
+        val h = Harness { call, _ -> if (call == 1) failed else recovered }
+        val manager = h.managerFor(
+            scope = backgroundScope,
+            nowMs = { testScheduler.currentTime },
+            config = config(idleMs = 1_000L, backoffMs = listOf(10L, 20L)),
+        )
+
+        manager.onEligibilityChanged(isEligible = true, profile = profile())
+        runCurrent()
+        val backoff = assertIs<WarmSessionState.Backoff>(manager.state.value)
+        assertEquals(10L, backoff.retryMs)
+        assertEquals(1, failed.closeCalls)
+
+        advanceTimeBy(10L)
+        runCurrent()
+        assertIs<WarmSessionState.Ready>(manager.state.value)
+        assertEquals(2, h.sessions.size)
+
+        manager.shutdown()
+        runCurrent()
+        assertEquals(1, recovered.closeCalls)
+    }
+
+    @Test
+    fun `dead idle-ready socket is discarded and rewarmed`() = runTest {
+        val h = Harness()
+        val manager = h.managerFor(
+            scope = backgroundScope,
+            nowMs = { testScheduler.currentTime },
+            config = config(idleMs = 1_000L, backoffMs = listOf(10L)),
+        )
+        val expectedProfile = profile()
+
+        manager.onEligibilityChanged(isEligible = true, profile = expectedProfile)
+        runCurrent()
+        assertIs<WarmSessionState.Ready>(manager.state.value)
+
+        h.sessions[0].emit(GeminiEvent.SessionEnd)
+        runCurrent()
+        assertEquals(1, h.sessions[0].closeCalls)
         assertIs<WarmSessionState.Backoff>(manager.state.value)
+        val miss = assertIs<WarmSessionClaim.Miss>(manager.claim(expectedProfile))
+        assertEquals(WarmSessionClaimMissReason.BACKING_OFF, miss.reason)
 
-        advanceTimeBy(1_000)
-        advanceTimeBy(1)
+        advanceTimeBy(10L)
+        runCurrent()
+        assertEquals(2, h.sessions.size)
         assertIs<WarmSessionState.Ready>(manager.state.value)
-        assertEquals(2, h.created)
+
+        manager.shutdown()
+        runCurrent()
     }
+
+    @Test
+    fun `idle expiry closes then rewarms while eligibility remains true`() = runTest {
+        val h = Harness()
+        val manager = h.managerFor(
+            scope = backgroundScope,
+            nowMs = { testScheduler.currentTime },
+            config = config(idleMs = 100L, backoffMs = listOf(10L, 20L)),
+        )
+
+        manager.onEligibilityChanged(isEligible = true, profile = profile())
+        runCurrent()
+        assertIs<WarmSessionState.Ready>(manager.state.value)
+
+        advanceTimeBy(100L)
+        runCurrent()
+        assertEquals(1, h.sessions[0].closeCalls)
+        assertEquals(WarmSessionState.Backoff(10L), manager.state.value)
+
+        advanceTimeBy(10L)
+        runCurrent()
+        assertEquals(2, h.sessions.size)
+        assertIs<WarmSessionState.Ready>(manager.state.value)
+
+        manager.shutdown()
+        runCurrent()
+    }
+
+    @Test
+    fun `claim before ineligible transfers ownership before replacement cancellation`() = runTest {
+        val h = Harness()
+        val manager = h.managerFor(
+            scope = backgroundScope,
+            nowMs = { testScheduler.currentTime },
+        )
+        val expectedProfile = profile()
+
+        manager.onEligibilityChanged(isEligible = true, profile = expectedProfile)
+        runCurrent()
+        val hit = assertIs<WarmSessionClaim.Hit>(manager.claim(expectedProfile))
+
+        // Do not run the replacement first: this is the production ordering
+        // where active-dictation eligibility follows the successful claim.
+        manager.onEligibilityChanged(false)
+        runCurrent()
+        assertIs<WarmSessionState.None>(manager.state.value)
+        assertEquals(0, h.sessions[0].closeCalls)
+
+        hit.lease.session.close()
+        assertEquals(1, h.sessions[0].closeCalls)
+    }
+
+    @Test
+    fun `claimed session keeps terminal events and manager never closes it`() = runTest {
+        val firstProfile = profile(instructionHash = "instruction-a")
+        val secondProfile = profile(instructionHash = "instruction-b")
+        val h = Harness()
+        val manager = h.managerFor(
+            scope = backgroundScope,
+            nowMs = { testScheduler.currentTime },
+        )
+
+        manager.onEligibilityChanged(isEligible = true, profile = firstProfile)
+        runCurrent()
+        val hit = assertIs<WarmSessionClaim.Hit>(manager.claim(firstProfile))
+
+        manager.onProfileChanged(secondProfile)
+        runCurrent()
+        manager.shutdown()
+        runCurrent()
+        assertEquals(0, h.sessions[0].closeCalls)
+        assertTrue(h.sessions.drop(1).all(FakeWarmSession::closed))
+
+        val received = async { hit.lease.session.events().first() }
+        runCurrent()
+        h.sessions[0].emit(GeminiEvent.SessionEnd)
+        runCurrent()
+        assertEquals(GeminiEvent.SessionEnd, received.await())
+        assertEquals(0, h.sessions[0].closeCalls, "idle monitor must relinquish lifecycle authority on claim")
+
+        hit.lease.session.close()
+        assertEquals(1, h.sessions[0].closeCalls)
+    }
+
+    @Test
+    fun `legacy claim remains nullable and does not close claimed session`() = runTest {
+        val raw = FakeWarmSession()
+        val manager = WarmLiveSessionManager(
+            scope = backgroundScope,
+            createSession = { raw },
+            config = config(idleMs = 1_000L, backoffMs = listOf(10L)),
+            monotonicTimeMs = { testScheduler.currentTime },
+        )
+
+        assertNull(manager.claim())
+        manager.onEligibilityChanged(true)
+        runCurrent()
+        val claimed = assertNotNull(manager.claim())
+        manager.onEligibilityChanged(false)
+        runCurrent()
+        assertEquals(0, raw.closeCalls)
+
+        claimed.close()
+        assertEquals(1, raw.closeCalls)
+    }
+
+    private fun profile(
+        instructionHash: String = "instruction",
+        credentialRevision: Long = 1L,
+    ): WarmSessionProfile =
+        WarmSessionProfile(
+            model = "gemini-live-test",
+            apiVersion = "v1beta",
+            language = LanguageMode.ENGLISH,
+            polishInstructionHash = instructionHash,
+            automaticActivityDetectionDisabled = true,
+            inputAudioTranscription = true,
+            outputAudioTranscription = true,
+            credentialRevision = credentialRevision,
+        )
+
+    private fun config(
+        idleMs: Long,
+        backoffMs: List<Long>,
+    ): WarmLiveSessionManager.Config =
+        WarmLiveSessionManager.Config(
+            warmIdleTimeoutMs = idleMs,
+            backoffStepsMs = backoffMs,
+        )
 }

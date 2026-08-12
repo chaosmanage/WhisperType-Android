@@ -9,12 +9,15 @@ import com.whispertype.android.core.model.AudioChunk
  * complete frame is available. Frame size is derived from the sample rate and
  * the fixed 20 ms duration, never from a hard-coded byte count.
  */
-class Chunker(private val sampleRateHz: Int = GemAudioFormat.SAMPLE_RATE_HZ) {
+class Chunker(
+    private val sampleRateHz: Int = GemAudioFormat.SAMPLE_RATE_HZ,
+    private val nowNanos: () -> Long = System::nanoTime,
+) {
 
     private val bytesPerFrame: Int =
         GemAudioFormat.FRAME_MILLIS * sampleRateHz * GemAudioFormat.CHAR_BYTES / 1000
 
-    private var pending = ByteArray(0)
+    private var pending = ByteArray(bytesPerFrame)
     private var pendingSize = 0
     private var nextSequence = 0L
 
@@ -28,26 +31,48 @@ class Chunker(private val sampleRateHz: Int = GemAudioFormat.SAMPLE_RATE_HZ) {
      * forced out by [remaining]. Returns an empty list when the buffer does
      * not yet hold a full frame. Empty input is a no-op.
      */
-    fun push(pcm16: ByteArray): List<AudioChunk> {
-        if (pcm16.isEmpty() && pendingSize == 0) return emptyList()
+    fun push(pcm16: ByteArray): List<AudioChunk> = push(pcm16, pcm16.size)
 
-        val totalSize = pendingSize + pcm16.size
-        val combined = ByteArray(totalSize)
-        if (pendingSize > 0) pending.copyInto(combined, 0, 0, pendingSize)
-        if (pcm16.isNotEmpty()) pcm16.copyInto(combined, pendingSize)
+    /**
+     * Accumulates the first [byteCount] bytes of [pcm16]. This avoids copying a
+     * short capture read into a right-sized temporary array before framing it.
+     */
+    fun push(pcm16: ByteArray, byteCount: Int): List<AudioChunk> {
+        require(byteCount in 0..pcm16.size) {
+            "byteCount must be in 0..${pcm16.size}, was $byteCount"
+        }
+        if (byteCount == 0) return emptyList()
 
-        val result = ArrayList<AudioChunk>(totalSize / bytesPerFrame)
+        val frameCount = (pendingSize + byteCount) / bytesPerFrame
+        if (frameCount == 0) {
+            pcm16.copyInto(pending, pendingSize, 0, byteCount)
+            pendingSize += byteCount
+            return emptyList()
+        }
+
+        val result = ArrayList<AudioChunk>(frameCount)
         var offset = 0
-        while (totalSize - offset >= bytesPerFrame) {
+
+        if (pendingSize > 0) {
+            val needed = bytesPerFrame - pendingSize
+            pcm16.copyInto(pending, pendingSize, 0, needed)
+            offset = needed
+            result.add(toChunk(pending))
+            pending = ByteArray(bytesPerFrame)
+            pendingSize = 0
+        }
+
+        while (byteCount - offset >= bytesPerFrame) {
             val frame = ByteArray(bytesPerFrame)
-            combined.copyInto(frame, 0, offset, offset + bytesPerFrame)
-            result.add(AudioChunk(nextSequence++, frame, sampleRateHz))
+            pcm16.copyInto(frame, 0, offset, offset + bytesPerFrame)
+            result.add(toChunk(frame))
             offset += bytesPerFrame
         }
 
-        val remainder = totalSize - offset
-        pending = if (remainder > 0) combined.copyOfRange(offset, totalSize) else ByteArray(0)
-        pendingSize = remainder
+        if (offset < byteCount) {
+            pendingSize = byteCount - offset
+            pcm16.copyInto(pending, 0, offset, byteCount)
+        }
         return result
     }
 
@@ -58,10 +83,16 @@ class Chunker(private val sampleRateHz: Int = GemAudioFormat.SAMPLE_RATE_HZ) {
      */
     fun remaining(): AudioChunk? {
         if (pendingSize == 0) return null
-        val frame = ByteArray(bytesPerFrame)
-        pending.copyInto(frame, 0, 0, pendingSize)
-        pending = ByteArray(0)
+        val frame = pending
+        pending = ByteArray(bytesPerFrame)
         pendingSize = 0
-        return AudioChunk(nextSequence++, frame, sampleRateHz)
+        return toChunk(frame)
     }
+
+    private fun toChunk(frame: ByteArray): AudioChunk = AudioChunk(
+        sequence = nextSequence++,
+        pcm16Bytes = frame,
+        sampleRateHz = sampleRateHz,
+        capturedAtMonotonicNanos = nowNanos(),
+    )
 }

@@ -128,9 +128,9 @@ class OverlayVisibilityTest {
     }
 
     @Test
-    fun `success maps to hidden for deterministic confirm elsewhere`() {
+    fun `success maps to short completion cue`() {
         assertEquals(
-            OverlayVisibility.Hidden,
+            OverlayVisibility.Success,
             visibilityOf(ui(DictationState.Success(session("s")))),
         )
     }

@@ -18,6 +18,20 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.sin
 import kotlin.math.sqrt
 
+internal const val WAVEFORM_SILENCE_THRESHOLD = 0.005f
+
+/** Sanitizes microphone levels before they reach Compose animation/drawing. */
+internal fun normalizedWaveformAmplitude(amplitude: Float): Float =
+    if (amplitude.isFinite()) amplitude.coerceIn(0f, 1f) else 0f
+
+/** Collapses microphone-floor noise to one stable zero target. */
+internal fun effectiveWaveformAmplitude(amplitude: Float): Float =
+    normalizedWaveformAmplitude(amplitude).takeIf { it > WAVEFORM_SILENCE_THRESHOLD } ?: 0f
+
+/** The rolling phase is useful only while live audio is visibly above silence. */
+internal fun shouldAnimateWaveform(amplitude: Float, isListening: Boolean): Boolean =
+    isListening && effectiveWaveformAmplitude(amplitude) > 0f
+
 /**
  * 0.4.2 real-time waveform for the recording pill: a flat baseline on silence
  * that livens into a dancing skyline of peaks and crests as the user speaks.
@@ -28,31 +42,37 @@ import kotlin.math.sqrt
  * jump — 0.1 -> ~0.32 of full scale), and bars reach nearly the full canvas
  * height, so speech is unmistakable even at a quiet voice.
  *
- * Stateless and side-effect free: each bar's height is a deterministic function
- * of the rolling [phase] (an infinite transition) and its position, scaled by
- * the boosted amplitude.
+ * The rolling phase exists only while [isListening] and above the effective
+ * silence threshold. At silence (and on the pre-listening Starting surface) the
+ * transition leaves composition, so the static baseline consumes no frames.
  */
 @Composable
 fun RealTimeWaveform(
     amplitude: Float,
     modifier: Modifier = Modifier,
     lineColor: Color = Color.White.copy(alpha = 0.9f),
+    isListening: Boolean = true,
 ) {
+    val targetAmplitude = effectiveWaveformAmplitude(amplitude)
     val animated by animateFloatAsState(
-        targetValue = amplitude.coerceIn(0f, 1f),
+        targetValue = targetAmplitude,
         animationSpec = tween(durationMillis = 90),
         label = "waveformAmplitude",
     )
-    val transition = rememberInfiniteTransition(label = "wavePhase")
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = (Math.PI * 2).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 550, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "wavePhase",
-    )
+    val phaseState = if (shouldAnimateWaveform(targetAmplitude, isListening)) {
+        val transition = rememberInfiniteTransition(label = "wavePhase")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = (Math.PI * 2).toFloat(),
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 550, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "wavePhase",
+        )
+    } else {
+        null
+    }
 
     Canvas(modifier = modifier) {
         val w = this.size.width
@@ -69,7 +89,7 @@ fun RealTimeWaveform(
             cap = StrokeCap.Round,
         )
 
-        if (animated <= 0.005f) return@Canvas
+        if (animated <= WAVEFORM_SILENCE_THRESHOLD) return@Canvas
 
         // Sqrt boost: quiet speech still produces a lively, full-height skyline.
         val level = sqrt(animated.coerceIn(0f, 1f))
@@ -77,6 +97,7 @@ fun RealTimeWaveform(
 
         // Bar skyline: three overlapping sine components per bar for organic,
         // non-uniform peaks and crests; height scales with the boosted level.
+        val phase = phaseState?.value ?: 0f
         val barCount = 16
         val barWidth = (w / barCount) * 0.7f
         val step = w / barCount

@@ -119,8 +119,12 @@ class EditorTracker {
      * resource IDs are distinct (FR-8).
      */
     fun onViewFocused(event: AccessibilityEvent) {
-        val source = event.source ?: return
-        val editor = toEditor(source, event.windowId) ?: return
+        val source = event.source
+        val editor = source?.let { toEditor(it, event.windowId) }
+        if (editor == null) {
+            clearCurrentFocus()
+            return
+        }
         synchronized(this) {
             generation += 1
             currentFocus = editor.copy(generation = generation)
@@ -134,9 +138,17 @@ class EditorTracker {
      * editor is still focused.
      */
     fun refreshFromRoot(root: AccessibilityNodeInfo?) {
-        val node = root ?: return
-        val input = node.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: root
-        val editor = toEditor(input, input.window?.id ?: -1) ?: return
+        val node = root
+        if (node == null) {
+            clearCurrentFocus()
+            return
+        }
+        val input = node.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: node
+        val editor = toEditor(input, input.window?.id ?: -1)
+        if (editor == null) {
+            clearCurrentFocus()
+            return
+        }
         synchronized(this) {
             val prev = currentFocus
             if (prev != null &&
@@ -144,13 +156,23 @@ class EditorTracker {
                 prev.windowId == editor.windowId &&
                 prev.displayId == editor.displayId &&
                 prev.editorIdentity == editor.editorIdentity &&
-                prev.inputType == editor.inputType
+                prev.inputType == editor.inputType &&
+                prev.isPassword == editor.isPassword &&
+                prev.contentInvalid == editor.contentInvalid
             ) {
                 currentFocus = editor.copy(generation = prev.generation)
             } else {
                 generation += 1
                 currentFocus = editor.copy(generation = generation)
             }
+        }
+        recompute()
+    }
+
+    private fun clearCurrentFocus() {
+        synchronized(this) {
+            if (currentFocus != null) generation += 1
+            currentFocus = null
         }
         recompute()
     }

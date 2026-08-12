@@ -9,10 +9,43 @@ class AudioChunk(
     val pcm16Bytes: ByteArray,
     val sampleRateHz: Int,
     val frameMillis: Int = 20,
+    /**
+     * Capture time on the process monotonic clock, or null for legacy/test
+     * callers that do not provide timing metadata. This is never wall time.
+     */
+    val capturedAtMonotonicNanos: Long? = null,
 ) {
     /** Expected bytes per frame: frameMillis / 1000 * sampleRate * 16-bit (2 bytes). */
     val expectedByteCount: Int get() = frameMillis * sampleRateHz * CHAR_BYTES / 1000
     val byteCount: Int get() = pcm16Bytes.size
+
+    /**
+     * Non-negative age on the same monotonic clock, capped at [maxAgeNanos].
+     * Returns null when this chunk came from a source-compatible legacy caller.
+     */
+    fun ageNanos(
+        nowMonotonicNanos: Long,
+        maxAgeNanos: Long = Long.MAX_VALUE,
+    ): Long? {
+        require(maxAgeNanos >= 0L) { "maxAgeNanos must be >= 0, was $maxAgeNanos" }
+        val capturedAt = capturedAtMonotonicNanos ?: return null
+        return (nowMonotonicNanos - capturedAt).coerceIn(0L, maxAgeNanos)
+    }
+
+    /**
+     * Number of contiguous newer frames through [latestSequence], capped at
+     * [maxDepth]. This is suitable for bounded queue-depth instrumentation.
+     */
+    fun depthBehind(latestSequence: Long, maxDepth: Int): Int {
+        require(maxDepth >= 0) { "maxDepth must be >= 0, was $maxDepth" }
+        if (latestSequence <= sequence) return 0
+        val difference = latestSequence - sequence
+        return if (difference <= 0L || difference >= maxDepth.toLong()) {
+            maxDepth
+        } else {
+            difference.toInt()
+        }
+    }
 
     override fun equals(other: Any?): Boolean =
         other is AudioChunk && other.sequence == sequence && other.frameMillis == frameMillis &&

@@ -21,7 +21,6 @@ import androidx.core.util.size
 import com.whispertype.android.core.model.HotkeyShortcut
 import com.whispertype.android.core.model.InsertionResult
 import com.whispertype.android.core.model.SessionId
-import com.whispertype.android.core.model.TargetSnapshot
 import com.whispertype.android.core.settings.PreferencesFileReader
 import com.whispertype.android.data.settings.SettingsRepository
 import com.whispertype.android.platform.ipc.RuntimeIpc
@@ -40,8 +39,9 @@ import kotlinx.coroutines.launch
  * The dedicated `:accessibility`-process service (locked decision §3). It sees
  * the screen only and owns focus / target / insertion — never the overlay, the
  * microphone, or Gemini. Focus and keyboard state are pushed to the main-process
- * [FlowRuntimeService] over typed IPC; the runtime responds with insert requests.
- * No editor content is ever transported over IPC.
+ * [FlowRuntimeService] over typed IPC; the runtime reserves at tap time and later
+ * commits or releases that reservation. No editor content or target snapshot is
+ * ever transported over IPC.
  */
 class WhisperTypeAccessibilityService : AccessibilityService() {
 
@@ -56,6 +56,11 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
         liveTargetProvider = { resolveLiveTarget() },
         inputConnectionProvider = { inputMethod.getCurrentInputConnection() },
     )
+
+    private val targetReservations = TargetReservationStore()
+
+    private val pendingCommitReplies =
+        mutableMapOf<SessionId, MutableList<PendingCommitReply>>()
 
     @Volatile
     private var runtimeMessenger: Messenger? = null
@@ -73,12 +78,15 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
     @Volatile
     private var cachedHotkey: HotkeyShortcut = HotkeyShortcut(SettingsRepository.DEFAULT_HOTKEY_KEYCODE)
 
-    private var insertionJob: Job? = null
+    private var legacyInsertionJob: Job? = null
 
     private val replyHandler = object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(msg: Message) {
             when (msg.what) {
-                RuntimeIpc.MSG_INSERT -> onInsertRequest(msg)
+                RuntimeIpc.MSG_RESERVE_TARGET -> onReserveTargetRequest(msg)
+                RuntimeIpc.MSG_COMMIT_RESERVED_TARGET -> onCommitReservedTargetRequest(msg)
+                RuntimeIpc.MSG_RELEASE_RESERVED_TARGET -> onReleaseReservedTargetRequest(msg)
+                RuntimeIpc.MSG_INSERT -> onLegacyInsertRequest(msg)
                 else -> Log.w(TAG, "Unhandled runtime message ${msg.what}")
             }
         }
@@ -108,6 +116,8 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
 
         override fun onServiceDisconnected(name: ComponentName?) {
             runtimeMessenger = null
+            legacyInsertionJob?.cancel()
+            clearReservationState()
             Log.w(TAG, "Runtime service disconnected")
         }
     }
@@ -146,9 +156,13 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
         // inert — no focus/keyboard tracking, no eligibility, nothing.
         if (!cachedAppEnabled) return
         when (event.eventType) {
-            AccessibilityEvent.TYPE_VIEW_FOCUSED -> tracker.onViewFocused(event)
-            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> tracker.refreshFromRoot(rootInActiveWindow)
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> tracker.refreshFromRoot(rootInActiveWindow)
+            AccessibilityEvent.TYPE_VIEW_FOCUSED -> {
+                tracker.onViewFocused(event)
+                invalidateReservationsAgainstCurrentFocus()
+            }
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            -> refreshFocusedTarget()
             // TYPE_WINDOWS_CHANGED refreshes BOTH keyboard visibility and the
             // focused-editor state, matching Wispr's observed event pipeline (§4.4).
             AccessibilityEvent.TYPE_WINDOWS_CHANGED -> refreshFocusedEditorAndKeyboard()
@@ -157,7 +171,8 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
-        // No-op: cancellation of an in-flight session is handled by higher layers.
+        legacyInsertionJob?.cancel()
+        clearReservationState()
     }
 
     /**
@@ -179,17 +194,21 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
             true
         } catch (_: RemoteException) {
             runtimeMessenger = null
+            legacyInsertionJob?.cancel()
+            clearReservationState()
             false
         }
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
         runtimeMessenger = null
+        clearReservationState()
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
-        insertionJob?.cancel()
+        legacyInsertionJob?.cancel()
+        clearReservationState()
         try {
             unbindService(runtimeConnection)
         } catch (_: Throwable) {
@@ -246,6 +265,8 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
             if (runtimeMessenger == null) bindToRuntime()
         } else if (changed) {
             runtimeMessenger = null
+            legacyInsertionJob?.cancel()
+            clearReservationState()
             try {
                 unbindService(runtimeConnection)
             } catch (_: Throwable) {
@@ -270,54 +291,220 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
             remote.send(m)
         } catch (_: RemoteException) {
             runtimeMessenger = null
+            legacyInsertionJob?.cancel()
+            clearReservationState()
         }
     }
 
     // ------------------------------------------------------------------
-    // Insertion (Phase 4 cursor-aware, over IPC)
+    // Tap-time target reservation + exactly-once insertion
     // ------------------------------------------------------------------
 
-    private fun onInsertRequest(msg: Message) {
-        val text = msg.data?.getString(RuntimeIpc.KEY_INSERT_TEXT) ?: return
-        val sessionId = SessionId(msg.data?.getString(RuntimeIpc.KEY_SESSION_ID) ?: SessionId.new().value)
+    private fun onReserveTargetRequest(msg: Message) {
         val replyTo = msg.replyTo ?: run {
-            Log.w(TAG, "Insert request carried no reply messenger")
+            Log.w(TAG, "Reserve request carried no reply messenger")
             return
         }
-        insertionJob?.cancel()
-        insertionJob = scope.launch {
-            val target = gateway.captureTarget(sessionId)
-            val localizedTarget = target ?: TargetSnapshot(
-                sessionId = sessionId,
-                packageName = "",
-                displayId = 0,
-                windowId = -1,
-                editorIdentity = "",
-                generation = 0L,
-                inputTypeMask = 0,
-                isSecure = true,
-                isUncertain = false,
-                selectionStart = null,
-                selectionEnd = null,
-                capturedAtMillis = System.currentTimeMillis(),
-            )
+        val receivedAtNanos = monotonicNowNanos()
+        val request = RuntimeIpc.unpackReserveTargetRequest(msg.data) ?: run {
+            Log.w(TAG, "Rejected malformed reserve request")
+            return
+        }
+
+        // Re-resolve immediately: this is the tap-time boundary, not the last
+        // asynchronously observed accessibility event.
+        refreshFocusedTarget()
+        val target = gateway.captureTarget(request.sessionId)
+        val decision = targetReservations.reserve(
+            sessionId = request.sessionId,
+            target = target,
+            currentTarget = tracker.currentFocus?.reservationIdentity(),
+        )
+        val status = when (decision) {
+            is TargetReservationStore.ReserveDecision.Reserved ->
+                RuntimeIpc.ReservationStatus.RESERVED
+            is TargetReservationStore.ReserveDecision.Rejected -> when (decision.reason) {
+                TargetReservationStore.ReserveRejection.INELIGIBLE ->
+                    RuntimeIpc.ReservationStatus.INELIGIBLE
+                TargetReservationStore.ReserveRejection.CAPACITY_EXCEEDED ->
+                    RuntimeIpc.ReservationStatus.CAPACITY_EXCEEDED
+                TargetReservationStore.ReserveRejection.TARGET_CHANGED ->
+                    RuntimeIpc.ReservationStatus.TARGET_CHANGED
+                TargetReservationStore.ReserveRejection.SESSION_TERMINAL ->
+                    RuntimeIpc.ReservationStatus.SESSION_TERMINAL
+            }
+        }
+        val result = RuntimeIpc.ReserveTargetResult(
+            sessionId = request.sessionId,
+            status = status,
+            requestedAtNanos = request.requestedAtNanos,
+            receivedAtNanos = receivedAtNanos,
+            repliedAtNanos = monotonicNowNanos(),
+        )
+        val reply = Message.obtain(null, RuntimeIpc.MSG_RESERVE_TARGET_RESULT).apply {
+            data = RuntimeIpc.packReserveTargetResult(result)
+        }
+        try {
+            replyTo.send(reply)
+        } catch (_: RemoteException) {
+            // The runtime cannot know it owns this reservation, so release it.
+            targetReservations.release(request.sessionId)
+            Log.w(TAG, "Could not deliver target-reservation result")
+        }
+    }
+
+    private fun onCommitReservedTargetRequest(msg: Message) {
+        val replyTo = msg.replyTo ?: run {
+            Log.w(TAG, "Reserved commit carried no reply messenger")
+            return
+        }
+        val receivedAtNanos = monotonicNowNanos()
+        val request = RuntimeIpc.unpackCommitReservedTargetRequest(msg.data) ?: run {
+            Log.w(TAG, "Rejected malformed reserved commit")
+            return
+        }
+        val pending = PendingCommitReply(
+            replyTo = replyTo,
+            requestedAtNanos = request.requestedAtNanos,
+            receivedAtNanos = receivedAtNanos,
+        )
+
+        // Re-resolve and invalidate before atomically granting the one commit.
+        refreshFocusedTarget()
+        when (val decision = targetReservations.beginCommit(
+            sessionId = request.sessionId,
+            currentTarget = tracker.currentFocus?.reservationIdentity(),
+            commitStartedAtNanos = monotonicNowNanos(),
+        )) {
+            is TargetReservationStore.CommitDecision.Terminal -> {
+                sendCommitResult(request.sessionId, pending, decision.terminal)
+            }
+            TargetReservationStore.CommitDecision.InFlight -> {
+                if (!enqueueCommitReply(request.sessionId, pending)) {
+                    sendCommitResult(
+                        sessionId = request.sessionId,
+                        pending = pending,
+                        terminal = TargetReservationStore.TerminalResult(
+                            result = InsertionResult.Ambiguous,
+                            commitStartedAtNanos = null,
+                        ),
+                    )
+                }
+            }
+            is TargetReservationStore.CommitDecision.Execute -> {
+                enqueueCommitReply(request.sessionId, pending)
+                scope.launch {
+                    val result = try {
+                        gateway.insert(decision.target, request.text)
+                    } catch (failure: kotlinx.coroutines.CancellationException) {
+                        throw failure
+                    } catch (_: Throwable) {
+                        InsertionResult.Failed(InsertionDecision.connectionUnavailable())
+                    }
+                    val terminal = targetReservations.completeCommit(
+                        sessionId = request.sessionId,
+                        result = result,
+                        commitCompletedAtNanos = monotonicNowNanos(),
+                    )
+                    pendingCommitReplies.remove(request.sessionId)
+                        .orEmpty()
+                        .forEach { sendCommitResult(request.sessionId, it, terminal) }
+                }
+            }
+        }
+    }
+
+    private fun onReleaseReservedTargetRequest(msg: Message) {
+        val request = RuntimeIpc.unpackReleaseReservedTargetRequest(msg.data) ?: run {
+            Log.w(TAG, "Rejected malformed target release")
+            return
+        }
+        targetReservations.release(request.sessionId)
+    }
+
+    private fun enqueueCommitReply(
+        sessionId: SessionId,
+        pending: PendingCommitReply,
+    ): Boolean {
+        val replies = pendingCommitReplies.getOrPut(sessionId) { mutableListOf() }
+        if (replies.size >= MAX_PENDING_COMMIT_REPLIES_PER_SESSION) return false
+        replies += pending
+        return true
+    }
+
+    private fun sendCommitResult(
+        sessionId: SessionId,
+        pending: PendingCommitReply,
+        terminal: TargetReservationStore.TerminalResult,
+    ) {
+        val result = RuntimeIpc.CommitReservedTargetResult(
+            sessionId = sessionId,
+            result = terminal.result,
+            requestedAtNanos = pending.requestedAtNanos,
+            receivedAtNanos = pending.receivedAtNanos,
+            commitStartedAtNanos = terminal.commitStartedAtNanos,
+            commitCompletedAtNanos = terminal.commitCompletedAtNanos,
+            repliedAtNanos = monotonicNowNanos(),
+        )
+        val reply = Message.obtain(null, RuntimeIpc.MSG_INSERT_RESULT).apply {
+            data = RuntimeIpc.packCommitReservedTargetResult(result)
+        }
+        try {
+            pending.replyTo.send(reply)
+        } catch (_: RemoteException) {
+            Log.w(TAG, "Could not deliver reserved-target commit result")
+        }
+    }
+
+    /**
+     * Migration-only insertion path. It intentionally preserves the old wire
+     * message while new callers move to reserve -> commit/release.
+     */
+    private fun onLegacyInsertRequest(msg: Message) {
+        val replyTo = msg.replyTo ?: run {
+            Log.w(TAG, "Legacy insert carried no reply messenger")
+            return
+        }
+        val receivedAtNanos = monotonicNowNanos()
+        val request = RuntimeIpc.unpackCommitReservedTargetRequest(msg.data) ?: run {
+            Log.w(TAG, "Rejected malformed legacy insert")
+            return
+        }
+        legacyInsertionJob?.cancel()
+        legacyInsertionJob = scope.launch {
+            refreshFocusedTarget()
+            val target = gateway.captureTarget(request.sessionId)
+            val commitStartedAtNanos = if (target == null) null else monotonicNowNanos()
             val result = if (target == null) {
-                InsertionResult.Failed(com.whispertype.android.core.model.DictationFailure(
-                    code = "insert_target_ineligible",
-                    message = "No safe text field is focused. Not a password or secure field.",
-                    recoverable = true,
-                ))
+                val focus = tracker.currentFocus
+                if (focus?.isSecure == true || focus?.isUncertain == true) {
+                    InsertionResult.Failed(InsertionDecision.targetNotSafe())
+                } else {
+                    InsertionResult.Failed(
+                        com.whispertype.android.core.model.DictationFailure(
+                            code = "insert_target_ineligible",
+                            message = "No safe text field is focused. Not a password or secure field.",
+                            recoverable = true,
+                        ),
+                    )
+                }
             } else {
-                gateway.insert(localizedTarget, text)
+                gateway.insert(target, request.text)
             }
-            val reply = Message.obtain(null, RuntimeIpc.MSG_INSERT_RESULT).apply {
-                data = RuntimeIpc.packInsertionResult(result, sessionId = sessionId.value)
-            }
-            try {
-                replyTo.send(reply)
-            } catch (_: RemoteException) {
-                Log.w(TAG, "Could not deliver insertion result")
-            }
+            val commitCompletedAtNanos = if (target == null) null else monotonicNowNanos()
+            sendCommitResult(
+                sessionId = request.sessionId,
+                pending = PendingCommitReply(
+                    replyTo = replyTo,
+                    requestedAtNanos = request.requestedAtNanos,
+                    receivedAtNanos = receivedAtNanos,
+                ),
+                terminal = TargetReservationStore.TerminalResult(
+                    result = result,
+                    commitStartedAtNanos = commitStartedAtNanos,
+                    commitCompletedAtNanos = commitCompletedAtNanos,
+                ),
+            )
         }
     }
 
@@ -326,8 +513,17 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
     // ------------------------------------------------------------------
 
     private fun refreshFocusedEditorAndKeyboard() {
-        tracker.refreshFromRoot(rootInActiveWindow)
+        refreshFocusedTarget()
         refreshKeyboardVisible()
+    }
+
+    private fun refreshFocusedTarget() {
+        tracker.refreshFromRoot(rootInActiveWindow)
+        invalidateReservationsAgainstCurrentFocus()
+    }
+
+    private fun invalidateReservationsAgainstCurrentFocus() {
+        targetReservations.invalidateAgainst(tracker.currentFocus?.reservationIdentity())
     }
 
     private fun refreshKeyboardVisible() {
@@ -349,24 +545,50 @@ class WhisperTypeAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow ?: return null
         val focus = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: root
         if (!focus.isEditable) return null
+        val tracked = tracker.currentFocus ?: return null
+        val packageName = focus.packageName?.toString() ?: return null
+        val displayId = focus.window?.displayId ?: -1
         val windowId = focus.window?.id ?: -1
-
-        val tracked = tracker.currentFocus
-        val packageName = tracked?.packageName ?: focus.packageName?.toString() ?: return null
-        val generation = tracked?.generation ?: 0L
+        val editorIdentity = focus.viewIdResourceName.orEmpty()
+        if (tracked.packageName != packageName ||
+            tracked.displayId != displayId ||
+            tracked.windowId != windowId ||
+            tracked.editorIdentity.orEmpty() != editorIdentity
+        ) {
+            return null
+        }
         return LiveTarget(
             packageName = packageName,
+            displayId = displayId,
             windowId = windowId,
-            generation = generation,
-            node = focus,
+            editorIdentity = editorIdentity,
+            generation = tracked.generation,
+            isSecure = tracked.isSecure,
+            isUncertain = tracked.isUncertain,
         )
     }
+
+    private fun clearReservationState() {
+        pendingCommitReplies.clear()
+        targetReservations.clear()
+    }
+
+    private fun monotonicNowNanos(): Long = System.nanoTime()
+
+    private data class PendingCommitReply(
+        val replyTo: Messenger,
+        val requestedAtNanos: Long?,
+        val receivedAtNanos: Long,
+    )
 
     private companion object {
         const val TAG = "WhisperTypeAccessibility"
 
         /** Poll cadence for re-reading the on-disk app-enabled kill switch. */
         const val APP_ENABLED_POLL_MS = 2000L
+
+        /** Same-app IPC duplicates are bounded independently of reservation count. */
+        const val MAX_PENDING_COMMIT_REPLIES_PER_SESSION = 8
     }
 }
 

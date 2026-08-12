@@ -10,6 +10,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.Gravity
 import android.view.View
+import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.widget.TextView
 import androidx.compose.runtime.collectAsState
@@ -22,7 +23,6 @@ import com.whispertype.android.core.model.OverlayIntent
 import com.whispertype.android.core.model.OverlayUiState
 import com.whispertype.android.core.model.TargetEligibility
 import com.whispertype.android.core.overlay.BubblePlacement
-import com.whispertype.android.ui.theme.WhisperTypeTheme
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,11 +31,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
@@ -43,10 +42,11 @@ import kotlinx.coroutines.launch
  *
  * Positioning is deliberately simple (0.4.1): the window always uses
  * `gravity = TOP|START` with an absolute pixel [currentPixel] as the single
- * source of truth. A drag adds deltas to that pixel position and calls
- * `updateViewLayout`; clamping uses the real measured view size. While
- * dragging, a small "X" drop target appears near the bottom; dropping the
- * bubble on it hides the bubble until the next eligible field is focused.
+ * source of truth. Drag deltas are coalesced into at most one
+ * `updateViewLayout` per display frame and persisted once at drag end;
+ * clamping uses the real measured view size. While dragging, a small "X" drop
+ * target appears near the bottom; dropping the bubble on it hides the bubble
+ * until the next eligible field is focused.
  *
  * The window is `TYPE_APPLICATION_OVERLAY` (SYSTEM_ALERT_WINDOW), WRAP_CONTENT,
  * translucent, non-focusable, touchable. A lifecycle-backed ComposeView renders
@@ -76,9 +76,6 @@ class PersistentOverlayHost(
 
     private val _appearance = MutableStateFlow(OverlayAppearance())
     val appearance: StateFlow<OverlayAppearance> = _appearance
-
-    /** 0.4.2 kill switch state (reflects the app-enabled setting). */
-    private val _appEnabled = MutableStateFlow(true)
 
     private val _intents = MutableSharedFlow<OverlayIntent>(extraBufferCapacity = 4)
     override val intents: SharedFlow<OverlayIntent> = _intents
@@ -132,17 +129,27 @@ class PersistentOverlayHost(
     @Volatile
     private var dropTargetBounds: Rect? = null
 
-    /** True while a recording pill is shown; the window is anchored so the pill's
-     *  Done button sits exactly where the bubble was when it was tapped. */
+    /** Last visibility used to avoid re-anchoring on amplitude-only updates. */
     @Volatile
-    private var pillKind: PillKind? = null
+    private var renderedVisibility: OverlayVisibility = OverlayVisibility.Hidden
 
     /** Bubble center (px) captured before the pill anchor, so the bubble is
      *  restored to the same spot when the session returns to idle. */
     @Volatile
     private var storedBubbleCenter: Pair<Int, Int>? = null
 
-    private var positionChangeDebounce: Runnable? = null
+    private var pendingAnchorView: View? = null
+    private var pendingAnchorListener: ViewTreeObserver.OnPreDrawListener? = null
+
+    private val dragFrames = DragFrameCoalescer()
+    private var dragFrameView: View? = null
+    private var dragActive = false
+    private var dragEnding = false
+    private val dragFrameCallback = Runnable {
+        dragFrameView = null
+        dragFrames.consume()?.let(::applyDragDelta)
+        if (dragEnding) completeDrag()
+    }
 
     private var retryCount = 0
 
@@ -150,12 +157,12 @@ class PersistentOverlayHost(
 
     init {
         scope.launch {
-            combine(sessionState, eligibility) { state, target ->
-                OverlayUiState(eligibility = target, state = state)
+            combine(sessionState, eligibility, appEnabled) { state, target, enabled ->
+                Triple(state, target, enabled)
             }
-                .stateIn(scope, SharingStarted.Eagerly, OverlayUiState.Hidden)
-                .collect { ui ->
-                    val eligible = ui.eligibility.eligible
+                .distinctUntilChanged()
+                .collect { (state, target, enabled) ->
+                    val eligible = target.eligible
                     // A fresh eligibility cycle (ineligible -> eligible) re-shows a
                     // dismissed bubble and re-attempts a failed overlay attach
                     // (e.g. after the user grants Display-over-other-apps).
@@ -168,48 +175,14 @@ class PersistentOverlayHost(
                     wasEligible = eligible
                     // 0.4.2 kill switch: with the app disabled, the idle bubble is
                     // hidden entirely (active sessions are not interrupted).
-                    val appDisabled = !_appEnabled.value
+                    val ui = OverlayUiState(eligibility = target, state = state)
                     val effective =
-                        if ((dismissed || appDisabled) && ui.state is DictationState.Idle) {
+                        if ((dismissed || !enabled) && state is DictationState.Idle) {
                             OverlayUiState.Hidden
                         } else {
                             ui
                         }
-                    // 0.4.2: anchor the pill so it appears where the bubble was.
-                    // Interactive pills (Starting/Listening) keep their Done button
-                    // on the bubble's center (the tap point); status capsules
-                    // (Finalizing/Inserting) re-center on the bubble so
-                    // they do not drift left of it. Restore on return to idle.
-                    val s = effective.state
-                    val kind = when (s) {
-                        is DictationState.Starting,
-                        is DictationState.Listening,
-                        -> PillKind.INTERACTIVE
-
-                        is DictationState.Finalizing,
-                        is DictationState.Inserting,
-                        -> PillKind.STATUS
-
-                        else -> null
-                    }
-                    if (kind != pillKind) {
-                        when {
-                            kind == null -> {
-                                pillKind = null
-                                restoreBubblePosition()
-                            }
-                            pillKind == null -> {
-                                storedBubbleCenter = bubbleCenter()
-                                pillKind = kind
-                                schedulePillAnchor(kind)
-                            }
-                            else -> {
-                                pillKind = kind
-                                schedulePillAnchor(kind)
-                            }
-                        }
-                    }
-                    _uiState.value = effective
+                    render(effective)
                 }
         }
         // 0.4.2: combine the user-configurable bubble appearance settings.
@@ -222,22 +195,46 @@ class PersistentOverlayHost(
                     miniDotAutoMinimizeMs = delay.coerceIn(1, 15) * 1000L,
                 )
             }
+                .distinctUntilChanged()
                 .collect { _appearance.value = it }
-        }
-        // 0.4.2 kill switch.
-        scope.launch {
-            appEnabled.collect { _appEnabled.value = it }
         }
         // 0.6.0: follow the display hosting the focused editor (Samsung DeX
         // secondary display). The overlay window is re-parented on change; a
         // pre-attach change is picked up by performAttach via activeDisplayId.
         scope.launch {
-            displayId.collect { id ->
+            displayId.distinctUntilChanged().collect { id ->
                 if (id != activeDisplayId) {
                     activeDisplayId = id
                     handler.post { moveWindowToDisplay(activeDisplayId) }
                 }
             }
+        }
+    }
+
+    /** Publishes one render state and schedules anchoring only for surface changes. */
+    private fun render(ui: OverlayUiState) {
+        val nextVisibility = visibilityOf(ui)
+        val previousVisibility = renderedVisibility
+        val anchorMode = anchorModeFor(nextVisibility)
+        if (anchorMode != null && storedBubbleCenter == null) {
+            storedBubbleCenter = bubbleCenter()
+        }
+        renderedVisibility = nextVisibility
+        _uiState.value = ui
+
+        when {
+            anchorMode != null && nextVisibility != previousVisibility ->
+                schedulePillAnchor(nextVisibility, anchorMode)
+
+            nextVisibility == OverlayVisibility.IdleBubble && storedBubbleCenter != null ->
+                schedulePillAnchor(
+                    visibility = nextVisibility,
+                    mode = OverlayAnchorMode.Center,
+                    clearStoredCenter = true,
+                )
+
+            anchorMode == null && storedBubbleCenter != null ->
+                restoreBubblePosition()
         }
     }
 
@@ -268,6 +265,7 @@ class PersistentOverlayHost(
             windowManager = wm
             wm.addView(container, buildLayoutParams(context, placement))
             view = container
+            scheduleCurrentAnchor()
             retryCount = 0
             machine.attachSucceeded()
         } catch (t: Throwable) {
@@ -294,11 +292,9 @@ class PersistentOverlayHost(
                     uiState = current,
                     appearance = currentAppearance,
                     onIntent = { _intents.tryEmit(it) },
-                    onDragStart = { showDropTarget() },
+                    onDragStart = { beginDrag() },
                     onDragBubble = { dx, dy -> moveBy(dx, dy) },
-                    // 0.4.2: check the drop BEFORE hiding the target, because
-                    // checkDropDismiss() reads dropTargetBounds.
-                    onDragEnd = { checkDropDismiss(); hideDropTarget() },
+                    onDragEnd = { finishDrag() },
                 )
             }
         }
@@ -319,6 +315,9 @@ class PersistentOverlayHost(
         val context = windowContextFor(displayId) ?: serviceContext
         val newWm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         if (newWm === oldWm) return
+        abortDrag()
+        hideDropTarget()
+        cancelPendingAnchor()
         try {
             oldWm.removeView(currentView)
         } catch (t: Throwable) {
@@ -331,6 +330,7 @@ class PersistentOverlayHost(
         try {
             newWm.addView(container, buildLayoutParams(context, placement))
             view = container
+            scheduleCurrentAnchor()
         } catch (t: Throwable) {
             Log.w(TAG, "Overlay re-attach on display $displayId failed", t)
             view = null
@@ -368,6 +368,8 @@ class PersistentOverlayHost(
     }
 
     private fun performDetach() {
+        abortDrag()
+        cancelPendingAnchor()
         hideDropTarget()
         if (!machine.detachRequested()) {
             _status.value = machine.status
@@ -442,8 +444,27 @@ class PersistentOverlayHost(
             this.y = y
         }
 
-    /** Moves the window by a pixel delta; clamps with the real measured size. */
+    private fun beginDrag() {
+        abortDrag()
+        dragActive = true
+        showDropTarget()
+    }
+
+    /**
+     * Queues a pointer delta. All deltas received before the next display frame
+     * are folded into one WindowManager update.
+     */
     fun moveBy(dxPx: Float, dyPx: Float) {
+        if (!dragActive) return
+        val currentView = view ?: return
+        if (dragFrames.enqueue(dxPx, dyPx)) {
+            dragFrameView = currentView
+            currentView.postOnAnimation(dragFrameCallback)
+        }
+    }
+
+    /** Applies one frame's accumulated movement using the freshly measured bubble. */
+    private fun applyDragDelta(delta: DragDelta) {
         val currentView = view ?: return
         val wm = windowManager ?: return
         val base = currentPixel ?: return
@@ -451,33 +472,57 @@ class PersistentOverlayHost(
         val h = currentView.height.takeIf { it > 0 } ?: bubblePx()
         val (dw, dh) = displaySizePx()
         val target = BubblePlacement.clamp(
-            (base.first + dxPx).roundToInt(),
-            (base.second + dyPx).roundToInt(),
+            (base.first + delta.x).roundToInt(),
+            (base.second + delta.y).roundToInt(),
             w,
             h,
             dw,
             dh,
         )
-        wm.updateViewLayout(currentView, windowParams(target.first, target.second))
+        if (target != base) {
+            wm.updateViewLayout(currentView, windowParams(target.first, target.second))
+        }
         currentPixel = target
-        persistPosition(target)
+    }
+
+    /** Finishes after any queued frame, then persists exactly once for the drag. */
+    private fun finishDrag() {
+        if (!dragActive) {
+            hideDropTarget()
+            return
+        }
+        dragEnding = true
+        if (!dragFrames.hasPendingFrame) completeDrag()
+    }
+
+    private fun completeDrag() {
+        if (!dragActive) return
+        dragActive = false
+        dragEnding = false
+        currentPixel?.let(::persistPosition)
+        // Check before hiding because checkDropDismiss() reads dropTargetBounds.
+        checkDropDismiss()
+        hideDropTarget()
+    }
+
+    private fun abortDrag() {
+        dragFrameView?.removeCallbacks(dragFrameCallback)
+        dragFrameView = null
+        dragFrames.clear()
+        dragActive = false
+        dragEnding = false
     }
 
     private fun persistPosition(pixel: Pair<Int, Int>) {
         val callback = onBubblePositionChange ?: return
-        positionChangeDebounce?.let(handler::removeCallbacks)
         val xDp = pixel.first / density()
         val yDp = pixel.second / density()
-        val runnable = Runnable { callback(xDp, yDp) }
-        positionChangeDebounce = runnable
-        handler.postDelayed(runnable, DRAG_SETTLE_DEBOUNCE_MS)
+        callback(xDp, yDp)
     }
 
     // ------------------------------------------------------------------
-    // 0.4.2: recording-pill anchoring (Done / status text sits where the bubble was)
+    // Recording-pill anchoring
     // ------------------------------------------------------------------
-
-    private enum class PillKind { INTERACTIVE, STATUS }
 
     /** The visible bubble's size in px (48dp touch floor, user size above). */
     private fun bubbleSizePx(): Int = (maxOf(48f, _appearance.value.bubbleSizeDp.toFloat()) * density()).roundToInt()
@@ -489,62 +534,83 @@ class PersistentOverlayHost(
         return Pair(base.first + s / 2, base.second + s / 2)
     }
 
-    /** Anchors the window for the current pill kind. Interactive pills use fixed
-     *  offsets; status capsules center on the bubble's center after the content
-     *  re-layouts (their size is content-dependent). */
-    private fun schedulePillAnchor(kind: PillKind) {
+    private fun scheduleCurrentAnchor() {
+        val mode = anchorModeFor(renderedVisibility) ?: return
+        if (storedBubbleCenter == null) storedBubbleCenter = bubbleCenter()
+        schedulePillAnchor(renderedVisibility, mode)
+    }
+
+    /**
+     * Anchors on pre-draw, after Compose has measured the newly selected
+     * surface. Replacing the pending listener prevents an older pill state from
+     * applying stale dimensions after a fast transition.
+     */
+    private fun schedulePillAnchor(
+        visibility: OverlayVisibility,
+        mode: OverlayAnchorMode,
+        clearStoredCenter: Boolean = false,
+    ) {
         val center = storedBubbleCenter ?: return
-        when (kind) {
-            PillKind.INTERACTIVE -> positionInteractivePill(center)
-            PillKind.STATUS -> positionStatusCapsule(center)
-        }
-    }
-
-    /** Anchors the interactive [X][wave][Done] pill so the Done button center sits
-     *  on the bubble's center (the tap point), using PILL_DONE_OFFSET_*_DP from the
-     *  window's top-left corner. Clamped to stay on-screen. */
-    private fun positionInteractivePill(center: Pair<Int, Int>) {
-        val wm = windowManager ?: return
-        val v = view ?: return
-        val anchorX = (PILL_DONE_OFFSET_X_DP * density()).roundToInt()
-        val anchorY = (PILL_DONE_OFFSET_Y_DP * density()).roundToInt()
-        val w = v.width.takeIf { it > 0 } ?: 0
-        val h = v.height.takeIf { it > 0 } ?: 0
-        val (dw, dh) = displaySizePx()
-        val x = (center.first - anchorX).coerceIn(0, maxOf(0, dw - w))
-        val y = (center.second - anchorY).coerceIn(0, maxOf(0, dh - h))
-        wm.updateViewLayout(v, windowParams(x, y))
-        currentPixel = x to y
-    }
-
-    /** Centers a status capsule (Finalizing/Inserting) on the bubble's
-     *  center so the text appears exactly where the bubble/pill was. Because the
-     *  capsule's size depends on its text and re-layouts after the state change, the
-     *  reposition runs on the next global layout with the freshly measured size. */
-    private fun positionStatusCapsule(center: Pair<Int, Int>) {
-        val v = view ?: return
-        v.viewTreeObserver.addOnGlobalLayoutListener(object : android.view.ViewTreeObserver.OnGlobalLayoutListener {
-            override fun onGlobalLayout() {
-                v.viewTreeObserver.removeOnGlobalLayoutListener(this)
-                val w = v.width
-                val h = v.height
-                if (w <= 0 || h <= 0) return
-                val wm = windowManager ?: return
-                val (dw, dh) = displaySizePx()
-                val x = (center.first - w / 2).coerceIn(0, maxOf(0, dw - w))
-                val y = (center.second - h / 2).coerceIn(0, maxOf(0, dh - h))
-                wm.updateViewLayout(v, windowParams(x, y))
-                currentPixel = x to y
+        val anchorView = view ?: return
+        cancelPendingAnchor()
+        val listener = object : ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                if (pendingAnchorListener !== this) return true
+                cancelPendingAnchor()
+                if (
+                    view !== anchorView ||
+                    renderedVisibility != visibility ||
+                    storedBubbleCenter != center
+                ) {
+                    return true
+                }
+                val width = anchorView.width
+                val height = anchorView.height
+                if (width <= 0 || height <= 0) return true
+                val wm = windowManager ?: return true
+                val (displayWidth, displayHeight) = displaySizePx()
+                val target = anchoredTopLeft(
+                    mode = mode,
+                    bubbleCenter = center,
+                    windowWidth = width,
+                    windowHeight = height,
+                    displayWidth = displayWidth,
+                    displayHeight = displayHeight,
+                    density = density(),
+                )
+                val positionChanged = target != currentPixel
+                if (positionChanged) {
+                    wm.updateViewLayout(anchorView, windowParams(target.first, target.second))
+                    currentPixel = target
+                }
+                if (clearStoredCenter && storedBubbleCenter == center) {
+                    storedBubbleCenter = null
+                }
+                // Skip this draw when the window moved so the stale anchor never flashes.
+                return !positionChanged
             }
-        })
+        }
+        pendingAnchorView = anchorView
+        pendingAnchorListener = listener
+        anchorView.viewTreeObserver.addOnPreDrawListener(listener)
+        anchorView.invalidate()
+    }
+
+    private fun cancelPendingAnchor() {
+        val anchorView = pendingAnchorView
+        val listener = pendingAnchorListener
+        pendingAnchorView = null
+        pendingAnchorListener = null
+        if (anchorView != null && listener != null && anchorView.viewTreeObserver.isAlive) {
+            anchorView.viewTreeObserver.removeOnPreDrawListener(listener)
+        }
     }
 
     /** Restores the window to the bubble's top-left (the saved center minus half
      *  the bubble size), keeping it on-screen. */
     private fun restoreBubblePosition() {
-        val wm = windowManager ?: return
-        val v = view ?: return
         val center = storedBubbleCenter ?: return
+        cancelPendingAnchor()
         storedBubbleCenter = null
         val s = bubbleSizePx()
         val (dw, dh) = displaySizePx()
@@ -556,7 +622,11 @@ class PersistentOverlayHost(
             dw,
             dh,
         )
-        wm.updateViewLayout(v, windowParams(target.first, target.second))
+        val currentView = view
+        val wm = windowManager
+        if (currentView != null && wm != null && target != currentPixel) {
+            wm.updateViewLayout(currentView, windowParams(target.first, target.second))
+        }
         currentPixel = target
     }
 
@@ -640,17 +710,7 @@ class PersistentOverlayHost(
         const val TAG = "PersistentOverlayHost"
         const val MAX_ATTACH_RETRIES = 3
         const val ATTACH_RETRY_DELAY_MS = 2000L
-        const val DRAG_SETTLE_DEBOUNCE_MS = 150L
         const val DROP_TARGET_DP = 56f
         const val DROP_TARGET_MARGIN_DP = 24f
-
-        /** Distance from the pill window's top-left corner to the Done button
-         *  center for the [X][wave 72dp][Done] pill layout:
-         *  horizontally 6 dp padding + 48 dp Cancel + 4 dp gap + 72 dp wave +
-         *  4 dp gap + 24 dp half of the 48 dp Done button; vertically 6 dp
-         *  padding + half the 52 dp wave (the button is vertically centered).
-         *  Keep in sync with [WhisperTypeOverlayContent.ListeningCapsule]. */
-        const val PILL_DONE_OFFSET_X_DP = 158f
-        const val PILL_DONE_OFFSET_Y_DP = 32f
     }
 }

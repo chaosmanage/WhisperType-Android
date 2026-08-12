@@ -1,7 +1,6 @@
 package com.whispertype.android.platform.overlay
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -55,6 +54,7 @@ import com.whispertype.android.core.model.OverlayUiState
 import com.whispertype.android.ui.theme.WhisperTypeColors
 import com.whispertype.android.ui.theme.WhisperTypeTheme
 import com.whispertype.android.ui.waveform.RealTimeWaveform
+import com.whispertype.android.ui.waveform.effectiveWaveformAmplitude
 import kotlinx.coroutines.delay
 
 /**
@@ -84,14 +84,17 @@ fun WhisperTypeOverlayContent(
             )
             OverlayVisibility.Starting -> StartingCapsule(onIntent = onIntent)
             OverlayVisibility.Listening -> ListeningCapsule(
-                amplitude = (uiState.state as DictationState.Listening).amplitude,
+                amplitude = effectiveWaveformAmplitude(
+                    (uiState.state as DictationState.Listening).amplitude ?: 0f,
+                ),
                 onIntent = onIntent,
             )
             OverlayVisibility.Finalizing ->
                 StatusCapsule(stringResource(R.string.dictation_finalizing))
             OverlayVisibility.Inserting ->
                 StatusCapsule(stringResource(R.string.dictation_inserting))
-            OverlayVisibility.Success -> Unit
+            OverlayVisibility.Success ->
+                SuccessCapsule(stringResource(R.string.dictation_done))
             OverlayVisibility.CopyAvailable -> CopyAvailablePanel(onIntent = onIntent)
             OverlayVisibility.CopiedToClipboard ->
                 StatusCapsule(stringResource(R.string.dictation_copied_to_clipboard))
@@ -213,7 +216,7 @@ private fun PanelSurface(content: @Composable () -> Unit) {
  *  on the right. Done commits the dictation; Cancel discards it. */
 @Composable
 private fun ListeningCapsule(
-    amplitude: Float?,
+    amplitude: Float,
     onIntent: (OverlayIntent) -> Unit,
 ) {
     Surface(
@@ -234,8 +237,9 @@ private fun ListeningCapsule(
                 onClick = { onIntent(OverlayIntent.CANCEL) },
             )
             RealTimeWaveform(
-                amplitude = amplitude ?: 0f,
+                amplitude = amplitude,
                 modifier = Modifier.size(width = 72.dp, height = 52.dp),
+                isListening = true,
             )
             PillAction(
                 tag = stringResource(R.string.test_tag_stop),
@@ -271,6 +275,7 @@ private fun StartingCapsule(onIntent: (OverlayIntent) -> Unit) {
             RealTimeWaveform(
                 amplitude = 0f,
                 modifier = Modifier.size(width = 72.dp, height = 52.dp),
+                isListening = false,
             )
         }
     }
@@ -290,6 +295,34 @@ private fun StatusCapsule(text: String) {
             style = MaterialTheme.typography.labelLarge,
             color = WhisperTypeColors.OnSurface,
         )
+    }
+}
+
+/** Short terminal confirmation; the coordinator's Success state bounds its duration. */
+@Composable
+private fun SuccessCapsule(text: String) {
+    Surface(
+        modifier = Modifier.testTag(stringResource(R.string.test_tag_panel)),
+        shape = RoundedCornerShape(50),
+        color = WhisperTypeColors.SurfaceRaised.copy(alpha = 0.85f),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = null,
+                tint = WhisperTypeColors.SuccessAccent,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                color = WhisperTypeColors.OnSurface,
+            )
+        }
     }
 }
 

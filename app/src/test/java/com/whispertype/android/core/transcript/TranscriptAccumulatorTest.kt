@@ -2,7 +2,9 @@ package com.whispertype.android.core.transcript
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * Unit tests for the session-local [TranscriptAccumulator] merge rules
@@ -170,6 +172,14 @@ class TranscriptAccumulatorTest {
     }
 
     @Test
+    fun `appendDeltas replaces a provisional final word fragment`() {
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        accumulator.accept("please sched")
+
+        assertEquals("please schedule", accumulator.accept("please schedule"))
+    }
+
+    @Test
     fun `appendDeltas keeps the longest value when a cumulative extension arrives after deltas`() {
         val accumulator = TranscriptAccumulator(appendDeltas = true)
         accumulator.accept("hello")
@@ -186,5 +196,127 @@ class TranscriptAccumulatorTest {
         accumulator.accept("hello")
         assertEquals("world", accumulator.accept("world"))
         assertEquals("world", accumulator.current)
+    }
+
+    @Test
+    fun `acceptWithResult distinguishes state changes from ignored messages`() {
+        val accumulator = TranscriptAccumulator()
+
+        val first = accumulator.acceptWithResult("hello")
+        assertTrue(first.changed)
+        assertEquals("hello", first.text)
+
+        assertFalse(accumulator.acceptWithResult("hello").changed)
+        assertFalse(accumulator.acceptWithResult("   ").changed)
+
+        val extension = accumulator.acceptWithResult("hello world")
+        assertTrue(extension.changed)
+        assertEquals("hello world", extension.text)
+        assertEquals(2, accumulator.revisionCount)
+    }
+
+    @Test
+    fun `punctuation-only revision reports a real text change`() {
+        val accumulator = TranscriptAccumulator()
+        accumulator.accept("hello world!")
+
+        val revision = accumulator.acceptWithResult("hello world")
+
+        assertTrue(revision.changed)
+        assertEquals("hello world", revision.text)
+        assertEquals(2, accumulator.revisionCount)
+    }
+
+    @Test
+    fun `appendDeltas merges the maximal multiword suffix prefix overlap`() {
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        accumulator.accept("alpha beta gamma delta")
+
+        assertEquals(
+            "alpha beta gamma delta epsilon zeta",
+            accumulator.accept("gamma delta epsilon zeta"),
+        )
+        assertEquals(2, accumulator.revisionCount)
+    }
+
+    @Test
+    fun `maximal overlap handles repeated connector words without duplication`() {
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        accumulator.accept("tea and biscuits and tea and")
+
+        assertEquals(
+            "tea and biscuits and tea and coffee",
+            accumulator.accept("tea and coffee"),
+        )
+    }
+
+    @Test
+    fun `cumulative correction wins over a coincidental tail overlap`() {
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        accumulator.accept("go home and go")
+
+        assertEquals("go home and stay", accumulator.accept("go home and stay"))
+        assertEquals(2, accumulator.revisionCount)
+    }
+
+    @Test
+    fun `correction may revise the first token while preserving the remainder`() {
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        accumulator.accept("Their meeting starts Friday")
+
+        assertEquals(
+            "The meeting starts Friday",
+            accumulator.accept("The meeting starts Friday"),
+        )
+    }
+
+    @Test
+    fun `unrelated equal length messages remain true deltas`() {
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        accumulator.accept("alpha beta")
+
+        assertEquals("alpha beta gamma delta", accumulator.accept("gamma delta"))
+    }
+
+    @Test
+    fun `fully overlapped replay is unchanged`() {
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        accumulator.accept("one two three")
+
+        val replay = accumulator.acceptWithResult("two three")
+        assertFalse(replay.changed)
+        assertEquals("one two three", replay.text)
+        assertEquals(1, accumulator.revisionCount)
+    }
+
+    @Test
+    fun `overlap uses incoming terminal punctuation`() {
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        accumulator.accept("Hello world")
+
+        assertEquals("Hello world! Again", accumulator.accept("world! Again"))
+    }
+
+    @Test
+    fun `punctuation delta attaches after trailing whitespace`() {
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        accumulator.accept("Hello ")
+
+        assertEquals("Hello, world", accumulator.accept(", world"))
+    }
+
+    @Test
+    fun `all overlap lengths append each continuation exactly once`() {
+        val prefix = listOf("zero", "one", "two", "three", "four", "five")
+        val continuation = listOf("six", "seven")
+        val expected = (prefix + continuation).joinToString(" ")
+
+        for (overlap in 1..prefix.size) {
+            val accumulator = TranscriptAccumulator(appendDeltas = true)
+            accumulator.accept(prefix.joinToString(" "))
+            val message = (prefix.takeLast(overlap) + continuation).joinToString(" ")
+
+            assertEquals(expected, accumulator.accept(message), "overlap=$overlap")
+        }
     }
 }

@@ -92,15 +92,15 @@ fun audioSourceFactory(
  * exposed as an input device while a SCO connection is active, so this source
  * opens one: it enters [AudioManager.MODE_IN_COMMUNICATION], requests SCO, waits
  * briefly for the headset's input device to appear, and pins the recording to it
- * with [AudioRecord.setPreferredDevice]. On [release] the SCO connection is
- * closed and the normal audio mode is restored. Returns null from [build] (and
- * cleans up) when the headset mic cannot be brought up, so the caller falls back
- * to the phone mic.
+ * with [AudioRecord.setPreferredDevice]. [requestStop] only unblocks recording;
+ * on [release] the SCO connection is closed and the normal audio mode is
+ * restored. Returns null from [build] (and cleans up) when the headset mic cannot
+ * be brought up, so the caller falls back to the phone mic.
  */
 @Suppress("DEPRECATION")
 private class ScoCaptureSource(
     private val audioManager: AudioManager,
-) : PcmSource {
+) : InterruptiblePcmSource {
 
     private var delegate: PcmSource? = null
 
@@ -139,6 +139,10 @@ private class ScoCaptureSource(
     }
 
     override fun read(out: ByteArray): Int = delegate?.read(out) ?: 0
+
+    override fun requestStop() {
+        (delegate as? InterruptiblePcmSource)?.requestStop()
+    }
 
     override fun release() {
         try {

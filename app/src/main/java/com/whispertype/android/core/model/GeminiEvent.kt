@@ -29,6 +29,15 @@ sealed interface GeminiEvent {
     /** Activity end acknowledged by the server. */
     data object TurnComplete : GeminiEvent
 
+    /** Model generation ended; transcription messages may still arrive independently. */
+    data object GenerationComplete : GeminiEvent
+
+    /** The current model generation was interrupted by new realtime input. */
+    data object Interrupted : GeminiEvent
+
+    /** Advance notice; [timeLeft] is the server's protobuf JSON duration string. */
+    data class GoAway(val timeLeft: String?) : GeminiEvent
+
     /** Server closed the turn/session. */
     data object SessionEnd : GeminiEvent
 

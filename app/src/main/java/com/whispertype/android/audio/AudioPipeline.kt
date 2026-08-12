@@ -25,14 +25,24 @@ interface AudioPipeline {
     /** Typed terminal failures (mic init/read); the latest is replayed. */
     val failures: SharedFlow<DictationFailure>
 
+    /** Maximum number of frames buffered by [chunks], when known. */
+    val frameQueueCapacity: Int get() = 0
+
+    /**
+     * Bounded estimate of frames queued after [chunk]. Implementations with no
+     * producer sequence visibility return zero for source compatibility.
+     */
+    fun queuedFrameDepth(chunk: AudioChunk): Int = 0
+
     /** Starts capture; safe to call once. */
     fun start(): AudioStartResult
 
-    /** Marks stop requested and releases the source so a blocking read unblocks;
-     *  the producer then flushes its final partial frame and closes [chunks]. */
+    /** Marks stop requested and unblocks the source; the producer then flushes
+     *  its final partial frame and closes [chunks]. */
     fun requestStop()
 
-    /** Joins the producer with a bounded timeout; true when it quiesced in time. */
+    /** Joins the producer with a bounded timeout; implementations hard-stop on
+     *  timeout and return true only when it quiesced in time. */
     suspend fun awaitQuiescence(timeoutMs: Long): Boolean
 
     /** Idempotent hard stop: cancels the producer, releases the source, closes [chunks]. */

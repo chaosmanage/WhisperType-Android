@@ -6,15 +6,15 @@ import com.whispertype.android.core.model.GeminiEvent
 import com.whispertype.android.core.model.SendResult
 import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.AfterTest
@@ -69,10 +69,18 @@ class OkHttpGeminiLiveSessionTest {
     private fun newSession(
         config: GeminiSessionConfig = GeminiSessionConfig(model = "test-model"),
         target: MockWebServer = server,
+        sendTextFrame: (WebSocket, String) -> Boolean = { webSocket, text ->
+            webSocket.send(text)
+        },
     ): OkHttpGeminiLiveSession {
         val client = OkHttpClient()
         activeClient = client
-        return OkHttpGeminiLiveSession(client, target.url("/live").toString(), config)
+        return OkHttpGeminiLiveSession(
+            client = client,
+            wsUrl = target.url("/live").toString(),
+            config = config,
+            sendTextFrame = sendTextFrame,
+        )
     }
 
     private fun CoroutineScope.bufferEvents(session: GeminiLiveSession): Channel<GeminiEvent> {
@@ -139,6 +147,40 @@ class OkHttpGeminiLiveSessionTest {
         session.awaitReady()
         assertEquals(GeminiEvent.Ready, receiveWithTimeout(events))
         session.close()
+    }
+
+    @Test
+    fun `setup send false fails readiness and emits one terminal transport failure`() = runBlocking {
+        val noAckServer = MockWebServer()
+        noAckServer.enqueue(
+            MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {}).build(),
+        )
+        noAckServer.start()
+        try {
+            val session = newSession(
+                target = noAckServer,
+                sendTextFrame = { _, _ -> false },
+            )
+            val events = bufferEvents(session)
+
+            val error = assertFailsWith<GeminiLiveException> {
+                withTimeout(5_000) { session.awaitReady() }
+            }
+            assertEquals("gemini_transport", error.failure.code)
+            assertEquals(
+                "The Gemini setup message could not be queued.",
+                error.failure.message,
+            )
+            val failed = assertIs<GeminiEvent.Failed>(receiveWithTimeout(events))
+            assertEquals("gemini_transport", failed.failure.code)
+            assertEquals(SendResult.Rejected("socket_closed"), session.startActivity())
+            assertNull(events.tryReceive().getOrNull(), "terminal send failure must be emitted once")
+            session.close()
+        } finally {
+            activeClient?.dispatcher?.cancelAll()
+            activeClient?.connectionPool?.evictAll()
+            noAckServer.close()
+        }
     }
 
     @Test
@@ -212,7 +254,40 @@ class OkHttpGeminiLiveSessionTest {
     }
 
     @Test
-    fun `dictation session sends exactly one activityStart then ordered audio then one activityEnd and no clientContent`() = runBlocking {
+    fun `audio send false closes the session and emits a terminal transport failure`() = runBlocking {
+        val session = newSession(
+            sendTextFrame = { webSocket, text ->
+                val root = Json.parseToJsonElement(text).jsonObject
+                val isAudio = root["realtimeInput"]
+                    ?.jsonObject
+                    ?.containsKey("audio")
+                    ?: false
+                if (isAudio) false else webSocket.send(text)
+            },
+        )
+        val events = bufferEvents(session)
+        session.awaitReady()
+        assertEquals(GeminiEvent.Ready, receiveWithTimeout(events))
+        assertEquals(SendResult.Accepted, session.startActivity())
+
+        val result = session.sendAudio(
+            AudioChunk(0, byteArrayOf(1, 2), sampleRateHz = 16_000),
+        )
+
+        assertEquals(SendResult.Rejected("socket_closed"), result)
+        val failed = assertIs<GeminiEvent.Failed>(receiveWithTimeout(events))
+        assertEquals("gemini_transport", failed.failure.code)
+        assertEquals(
+            "A Gemini audio frame could not be queued.",
+            failed.failure.message,
+        )
+        assertEquals(SendResult.Rejected("socket_closed"), session.endActivity())
+        assertNull(events.tryReceive().getOrNull(), "terminal send failure must be emitted once")
+        session.close()
+    }
+
+    @Test
+    fun `dictation preserves setup then activityStart then ordered audio then activityEnd`() = runBlocking {
         val session = newSession()
         session.awaitReady()
         session.startActivity()
@@ -221,15 +296,17 @@ class OkHttpGeminiLiveSessionTest {
         assertEquals(SendResult.Accepted, session.endActivity())
         awaitMessages { countMessages(serverSocket.clientMessages, "activityEnd") == 1 }
 
-        val frames = realtimeInputFrames(serverSocket.clientMessages)
+        val messages = serverSocket.clientMessages.toList()
+        assertTrue(Json.parseToJsonElement(messages.first()).jsonObject.containsKey("setup"))
+        val frames = realtimeInputFrames(messages)
         assertEquals("activityStart", frames.first().keys.first())
         val audioFrames = frames.filter { it.containsKey("audio") }
         assertEquals(2, audioFrames.size)
         assertEquals("AQI=", audioFrames[0]["audio"]!!.jsonObject["data"]!!.jsonPrimitive.content)
         assertEquals("AwQ=", audioFrames[1]["audio"]!!.jsonObject["data"]!!.jsonPrimitive.content)
         assertEquals("activityEnd", frames.last().keys.first())
-        assertTrue(serverSocket.clientMessages.none { it.contains("clientContent") })
-        assertTrue(serverSocket.clientMessages.none { it.contains("audioStreamEnd") })
+        assertTrue(messages.none { it.contains("clientContent") })
+        assertTrue(messages.none { it.contains("audioStreamEnd") })
         session.close()
     }
 
@@ -319,6 +396,45 @@ class OkHttpGeminiLiveSessionTest {
     }
 
     @Test
+    fun `input and output transcription in one frame emit independent candidates`() = runBlocking {
+        val session = newSession()
+        val events = bufferEvents(session)
+        session.awaitReady()
+        receiveWithTimeout(events)
+
+        serverSocket.push(
+            """{"serverContent":{"inputTranscription":{"text":"user speech"},"outputTranscription":{"text":"model echo"}}}""",
+        )
+        val input = assertIs<GeminiEvent.TranscriptCandidates>(receiveWithTimeout(events))
+        val output = assertIs<GeminiEvent.TranscriptCandidates>(receiveWithTimeout(events))
+        assertEquals(GeminiEvent.TranscriptSource.INPUT, input.source)
+        assertEquals(listOf("user speech"), input.candidates.map { it.raw })
+        assertEquals(GeminiEvent.TranscriptSource.ECHO, output.source)
+        assertEquals(listOf("model echo"), output.candidates.map { it.raw })
+        session.close()
+    }
+
+    @Test
+    fun `server lifecycle flags and goAway timeLeft emit typed events`() = runBlocking {
+        val session = newSession()
+        val events = bufferEvents(session)
+        session.awaitReady()
+        receiveWithTimeout(events)
+
+        serverSocket.push("""{"serverContent":{"generationComplete":true}}""")
+        assertEquals(GeminiEvent.GenerationComplete, receiveWithTimeout(events))
+
+        serverSocket.push("""{"serverContent":{"interrupted":true}}""")
+        assertEquals(GeminiEvent.Interrupted, receiveWithTimeout(events))
+
+        serverSocket.push("""{"goAway":{"timeLeft":"12.500s"}}""")
+        val goAway = assertIs<GeminiEvent.GoAway>(receiveWithTimeout(events))
+        assertEquals("12.500s", goAway.timeLeft)
+        assertNull(events.tryReceive().getOrNull(), "goAway is advance notice, not SessionEnd")
+        session.close()
+    }
+
+    @Test
     fun `serverContent turnComplete emits TurnComplete`() = runBlocking {
         val session = newSession()
         val events = bufferEvents(session)
@@ -327,6 +443,47 @@ class OkHttpGeminiLiveSessionTest {
 
         serverSocket.push("""{"serverContent":{"turnComplete":true}}""")
         assertEquals(GeminiEvent.TurnComplete, receiveWithTimeout(events))
+        session.close()
+    }
+
+    @Test
+    fun `requestEchoFor uses manual realtime text order and returns on TurnComplete`() = runBlocking {
+        val session = newSession()
+        session.awaitReady()
+
+        val result = async(start = CoroutineStart.UNDISPATCHED) {
+            session.requestEchoFor("source text")
+        }
+        awaitMessages { countMessages(serverSocket.clientMessages, "activityEnd") == 1 }
+
+        val messages = serverSocket.clientMessages.toList()
+        val frames = realtimeInputFrames(messages)
+        assertEquals(
+            listOf("activityStart", "text", "activityEnd"),
+            frames.map { it.keys.single() },
+        )
+        assertEquals("source text", frames[1]["text"]!!.jsonPrimitive.content)
+        assertTrue(messages.none { it.contains("clientContent") })
+
+        serverSocket.push("""{"serverContent":{"generationComplete":true}}""")
+        serverSocket.push("""{"serverContent":{"outputTranscription":{"text":"latin text"}}}""")
+        serverSocket.push("""{"serverContent":{"turnComplete":true}}""")
+        assertEquals("latin text", withTimeout(5_000) { result.await() })
+        session.close()
+    }
+
+    @Test
+    fun `requestEchoFor returns immediately on Failed without another event`() = runBlocking {
+        val session = newSession()
+        session.awaitReady()
+
+        val result = async(start = CoroutineStart.UNDISPATCHED) {
+            session.requestEchoFor("source text")
+        }
+        awaitMessages { countMessages(serverSocket.clientMessages, "activityEnd") == 1 }
+
+        serverSocket.push("""{"error":{"message":"synthetic failure"}}""")
+        assertNull(withTimeout(5_000) { result.await() })
         session.close()
     }
 
@@ -373,7 +530,7 @@ class OkHttpGeminiLiveSessionTest {
             MockResponse.Builder()
                 .webSocketUpgrade(object : WebSocketListener() {
                     override fun onOpen(webSocket: WebSocket, response: Response) {
-                        webSocket.close(1008, "API key not valid. Please pass a valid API key.")
+                        webSocket.close(1008, "connection rejected key=not-a-real-credential")
                     }
                 })
                 .build(),
@@ -383,7 +540,7 @@ class OkHttpGeminiLiveSessionTest {
             val session = newSession(target = closing)
             val error = assertFailsWith<GeminiLiveException> { session.awaitReady() }
             assertEquals("gemini_setup", error.failure.code)
-            assertTrue(error.failure.message.contains("API key not valid"))
+            assertEquals("connection rejected key=[REDACTED]", error.failure.message)
             session.close()
         } finally {
             activeClient?.dispatcher?.cancelAll()

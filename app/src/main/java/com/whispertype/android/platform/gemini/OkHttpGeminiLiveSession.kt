@@ -7,6 +7,7 @@ import com.whispertype.android.core.model.GeminiEvent
 import com.whispertype.android.core.model.MutableSessionMetrics
 import com.whispertype.android.core.model.ResultCandidate
 import com.whispertype.android.core.model.SendResult
+import com.whispertype.android.core.privacy.LogRedactor
 import com.whispertype.android.core.transcript.TranscriptAccumulator
 import java.util.Base64
 import java.util.concurrent.atomic.AtomicBoolean
@@ -16,8 +17,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -52,14 +53,18 @@ class GeminiLiveException(val failure: DictationFailure) : Exception(failure.mes
  *  - A failed `WebSocket.send` returns [SendResult.Rejected] immediately.
  *  - [close] is idempotent and takes the session to Closed from any state.
  *
- * The outbound state is one [AtomicReference], so concurrent callers (the
- * audio sender and the finalizer) cannot violate the state machine.
+ * Outbound state transitions and WebSocket sends share one lock, so setup,
+ * activity boundaries, audio, and close cannot be reordered by concurrent
+ * callers. The atomic state also lets OkHttp callbacks terminate the session.
  */
 class OkHttpGeminiLiveSession(
     private val client: OkHttpClient,
     private val wsUrl: String,
     private val config: GeminiSessionConfig,
     private val metrics: MutableSessionMetrics? = null,
+    private val sendTextFrame: (WebSocket, String) -> Boolean = { webSocket, text ->
+        webSocket.send(text)
+    },
 ) : GeminiLiveSession {
 
     private enum class State { Connecting, Ready, ActivityStarted, ActivityEnded, Closed }
@@ -68,6 +73,7 @@ class OkHttpGeminiLiveSession(
     private val ready = CompletableDeferred<Unit>()
     private val closed = AtomicBoolean(false)
     private val state = AtomicReference(State.Connecting)
+    private val outboundLock = Any()
 
     private var socket: WebSocket? = client.newWebSocket(
         Request.Builder().url(wsUrl).build(),
@@ -88,30 +94,28 @@ class OkHttpGeminiLiveSession(
         }
     }
 
-    override suspend fun startActivity(): SendResult {
-        val current = state.get()
-        return when (current) {
+    override suspend fun startActivity(): SendResult = synchronized(outboundLock) {
+        when (state.get()) {
             State.Connecting -> SendResult.Rejected(REASON_NOT_READY)
             State.Ready -> {
-                if (state.compareAndSet(State.Ready, State.ActivityStarted)) {
-                    val ws = socket
-                    if (ws == null) {
-                        state.set(State.Closed)
-                        return SendResult.Rejected(REASON_CLOSED)
-                    }
-                    if (config.automaticActivityDetectionDisabled) {
-                        val sent = ws.send(GeminiLiveWire.buildActivityStart())
-                        if (!sent) {
-                            state.set(State.Closed)
-                            return SendResult.Rejected(REASON_CLOSED)
-                        }
-                        metrics?.mark(MutableSessionMetrics.Event.ActivityStartQueued)
-                    }
-                    SendResult.Accepted
-                } else {
-                    // Lost the race to another starter or a close.
-                    sendResultFor(state.get())
+                val ws = socket
+                if (ws == null) {
+                    state.compareAndSet(State.Ready, State.Closed)
+                    return@synchronized SendResult.Rejected(REASON_CLOSED)
                 }
+                if (config.automaticActivityDetectionDisabled) {
+                    if (!sendTextFrame(ws, GeminiLiveWire.buildActivityStart())) {
+                        state.set(State.Closed)
+                        return@synchronized SendResult.Rejected(REASON_CLOSED)
+                    }
+                }
+                if (!state.compareAndSet(State.Ready, State.ActivityStarted)) {
+                    return@synchronized sendResultFor(state.get())
+                }
+                if (config.automaticActivityDetectionDisabled) {
+                    metrics?.mark(MutableSessionMetrics.Event.ActivityStartQueued)
+                }
+                SendResult.Accepted
             }
             State.ActivityStarted -> SendResult.Accepted // duplicate start: no second wire message
             State.ActivityEnded -> SendResult.Rejected(REASON_ACTIVITY_ENDED)
@@ -120,50 +124,54 @@ class OkHttpGeminiLiveSession(
     }
 
     override suspend fun sendAudio(chunk: AudioChunk): SendResult = withContext(Dispatchers.IO) {
-        when (state.get()) {
-            State.Connecting -> return@withContext SendResult.Rejected(REASON_NOT_READY)
-            State.Ready -> return@withContext SendResult.Rejected(REASON_AUDIO_BEFORE_START)
-            State.ActivityEnded -> return@withContext SendResult.Rejected(REASON_AUDIO_AFTER_END)
-            State.Closed -> return@withContext SendResult.Rejected(REASON_CLOSED)
-            State.ActivityStarted -> Unit
-        }
-        val ws = socket ?: return@withContext SendResult.Rejected(REASON_CLOSED)
-        val dataBase64 = Base64.getEncoder().encodeToString(chunk.pcm16Bytes)
-        val sent = ws.send(GeminiLiveWire.buildAudioChunk(dataBase64, chunk.sampleRateHz))
-        if (sent) {
+        synchronized(outboundLock) {
+            when (state.get()) {
+                State.Connecting -> return@synchronized SendResult.Rejected(REASON_NOT_READY)
+                State.Ready -> return@synchronized SendResult.Rejected(REASON_AUDIO_BEFORE_START)
+                State.ActivityEnded -> return@synchronized SendResult.Rejected(REASON_AUDIO_AFTER_END)
+                State.Closed -> return@synchronized SendResult.Rejected(REASON_CLOSED)
+                State.ActivityStarted -> Unit
+            }
+            val ws = socket ?: return@synchronized SendResult.Rejected(REASON_CLOSED)
+            val dataBase64 = Base64.getEncoder().encodeToString(chunk.pcm16Bytes)
+            val sent = sendTextFrame(
+                ws,
+                GeminiLiveWire.buildAudioChunk(dataBase64, chunk.sampleRateHz),
+            )
+            if (!sent) {
+                failTransport(ws, DETAIL_AUDIO_SEND)
+                return@synchronized SendResult.Rejected(REASON_CLOSED)
+            }
             metrics?.recordWebSocketQueue(ws.queueSize().toInt())
+            SendResult.Accepted
         }
-        if (sent) SendResult.Accepted else SendResult.Rejected(REASON_CLOSED)
     }
 
-    override suspend fun endActivity(): SendResult {
-        val current = state.get()
-        return when (current) {
+    override suspend fun endActivity(): SendResult = synchronized(outboundLock) {
+        when (state.get()) {
             State.Connecting -> SendResult.Rejected(REASON_NOT_READY)
             State.Ready -> SendResult.Rejected(REASON_ACTIVITY_NOT_STARTED)
             State.ActivityStarted -> {
-                if (state.compareAndSet(State.ActivityStarted, State.ActivityEnded)) {
-                    val ws = socket
-                    if (ws == null) {
-                        state.set(State.Closed)
-                        return SendResult.Rejected(REASON_CLOSED)
-                    }
-                    val message =
-                        if (config.automaticActivityDetectionDisabled) {
-                            GeminiLiveWire.buildActivityEnd()
-                        } else {
-                            GeminiLiveWire.buildAudioStreamEnd()
-                        }
-                    val sent = ws.send(message)
-                    if (!sent) {
-                        state.set(State.Closed)
-                        return SendResult.Rejected(REASON_CLOSED)
-                    }
-                    metrics?.mark(MutableSessionMetrics.Event.ActivityEndQueued)
-                    SendResult.Accepted
-                } else {
-                    sendResultFor(state.get())
+                val ws = socket
+                if (ws == null) {
+                    state.compareAndSet(State.ActivityStarted, State.Closed)
+                    return@synchronized SendResult.Rejected(REASON_CLOSED)
                 }
+                val message =
+                    if (config.automaticActivityDetectionDisabled) {
+                        GeminiLiveWire.buildActivityEnd()
+                    } else {
+                        GeminiLiveWire.buildAudioStreamEnd()
+                    }
+                if (!sendTextFrame(ws, message)) {
+                    state.set(State.Closed)
+                    return@synchronized SendResult.Rejected(REASON_CLOSED)
+                }
+                if (!state.compareAndSet(State.ActivityStarted, State.ActivityEnded)) {
+                    return@synchronized sendResultFor(state.get())
+                }
+                metrics?.mark(MutableSessionMetrics.Event.ActivityEndQueued)
+                SendResult.Accepted
             }
             State.ActivityEnded -> SendResult.Accepted // duplicate end: no second wire message
             State.Closed -> SendResult.Rejected(REASON_CLOSED)
@@ -173,43 +181,55 @@ class OkHttpGeminiLiveSession(
     override fun events(): Flow<GeminiEvent> = _events.receiveAsFlow()
 
     /**
-     * 0.5.0 Hinglish: sends [text] over the realtime text channel and collects the
-     * model's spoken reply via `outputTranscription` (delta-accumulated), returning
-     * the transliterated Latin text or null. Used on a fresh, dedicated session.
+     * Sends [text] as a manually delimited realtime activity and collects the
+     * model's spoken reply via `outputTranscription` (delta-accumulated). Gemini
+     * 3.1 ongoing text is never completed with `clientContent.turnComplete`.
      */
     override suspend fun requestEchoFor(text: String): String? {
         if (state.get() != State.Ready) return null
-        val ws = socket ?: return null
-        if (!ws.send(GeminiLiveWire.buildRealtimeText(text))) return null
-        if (!ws.send(GeminiLiveWire.buildTurnComplete())) return null
-        val accumulator = TranscriptAccumulator(appendDeltas = true)
-        var done = false
-        var failed = false
-        withTimeoutOrNull(ECHO_TIMEOUT_MS) {
-            events()
-                .takeWhile { !done && !failed }
-                .collect { event ->
-                    when (event) {
-                        is GeminiEvent.TranscriptCandidates ->
-                            if (event.source == GeminiEvent.TranscriptSource.ECHO) {
-                                event.candidates.forEach { accumulator.accept(it.raw) }
-                            }
-                        GeminiEvent.TurnComplete -> done = true
-                        is GeminiEvent.Failed -> failed = true
-                        else -> Unit
-                    }
-                }
+        if (startActivity() != SendResult.Accepted) return null
+        val textQueued = synchronized(outboundLock) {
+            if (state.get() != State.ActivityStarted) return@synchronized false
+            val ws = socket ?: return@synchronized false
+            if (!sendTextFrame(ws, GeminiLiveWire.buildRealtimeText(text))) {
+                state.set(State.Closed)
+                return@synchronized false
+            }
+            true
         }
-        return if (failed) null else accumulator.settledText()
+        if (!textQueued) return null
+        if (endActivity() != SendResult.Accepted) return null
+
+        val accumulator = TranscriptAccumulator(appendDeltas = true)
+        val terminal = withTimeoutOrNull(ECHO_TIMEOUT_MS) {
+            events().firstOrNull { event ->
+                when (event) {
+                    is GeminiEvent.TranscriptCandidates -> {
+                        if (event.source == GeminiEvent.TranscriptSource.ECHO) {
+                            event.candidates.forEach { accumulator.accept(it.raw) }
+                        }
+                        false
+                    }
+                    GeminiEvent.TurnComplete,
+                    GeminiEvent.Interrupted,
+                    GeminiEvent.SessionEnd -> true
+                    is GeminiEvent.Failed -> true
+                    else -> false
+                }
+            }
+        } ?: return null
+        return if (terminal == GeminiEvent.TurnComplete) accumulator.settledText() else null
     }
 
     override suspend fun close() {
-        if (closed.compareAndSet(false, true)) {
-            state.set(State.Closed)
-            socket?.close(NORMAL_CLOSE_CODE, "session closed")
-            socket = null
-            ready.completeExceptionally(CancellationException("Session closed"))
-            _events.close()
+        synchronized(outboundLock) {
+            if (closed.compareAndSet(false, true)) {
+                state.set(State.Closed)
+                socket?.close(NORMAL_CLOSE_CODE, "session closed")
+                socket = null
+                ready.completeExceptionally(CancellationException("Session closed"))
+                _events.close()
+            }
         }
     }
 
@@ -226,8 +246,14 @@ class OkHttpGeminiLiveSession(
         override fun onOpen(webSocket: WebSocket, response: Response) {
             GeminiLog.i(TAG, "onOpen code=${response.code} url=${redactUrl(wsUrl)}")
             metrics?.mark(MutableSessionMetrics.Event.SocketOpen)
-            val sent = webSocket.send(GeminiLiveWire.buildSetup(config))
-            GeminiLog.i(TAG, "setupSent=$sent")
+            synchronized(outboundLock) {
+                if (state.get() != State.Connecting) return@synchronized
+                val sent = sendTextFrame(webSocket, GeminiLiveWire.buildSetup(config))
+                GeminiLog.i(TAG, "setupSent=$sent")
+                if (!sent) {
+                    failTransport(webSocket, DETAIL_SETUP_SEND)
+                }
+            }
         }
 
         // The Gemini Live server sends every server->client message as a BINARY
@@ -238,53 +264,82 @@ class OkHttpGeminiLiveSession(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            if (state.get() == State.Closed) return
             when (val message = GeminiLiveWire.parseServerMessage(text)) {
                 GeminiLiveWire.ServerMessage.SetupComplete -> {
-                    metrics?.mark(MutableSessionMetrics.Event.SetupComplete)
-                    state.compareAndSet(State.Connecting, State.Ready)
-                    ready.complete(Unit)
-                    _events.trySend(GeminiEvent.Ready)
+                    if (state.compareAndSet(State.Connecting, State.Ready)) {
+                        metrics?.mark(MutableSessionMetrics.Event.SetupComplete)
+                        ready.complete(Unit)
+                        _events.trySend(GeminiEvent.Ready)
+                    }
                 }
 
                 is GeminiLiveWire.ServerMessage.SetupError -> {
                     val failure = failure(FAIL_SETUP, message.message, recoverable = true)
+                    val transitioned = state.getAndSet(State.Closed) != State.Closed
                     ready.completeExceptionally(GeminiLiveException(failure))
-                    _events.trySend(GeminiEvent.Failed(failure))
+                    if (transitioned && !closed.get()) {
+                        _events.trySend(GeminiEvent.Failed(failure))
+                    }
                 }
 
                 is GeminiLiveWire.ServerMessage.ServerContent -> onServerContent(message)
 
-                GeminiLiveWire.ServerMessage.GoAway -> _events.trySend(GeminiEvent.SessionEnd)
+                is GeminiLiveWire.ServerMessage.GoAway ->
+                    _events.trySend(GeminiEvent.GoAway(message.timeLeft))
 
                 is GeminiLiveWire.ServerMessage.Unknown -> Unit
             }
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            GeminiLog.w(TAG, "onFailure ${t.message} httpCode=${response?.code}")
-            ready.completeExceptionally(t)
-            if (!closed.get()) {
-                _events.trySend(
-                    GeminiEvent.Failed(failure(FAIL_TRANSPORT, t.message ?: "Connection failed", recoverable = true)),
-                )
+            GeminiLog.w(TAG, "onFailure type=${t.javaClass.simpleName} httpCode=${response?.code}")
+            val failure = failure(
+                FAIL_TRANSPORT,
+                sanitizeTransportDetail(t.message, DETAIL_CONNECTION_FAILED),
+                recoverable = true,
+            )
+            val transitioned = state.getAndSet(State.Closed) != State.Closed
+            ready.completeExceptionally(GeminiLiveException(failure))
+            if (transitioned && !closed.get()) {
+                _events.trySend(GeminiEvent.Failed(failure))
             }
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-            GeminiLog.i(TAG, "onClosing code=$code reason=$reason at=${System.currentTimeMillis()}")
+            GeminiLog.i(TAG, "onClosing code=$code at=${System.currentTimeMillis()}")
             if (!closed.get() && !ready.isCompleted) {
                 ready.completeExceptionally(
-                    GeminiLiveException(failure(FAIL_SETUP, reason.ifBlank { "Connection closed (code $code) before setup." }, recoverable = true)),
+                    GeminiLiveException(
+                        failure(
+                            FAIL_SETUP,
+                            sanitizeTransportDetail(
+                                reason,
+                                "Connection closed (code $code) before setup.",
+                            ),
+                            recoverable = true,
+                        ),
+                    ),
                 )
             }
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            GeminiLog.i(TAG, "onClosed code=$code reason=$reason")
-            if (!closed.get()) {
+            GeminiLog.i(TAG, "onClosed code=$code")
+            val transitioned = state.getAndSet(State.Closed) != State.Closed
+            if (transitioned && !closed.get()) {
                 if (!ready.isCompleted) {
                     ready.completeExceptionally(
-                        GeminiLiveException(failure(FAIL_SETUP, reason.ifBlank { "Connection closed (code $code) before setup." }, recoverable = true)),
+                        GeminiLiveException(
+                            failure(
+                                FAIL_SETUP,
+                                sanitizeTransportDetail(
+                                    reason,
+                                    "Connection closed (code $code) before setup.",
+                                ),
+                                recoverable = true,
+                            ),
+                        ),
                     )
                 }
                 _events.trySend(GeminiEvent.SessionEnd)
@@ -297,7 +352,7 @@ class OkHttpGeminiLiveSession(
         // audio, or full server frames (Release A1/A2, D8).
         GeminiLog.i(
             TAG,
-            "serverContent: inputTx=${message.inputTranscription?.length ?: 0} outputTx=${message.outputTranscription?.length ?: 0} textParts=${message.textParts.size} turnComplete=${message.turnComplete}",
+            "serverContent: inputTx=${message.inputTranscription?.length ?: 0} outputTx=${message.outputTranscription?.length ?: 0} textParts=${message.textParts.size} generationComplete=${message.generationComplete} interrupted=${message.interrupted} turnComplete=${message.turnComplete}",
         )
         // 0.4.1 echo architecture: the dictation source is outputTranscription —
         // the model's spoken reply, which the systemInstruction turns into a
@@ -328,6 +383,12 @@ class OkHttpGeminiLiveSession(
                 ),
             )
         }
+        if (message.generationComplete) {
+            _events.trySend(GeminiEvent.GenerationComplete)
+        }
+        if (message.interrupted) {
+            _events.trySend(GeminiEvent.Interrupted)
+        }
         if (message.turnComplete) {
             if (m != null) {
                 m.turnCompleteArrived = true
@@ -335,6 +396,16 @@ class OkHttpGeminiLiveSession(
             }
             _events.trySend(GeminiEvent.TurnComplete)
         }
+    }
+
+    private fun failTransport(webSocket: WebSocket, detail: String) {
+        val failure = failure(FAIL_TRANSPORT, detail, recoverable = true)
+        val transitioned = state.getAndSet(State.Closed) != State.Closed
+        ready.completeExceptionally(GeminiLiveException(failure))
+        if (transitioned && !closed.get()) {
+            _events.trySend(GeminiEvent.Failed(failure))
+        }
+        webSocket.cancel()
     }
 
     private fun failure(code: String, detail: String, recoverable: Boolean): DictationFailure =
@@ -345,10 +416,13 @@ class OkHttpGeminiLiveSession(
             retryAllowed = recoverable,
         )
 
-    private fun redactUrl(url: String): String {
-        // Strip the api key query parameter; never log authenticated URLs (§FR-6).
-        return url.replace(Regex("key=[^&]*"), "key=<redacted>")
-    }
+    private fun sanitizeTransportDetail(detail: String?, fallback: String): String =
+        detail
+            ?.takeIf { it.isNotBlank() }
+            ?.let(LogRedactor::sanitize)
+            ?: fallback
+
+    private fun redactUrl(url: String): String = LogRedactor.sanitize(url)
 
     private companion object {
         const val TAG = "OkHttpGeminiLiveSession"
@@ -363,5 +437,8 @@ class OkHttpGeminiLiveSession(
         const val REASON_ACTIVITY_ENDED = "activity_ended"
         const val FAIL_SETUP = "gemini_setup"
         const val FAIL_TRANSPORT = "gemini_transport"
+        const val DETAIL_SETUP_SEND = "The Gemini setup message could not be queued."
+        const val DETAIL_AUDIO_SEND = "A Gemini audio frame could not be queued."
+        const val DETAIL_CONNECTION_FAILED = "The Gemini connection failed."
     }
 }

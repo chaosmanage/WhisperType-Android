@@ -1,5 +1,6 @@
 package com.whispertype.android.platform.gemini
 
+import com.whispertype.android.core.privacy.LogRedactor
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -22,9 +23,10 @@ import kotlinx.serialization.json.put
  *  - the first client message is `{"setup": {model, generationConfig, systemInstruction}}`
  *    and the server replies `setupComplete` (or `setupError`);
  *  - audio is sent as `{"realtimeInput": {"audio": {"data": <base64>, "mimeType": "audio/pcm;rate=16000"}}}`;
- *  - the client ends its turn with `{"clientContent": {"turnComplete": true}}`;
+ *  - ongoing text is sent through `realtimeInput.text`; manual activity
+ *    boundaries, not `clientContent.turnComplete`, delimit that input;
  *  - the server streams `serverContent` objects carrying `modelTurn.parts[].text`,
- *    `inputTranscription.text`, `turnComplete`, and `interrupted`.
+ *    transcription text, and independent turn lifecycle flags.
  */
 object GeminiLiveWire {
 
@@ -116,14 +118,17 @@ object GeminiLiveWire {
             )
         }.toString()
 
-    /** 0.5.0 Hinglish: sends a realtime text input (used to transliterate
-     *  Devanagari to Latin via the live model's spoken reply). */
+    /**
+     * Sends ongoing text through the Gemini 3.1 realtime-input channel. With
+     * manual activity detection, callers must surround this message with
+     * [buildActivityStart] and [buildActivityEnd].
+     */
     fun buildRealtimeText(text: String): String =
         buildJsonObject {
             put("realtimeInput", buildJsonObject { put("text", text) })
         }.toString()
 
-    /** Client signals the end of its turn and that generation may begin. */
+    /** Builds a client-content turn boundary; not valid for ongoing Gemini 3.1 realtime text. */
     fun buildTurnComplete(): String =
         buildJsonObject {
             put("clientContent", buildJsonObject { put("turnComplete", true) })
@@ -132,7 +137,7 @@ object GeminiLiveWire {
     /**
      * Explicit realtime activity boundary: start of a push-to-talk utterance
      * (manual activity detection). Sent as a realtime-input message before the
-     * first audio frame.
+     * first audio or text payload.
      */
     fun buildActivityStart(): String =
         buildJsonObject {
@@ -145,7 +150,7 @@ object GeminiLiveWire {
     /**
      * Explicit realtime activity boundary: end of a push-to-talk utterance
      * (manual activity detection). Sent as a realtime-input message after the
-     * final audio frame.
+     * final audio or text payload.
      */
     fun buildActivityEnd(): String =
         buildJsonObject {
@@ -168,11 +173,7 @@ object GeminiLiveWire {
             )
         }.toString()
 
-    /**
-     * Explicit realtime activity boundary: start of a push-to-talk utterance
-     * (manual activity detection). Sent as a realtime-input message before the
-     * first audio frame.
-     */
+    /** Parse one server WebSocket frame into a transport-level message. */
     fun parseServerMessage(raw: String): ServerMessage =
         try {
             val root = json.parseToJsonElement(raw).jsonObject
@@ -181,26 +182,44 @@ object GeminiLiveWire {
                 root.containsKey("setupError") -> parseSetupError(root)
                 root.containsKey("error") -> parseTopLevelError(root)
                 root.containsKey("serverContent") -> parseServerContent(root)
-                root.containsKey("goAway") -> ServerMessage.GoAway
-                else -> ServerMessage.Unknown(raw)
+                root.containsKey("goAway") -> parseGoAway(root)
+                else -> unknownServerMessage()
             }
         } catch (_: Throwable) {
-            ServerMessage.Unknown(raw)
+            unknownServerMessage()
         }
 
     private fun parseSetupError(root: JsonObject): ServerMessage {
         val error = root["setupError"]?.jsonObject
         val message = error?.get("error")?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull
         return ServerMessage.SetupError(
-            message ?: "Unknown setup error",
+            sanitizeServerDetail(message),
         )
     }
 
     private fun parseTopLevelError(root: JsonObject): ServerMessage {
         val message = root["error"]?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull
         return ServerMessage.SetupError(
-            message ?: "Unknown setup error",
+            sanitizeServerDetail(message),
         )
+    }
+
+    private fun sanitizeServerDetail(message: String?): String =
+        message
+            ?.takeIf { it.isNotBlank() }
+            ?.let(LogRedactor::sanitize)
+            ?: "Unknown setup error"
+
+    private fun unknownServerMessage(): ServerMessage =
+        ServerMessage.Unknown(LogRedactor.REDACTED_PLACEHOLDER)
+
+    private fun parseGoAway(root: JsonObject): ServerMessage {
+        val timeLeft = root["goAway"]
+            ?.jsonObject
+            ?.get("timeLeft")
+            ?.jsonPrimitive
+            ?.contentOrNull
+        return ServerMessage.GoAway(timeLeft)
     }
 
     private fun parseServerContent(root: JsonObject): ServerMessage {
@@ -222,12 +241,18 @@ object GeminiLiveWire {
             ?.get("text")
             ?.jsonPrimitive
             ?.contentOrNull
+        val generationComplete = content
+            ?.get("generationComplete")
+            ?.jsonPrimitive
+            ?.booleanOrNull
+            ?: false
         val turnComplete = content?.get("turnComplete")?.jsonPrimitive?.booleanOrNull ?: false
         val interrupted = content?.get("interrupted")?.jsonPrimitive?.booleanOrNull ?: false
         return ServerMessage.ServerContent(
             textParts = textParts,
             inputTranscription = inputTranscription,
             outputTranscription = outputTranscription,
+            generationComplete = generationComplete,
             turnComplete = turnComplete,
             interrupted = interrupted,
         )
@@ -269,12 +294,16 @@ object GeminiLiveWire {
             val outputTranscription: String?,
             val turnComplete: Boolean,
             val interrupted: Boolean,
+            val generationComplete: Boolean = false,
         ) : ServerMessage
 
-        /** `goAway` received; the server is closing the session. */
-        data object GoAway : ServerMessage
+        /**
+         * `goAway` received; [timeLeft] is the protocol's protobuf JSON duration
+         * string and is kept intact for lifecycle policy.
+         */
+        data class GoAway(val timeLeft: String?) : ServerMessage
 
-        /** A message with no session action (tool calls, grounding, unknown). */
+        /** A message with no session action; [raw] is always a redacted marker. */
         data class Unknown(val raw: String) : ServerMessage
     }
 }

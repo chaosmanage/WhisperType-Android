@@ -14,6 +14,8 @@ import com.whispertype.android.core.model.MutableSessionMetrics
 import com.whispertype.android.core.model.SendResult
 import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.SettlePath
+import com.whispertype.android.core.model.SettlementReason
+import com.whispertype.android.core.model.TerminalOutcome
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -41,6 +43,7 @@ class DictationCoordinatorTest {
         val events = Channel<GeminiEvent>(Channel.UNLIMITED)
         var readyError: Throwable? = null
         var readyGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+        var endGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
         var startResult: SendResult = SendResult.Accepted
         var endResult: SendResult = SendResult.Accepted
         var audioResult: SendResult = SendResult.Accepted
@@ -49,6 +52,7 @@ class DictationCoordinatorTest {
         var audioCalls = 0
         var closed = false
         val receivedChunks = mutableListOf<AudioChunk>()
+        val wireCalls = mutableListOf<String>()
 
         override suspend fun awaitReady() {
             readyError?.let { throw it }
@@ -57,17 +61,21 @@ class DictationCoordinatorTest {
 
         override suspend fun startActivity(): SendResult {
             startCalls++
+            wireCalls += "start"
             return startResult
         }
 
         override suspend fun sendAudio(chunk: AudioChunk): SendResult {
             audioCalls++
             receivedChunks += chunk
+            wireCalls += "audio:${chunk.sequence}"
             return audioResult
         }
 
         override suspend fun endActivity(): SendResult {
             endCalls++
+            endGate?.await()
+            wireCalls += "end"
             return endResult
         }
 
@@ -88,6 +96,12 @@ class DictationCoordinatorTest {
         var startResult = AudioStartResult.Started
         var stopRequested = false
         var stopCalls = 0
+        var queueCapacity = 0
+        var queueDepth = 0
+
+        override val frameQueueCapacity: Int get() = queueCapacity
+
+        override fun queuedFrameDepth(chunk: AudioChunk): Int = queueDepth
 
         fun setAmplitude(level: Float) {
             (amplitude as MutableStateFlow<Float>).value = level
@@ -167,7 +181,10 @@ class DictationCoordinatorTest {
         DictationCoordinator(
             scope = scope,
             host = host,
-            metricsFactory = { sessionId -> MutableSessionMetrics(sessionId) { 0L } },
+            config = DictationCoordinator.Config(insertionResultTimeoutMs = 0),
+            metricsFactory = { sessionId ->
+                MutableSessionMetrics(sessionId) { scope.testScheduler.currentTime * 1_000_000L }
+            },
         )
 
     private fun coordinator(
@@ -178,11 +195,23 @@ class DictationCoordinatorTest {
         DictationCoordinator(
             scope = scope,
             host = host,
-            config = config,
-            metricsFactory = { sessionId -> MutableSessionMetrics(sessionId) { 0L } },
+            config = config.copy(insertionResultTimeoutMs = 0),
+            metricsFactory = { sessionId ->
+                MutableSessionMetrics(sessionId) { scope.testScheduler.currentTime * 1_000_000L }
+            },
         )
 
-    private fun chunk(seq: Long): AudioChunk = AudioChunk(seq, ByteArray(640) { it.toByte() }, sampleRateHz = 16_000)
+    private fun chunk(
+        seq: Long,
+        frameMillis: Int = 20,
+        capturedAtNanos: Long? = null,
+    ): AudioChunk = AudioChunk(
+        sequence = seq,
+        pcm16Bytes = ByteArray(640) { it.toByte() },
+        sampleRateHz = 16_000,
+        frameMillis = frameMillis,
+        capturedAtMonotonicNanos = capturedAtNanos,
+    )
 
     @Test
     fun `duplicate START is rejected synchronously`() = runTest {
@@ -300,6 +329,22 @@ class DictationCoordinatorTest {
     }
 
     @Test
+    fun `interruption and go-away notice do not terminate an active session`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+
+        host.session.events.send(GeminiEvent.Interrupted)
+        host.session.events.send(GeminiEvent.GoAway("12.5s"))
+        runCurrent()
+
+        assertIs<DictationState.Listening>(states(host).last())
+        coordinator.cancel()
+        advanceUntilIdle()
+    }
+
+    @Test
     fun `rejected activity start fails promptly with a transport failure`() = runTest {
         val host = FakeHost()
         host.session.startResult = SendResult.Rejected("socket_closed")
@@ -407,6 +452,121 @@ class DictationCoordinatorTest {
         assertEquals("schedule the meeting", host.insertions[0].second)
         assertFalse(coordinator.activeMetrics()!!.usedHardDeadline)
         coordinator.onInsertionResult(host.insertions[0].first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `duplicate echo does not reset the global quiet debounce`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        sendEcho(host, "hello world")
+        runCurrent()
+        advanceTimeBy(500)
+        sendEcho(host, "hello world")
+        runCurrent()
+        advanceTimeBy(101)
+        runCurrent()
+
+        assertEquals(listOf("hello world"), host.insertions.map { it.second })
+        assertEquals(1L, coordinator.activeMetrics()!!.outputTranscriptionCount)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `raw revision arriving after echo grace settles after quiet not hard deadline`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(
+            this,
+            host,
+            DictationCoordinator.Config(
+                hardDeadlineMs = 5_000,
+                echoFallbackWaitMs = 2_000,
+                settleDebounceMs = 600,
+            ),
+        )
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        advanceTimeBy(2_100)
+        sendTranscript(host, "late but complete raw transcript")
+        runCurrent()
+        advanceTimeBy(599)
+        assertTrue(host.insertions.isEmpty())
+        advanceTimeBy(2)
+        runCurrent()
+
+        assertEquals("late but complete raw transcript", host.insertions.single().second)
+        val metrics = coordinator.activeMetrics()!!
+        assertEquals(SettlementReason.RAW_FALLBACK_TIMEOUT, metrics.settlementReason)
+        assertFalse(metrics.usedHardDeadline)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `generation complete is a hint and a later echo resets global quiet`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "we should meet")
+        host.session.events.send(GeminiEvent.GenerationComplete)
+        runCurrent()
+        advanceTimeBy(500)
+        assertTrue(host.insertions.isEmpty(), "the lifecycle hint cannot bypass transcript quiet")
+
+        sendEcho(host, "We should meet.")
+        runCurrent()
+        advanceTimeBy(599)
+        assertTrue(host.insertions.isEmpty(), "the echo revision must restart global quiet")
+        advanceTimeBy(2)
+        runCurrent()
+
+        assertEquals("We should meet.", host.insertions.single().second)
+        val metrics = coordinator.activeMetrics()!!
+        assertTrue(metrics.generationCompleteArrived)
+        assertEquals(SettlementReason.GENERATION_COMPLETE_QUIET, metrics.settlementReason)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `settlement is prohibited until activity end is queued`() = runTest {
+        val host = FakeHost()
+        host.session.endGate = kotlinx.coroutines.CompletableDeferred()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        sendEcho(host, "hello world")
+        host.session.events.send(GeminiEvent.TurnComplete)
+        runCurrent()
+        advanceTimeBy(1_000)
+        assertTrue(host.insertions.isEmpty())
+        assertEquals(null, coordinator.activeMetrics()!!.activityEndQueuedAt)
+
+        host.session.endGate!!.complete(Unit)
+        runCurrent()
+        advanceTimeBy(599)
+        assertTrue(host.insertions.isEmpty())
+        advanceTimeBy(2)
+        runCurrent()
+
+        assertEquals("hello world", host.insertions.single().second)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
         advanceUntilIdle()
     }
 
@@ -543,6 +703,103 @@ class DictationCoordinatorTest {
     }
 
     @Test
+    fun `STOP before readiness waits then preserves start audio end ordering`() = runTest {
+        val host = FakeHost()
+        host.session.readyGate = kotlinx.coroutines.CompletableDeferred()
+        val coordinator = coordinator(
+            this,
+            host,
+            DictationCoordinator.Config(readyAfterStopTimeoutMs = 1_000),
+        )
+        coordinator.start()
+        runCurrent()
+
+        host.capture.chunksChannel.send(chunk(0))
+        host.capture.chunksChannel.send(chunk(1))
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        assertTrue(host.session.wireCalls.isEmpty(), "capture closure is not readiness")
+        assertEquals(0, host.session.endCalls)
+
+        host.session.readyGate!!.complete(Unit)
+        runCurrent()
+
+        assertEquals(
+            listOf("start", "audio:0", "audio:1", "end"),
+            host.session.wireCalls,
+        )
+        coordinator.cancel()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `STOP before readiness fails after the bounded wait`() = runTest {
+        val host = FakeHost()
+        host.session.readyGate = kotlinx.coroutines.CompletableDeferred()
+        val coordinator = coordinator(
+            this,
+            host,
+            DictationCoordinator.Config(readyAfterStopTimeoutMs = 500),
+        )
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        advanceTimeBy(501)
+        runCurrent()
+
+        val error = states(host).filterIsInstance<DictationState.Error>().last()
+        assertEquals("gemini_setup_timeout", error.failure.code)
+        assertTrue(host.session.wireCalls.isEmpty())
+        coordinator.dismiss()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `rejected audio send fails immediately and never queues activity end`() = runTest {
+        val host = FakeHost()
+        host.session.audioResult = SendResult.Rejected("socket_closed")
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+
+        host.capture.chunksChannel.send(chunk(0))
+        runCurrent()
+
+        val error = states(host).filterIsInstance<DictationState.Error>().last()
+        assertEquals("gemini_transport", error.failure.code)
+        assertEquals(1L, coordinator.activeMetrics()!!.rejectedFrames)
+        assertEquals(0L, coordinator.activeMetrics()!!.acceptedFrames)
+        assertEquals(0, host.session.endCalls)
+        coordinator.dismiss()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `audio queue metadata records atomic depth and age high water marks`() = runTest {
+        val host = FakeHost()
+        host.capture.queueCapacity = 8
+        host.capture.queueDepth = 5
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceTimeBy(25)
+
+        host.capture.chunksChannel.send(chunk(0, capturedAtNanos = 0L))
+        runCurrent()
+
+        val metrics = coordinator.activeMetrics()!!
+        assertEquals(1L, metrics.capturedFrames)
+        assertEquals(1L, metrics.acceptedFrames)
+        assertEquals(5, metrics.maxFrameQueueDepth)
+        assertEquals(25L, metrics.maxFrameQueueAgeMs())
+        coordinator.cancel()
+        advanceUntilIdle()
+    }
+
+    @Test
     fun `pre-ready buffer overflow fails with connection-too-slow`() = runTest {
         val host = FakeHost()
         val session = host.session
@@ -564,6 +821,7 @@ class DictationCoordinatorTest {
         val error = states(host).first { it is DictationState.Error }
         assertEquals("gemini_connection_too_slow", (error as DictationState.Error).failure.code)
         assertTrue(session.audioCalls == 0)
+        assertTrue(coordinator.activeMetrics()!!.audioBufferOverflow)
         advanceUntilIdle()
     }
 
@@ -812,13 +1070,13 @@ class DictationCoordinatorTest {
         coordinator.stop()
         runCurrent()
 
-        sendTranscript(host, "raw text first") // raw arrives immediately
+        sendTranscript(host, "we should meet tomorrow") // raw arrives immediately
         advanceTimeBy(500)
-        sendEcho(host, "Polished echo text.")
+        sendEcho(host, "We should meet tomorrow.")
         advanceTimeBy(2_500) // well past the echo-fallback window
 
         assertEquals(1, host.insertions.size)
-        assertEquals("Polished echo text.", host.insertions[0].second, "an echo present must win over the raw fallback")
+        assertEquals("We should meet tomorrow.", host.insertions[0].second, "a complete echo must win over raw")
         coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
         advanceUntilIdle()
     }
@@ -919,6 +1177,38 @@ class DictationCoordinatorTest {
         advanceUntilIdle()
     }
 
+    @Test
+    fun `tiny echo-only result is rejected for a long captured duration`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(
+            this,
+            host,
+            DictationCoordinator.Config(hardDeadlineMs = 2_000),
+        )
+        coordinator.start()
+        runCurrent()
+        host.capture.chunksChannel.send(chunk(0, frameMillis = 60_000))
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        sendEcho(host, "brief reply")
+        host.session.events.send(GeminiEvent.GenerationComplete)
+        runCurrent()
+        advanceTimeBy(700)
+
+        assertTrue(host.insertions.isEmpty())
+        assertTrue(states(host).none { it is DictationState.Error })
+
+        advanceTimeBy(1_400)
+        runCurrent()
+        val error = states(host).filterIsInstance<DictationState.Error>().last()
+        assertEquals("gemini_no_transcript", error.failure.code)
+        assertEquals(SettlePath.NONE, coordinator.activeMetrics()!!.settlePath)
+        coordinator.dismiss()
+        advanceUntilIdle()
+    }
+
     // ------------------------------------------------------------------
     // 0.5.0 Hinglish: echo-only settlement, Latin output, live transliteration
     // ------------------------------------------------------------------
@@ -969,6 +1259,10 @@ class DictationCoordinatorTest {
         assertEquals(1, host.transliterateCalls.size)
         assertEquals(1, host.insertions.size)
         assertEquals("Aaj ka mausam bahut achcha hai aur ham picnic par jaa sakte hain", host.insertions[0].second)
+        val metrics = coordinator.activeMetrics()!!
+        assertTrue(metrics.repairStartedAt != null)
+        assertTrue(metrics.repairCompletedAt != null)
+        assertEquals(0L, metrics.repairDurationMs())
         coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
         advanceUntilIdle()
     }
@@ -1032,6 +1326,54 @@ class DictationCoordinatorTest {
         assertEquals("Aaj ka mausam", host.insertions[0].second, "best available Latin text is kept")
         coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
         advanceUntilIdle()
+    }
+
+    // ------------------------------------------------------------------
+    // Exactly-once insertion result timeout
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `missing insertion result times out without retrying the commit`() = runTest {
+        val host = FakeHost()
+        val coordinator = DictationCoordinator(
+            scope = this,
+            host = host,
+            config = DictationCoordinator.Config(
+                insertionResultTimeoutMs = 500,
+                returnToIdleMs = 1_000,
+            ),
+            metricsFactory = { sessionId ->
+                MutableSessionMetrics(sessionId) { testScheduler.currentTime * 1_000_000L }
+            },
+        )
+        coordinator.start()
+        runCurrent()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        runCurrent()
+        sendTranscript(host, "commit this once")
+        host.session.events.send(GeminiEvent.TurnComplete)
+        runCurrent()
+        advanceTimeBy(601)
+        runCurrent()
+
+        assertIs<DictationState.Inserting>(states(host).last())
+        assertEquals(1, host.insertions.size)
+
+        advanceTimeBy(501)
+        runCurrent()
+        val error = states(host).filterIsInstance<DictationState.Error>().last()
+        assertEquals("insert_result_timeout", error.failure.code)
+        assertFalse(error.failure.retryAllowed)
+        assertEquals(TerminalOutcome.TIMED_OUT, coordinator.activeMetrics()!!.terminalOutcome)
+        assertFalse(coordinator.retry(), "an ambiguous commit must never be retried")
+
+        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
+        runCurrent()
+        assertEquals(1, host.insertions.size)
+        assertTrue(states(host).none { it is DictationState.Success })
+        advanceUntilIdle()
+        assertEquals(DictationState.Idle, states(host).last())
     }
 
     // ------------------------------------------------------------------

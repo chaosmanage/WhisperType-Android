@@ -30,9 +30,8 @@ enum class OverlayVisibility {
  * shows regardless of eligibility: a live session necessarily flips eligibility off via
  * `sessionActive`, so gating those on eligibility would incorrectly hide the recording panel.
  *
- * [DictationState.Success] and [DictationState.Cancelled] map to [OverlayVisibility.Hidden].
- * Success confirmation is surfaced by the accessibility service; immediately recreating the
- * bubble while the keyboard/target focus is being restored would fight the insertion flow.
+ * [DictationState.Success] maps to a short completion cue for the lifetime of
+ * that existing terminal state; [DictationState.Cancelled] remains hidden.
  * This mapping is intentionally deterministic and host-testable.
  */
 fun visibilityOf(ui: OverlayUiState): OverlayVisibility = when (ui.state) {
@@ -43,7 +42,7 @@ fun visibilityOf(ui: OverlayUiState): OverlayVisibility = when (ui.state) {
     is DictationState.Listening -> OverlayVisibility.Listening
     is DictationState.Finalizing -> OverlayVisibility.Finalizing
     is DictationState.Inserting -> OverlayVisibility.Inserting
-    is DictationState.Success -> OverlayVisibility.Hidden
+    is DictationState.Success -> OverlayVisibility.Success
     is DictationState.Cancelled -> OverlayVisibility.Hidden
     is DictationState.CopyAvailable -> OverlayVisibility.CopyAvailable
     is DictationState.CopiedToClipboard -> OverlayVisibility.CopiedToClipboard

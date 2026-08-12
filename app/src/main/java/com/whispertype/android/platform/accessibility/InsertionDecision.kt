@@ -56,9 +56,11 @@ object InsertionDecision {
         targetSecureOrUncertain: Boolean,
         commitAccepted: Boolean?,
     ): InsertionResult {
+        // Security wins over transport/currentness diagnostics so a protected
+        // live field can never route dictated text to the clipboard fallback.
+        if (targetSecureOrUncertain) return InsertionResult.Failed(targetNotSafe())
         if (!connectionPresent) return InsertionResult.Failed(connectionUnavailable())
         if (!targetCurrent) return InsertionResult.Failed(targetStale())
-        if (targetSecureOrUncertain) return InsertionResult.Failed(targetNotSafe())
 
         return if (commitAccepted == true) {
             InsertionResult.Inserted

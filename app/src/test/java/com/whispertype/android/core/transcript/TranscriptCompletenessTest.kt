@@ -79,7 +79,7 @@ class TranscriptCompletenessTest {
     }
 
     @Test
-    fun `echo longer than the raw is complete (can never be missing content)`() {
+    fun `echo may be longer when it preserves the ordered raw content`() {
         assertTrue(
             TranscriptCompleteness.covers(
                 echo = "We should meet on Thursday then",
@@ -121,6 +121,209 @@ class TranscriptCompletenessTest {
         assertEquals(
             listOf("the", "quick", "brown", "fox123"),
             TranscriptCompleteness.contentWords("The quick, brown 'fox123'!"),
+        )
+    }
+
+    @Test
+    fun `unrelated equal length text fails ordered coverage`() {
+        val assessment = TranscriptCompleteness.assess(
+            echo = "orange violet silver copper golden bronze",
+            raw = "alpha beta gamma delta epsilon zeta",
+        )
+
+        assertFalse(assessment.isComplete)
+        assertEquals(
+            TranscriptCompleteness.Diagnosis.LOW_ORDERED_COVERAGE,
+            assessment.diagnosis,
+        )
+        assertEquals(1.0, assessment.lengthRatio, 0.001)
+        assertEquals(0.0, assessment.orderedCoverage, 0.001)
+    }
+
+    @Test
+    fun `matching length cannot substitute unrelated tokens for missing content`() {
+        val assessment = TranscriptCompleteness.assess(
+            echo = "alpha beta gamma orange violet silver",
+            raw = "alpha beta gamma delta epsilon zeta",
+            minOrderedCoverage = 0.5,
+        )
+
+        assertFalse(assessment.isComplete)
+        assertEquals(
+            TranscriptCompleteness.Diagnosis.LOW_TOKEN_COVERAGE,
+            assessment.diagnosis,
+        )
+        assertEquals(1.0, assessment.lengthRatio, 0.001)
+        assertEquals(0.5, assessment.tokenCoverage, 0.001)
+        assertEquals(0.5, assessment.orderedCoverage, 0.001)
+    }
+
+    @Test
+    fun `filler removal and moderate reordering remain complete`() {
+        assertTrue(
+            TranscriptCompleteness.covers(
+                echo = "Please send Elena the revised report",
+                raw = "um uh please send the revised report to Elena",
+            ),
+        )
+    }
+
+    @Test
+    fun `reversing a short phrase is not ordered evidence`() {
+        val assessment = TranscriptCompleteness.assess(
+            echo = "beta alpha",
+            raw = "alpha beta",
+        )
+
+        assertFalse(assessment.isComplete)
+        assertEquals(
+            TranscriptCompleteness.Diagnosis.LOW_ORDERED_COVERAGE,
+            assessment.diagnosis,
+        )
+    }
+
+    @Test
+    fun `style rephrasing may change wording while preserving ordered content`() {
+        val assessment = TranscriptCompleteness.assess(
+            echo = "Please reserve a window table for four people tonight",
+            raw = "Please book a table for four people near the window tonight",
+        )
+
+        assertTrue(assessment.isComplete)
+        assertTrue(assessment.orderedCoverage >= TranscriptCompleteness.DEFAULT_MIN_ORDERED_COVERAGE)
+    }
+
+    @Test
+    fun `every high signal anchor class is mandatory`() {
+        val examples = listOf(
+            "send 42 blue boxes to the north warehouse" to
+                "send many blue boxes to the north warehouse",
+            "meet the design team on Thursday in the main office" to
+                "meet the design team sometime in the main office",
+            "review https://example.com/orders before sending the final report" to
+                "review the customer portal before sending the final report now",
+            "send the report to user.name@example.com before lunch today" to
+                "send the report to the account owner before lunch today",
+            "deploy build AB-123 to the staging cluster after lunch" to
+                "deploy the approved build to the staging cluster after lunch",
+        )
+
+        for ((raw, echo) in examples) {
+            val assessment = TranscriptCompleteness.assess(echo = echo, raw = raw)
+            assertFalse(assessment.isComplete, raw)
+            assertEquals(
+                TranscriptCompleteness.Diagnosis.MISSING_ANCHOR,
+                assessment.diagnosis,
+                raw,
+            )
+            assertTrue(assessment.preservedAnchorCount < assessment.requiredAnchorCount, raw)
+        }
+    }
+
+    @Test
+    fun `anchors are compared case insensitively across rephrasing`() {
+        assertTrue(
+            TranscriptCompleteness.covers(
+                echo = "Please email user.name@example.com regarding ab-123 this Thursday at 42",
+                raw = "Email User.Name@Example.com about AB-123 on Thursday at 42",
+            ),
+        )
+    }
+
+    @Test
+    fun `numeric date separators may be polished without losing date evidence`() {
+        assertTrue(
+            TranscriptCompleteness.covers(
+                echo = "Meet on 2026/08/12 at 09:30",
+                raw = "meet on 2026-08-12 at 09:30",
+            ),
+        )
+    }
+
+    @Test
+    fun `repeated anchors must be preserved with multiplicity`() {
+        val assessment = TranscriptCompleteness.assess(
+            echo = "use code 7 and then continue later",
+            raw = "use code 7 and then code 7 later",
+        )
+
+        assertFalse(assessment.isComplete)
+        assertEquals(TranscriptCompleteness.Diagnosis.MISSING_ANCHOR, assessment.diagnosis)
+    }
+
+    @Test
+    fun `high signal anchors must retain their order`() {
+        val examples = listOf(
+            "move 21 before 84" to "move 84 before 21",
+            "meet Thursday at 42" to "meet 42 on Thursday",
+        )
+
+        for ((raw, echo) in examples) {
+            val assessment = TranscriptCompleteness.assess(echo = echo, raw = raw)
+            assertFalse(assessment.isComplete, raw)
+            assertEquals(
+                TranscriptCompleteness.Diagnosis.MISSING_ANCHOR,
+                assessment.diagnosis,
+                raw,
+            )
+        }
+    }
+
+    @Test
+    fun `optional vocal fillers do not reduce ordered coverage`() {
+        val base = "please send the final report tomorrow"
+        for (fillers in listOf("um", "uh um", "hmm er uh")) {
+            assertTrue(
+                TranscriptCompleteness.covers(
+                    echo = base,
+                    raw = "$fillers $base",
+                ),
+                fillers,
+            )
+        }
+    }
+
+    @Test
+    fun `long echo-only duration helper rejects tiny summaries`() {
+        val assessment = TranscriptCompleteness.assessDuration(
+            transcript = "brief reply",
+            durationMs = 120_000,
+        )
+
+        assertFalse(assessment.isPlausible)
+        assertEquals(
+            TranscriptCompleteness.DurationDiagnosis.TOO_FEW_WORDS,
+            assessment.diagnosis,
+        )
+        assertFalse(
+            TranscriptCompleteness.isPlausibleForDuration(
+                transcript = "brief reply",
+                durationMs = 120_000,
+            ),
+        )
+    }
+
+    @Test
+    fun `duration helper accepts sufficient long text and grants short recordings grace`() {
+        val longText = (1..30).joinToString(" ") { "word$it" }
+
+        assertTrue(
+            TranscriptCompleteness.isPlausibleForDuration(
+                transcript = longText,
+                durationMs = 120_000,
+            ),
+        )
+        assertTrue(
+            TranscriptCompleteness.isPlausibleForDuration(
+                transcript = "yes",
+                durationMs = 5_000,
+            ),
+        )
+        assertFalse(
+            TranscriptCompleteness.isPlausibleForDuration(
+                transcript = "   ",
+                durationMs = 5_000,
+            ),
         )
     }
 }
