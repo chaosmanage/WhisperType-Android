@@ -1,15 +1,14 @@
 package com.whispertype.android.ui.waveform
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -17,6 +16,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.dp
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlinx.coroutines.delay
 
 internal const val WAVEFORM_SILENCE_THRESHOLD = 0.005f
 
@@ -31,6 +31,15 @@ internal fun effectiveWaveformAmplitude(amplitude: Float): Float =
 /** The rolling phase is useful only while live audio is visibly above silence. */
 internal fun shouldAnimateWaveform(amplitude: Float, isListening: Boolean): Boolean =
     isListening && effectiveWaveformAmplitude(amplitude) > 0f
+
+/** 0.6.1: low-rate phase tick (was a 60 fps infinite transition). */
+private const val PHASE_TICK_MS = 50L
+
+/** Full visual cycle duration preserved from the pre-0.6.1 animation. */
+private const val PHASE_CYCLE_MS = 550L
+
+private val FULL_TURN = (Math.PI * 2).toFloat()
+private val PHASE_STEP = FULL_TURN * PHASE_TICK_MS / PHASE_CYCLE_MS
 
 /**
  * 0.4.2 real-time waveform for the recording pill: a flat baseline on silence
@@ -59,19 +68,23 @@ fun RealTimeWaveform(
         animationSpec = tween(durationMillis = 90),
         label = "waveformAmplitude",
     )
-    val phaseState = if (shouldAnimateWaveform(targetAmplitude, isListening)) {
-        val transition = rememberInfiniteTransition(label = "wavePhase")
-        transition.animateFloat(
-            initialValue = 0f,
-            targetValue = (Math.PI * 2).toFloat(),
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 550, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "wavePhase",
-        )
-    } else {
-        null
+
+    // 0.6.1: the rolling phase advances at ~20 Hz (50 ms ticks) instead of a
+    // 60 fps infinite transition. The mic amplitude only updates at ~16.7 Hz,
+    // so a full-rate animation both wastes battery and floods logcat with
+    // per-frame View.setRequestedFrameRate spam (which rotated our SESSION DONE
+    // diagnostics out of the buffer during recording).
+    val animate = shouldAnimateWaveform(targetAmplitude, isListening)
+    var phase by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(animate) {
+        if (animate) {
+            while (true) {
+                phase = (phase + PHASE_STEP) % FULL_TURN
+                delay(PHASE_TICK_MS)
+            }
+        } else {
+            phase = 0f
+        }
     }
 
     Canvas(modifier = modifier) {
@@ -97,7 +110,6 @@ fun RealTimeWaveform(
 
         // Bar skyline: three overlapping sine components per bar for organic,
         // non-uniform peaks and crests; height scales with the boosted level.
-        val phase = phaseState?.value ?: 0f
         val barCount = 16
         val barWidth = (w / barCount) * 0.7f
         val step = w / barCount
