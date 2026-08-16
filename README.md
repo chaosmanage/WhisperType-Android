@@ -86,6 +86,15 @@ never triggers a retry. The recording re-transcription backstop was removed —
 there is no other model or endpoint to fall back on. See `docs/GEMINI_LIVE.md`
 for the full engine and wire reference.
 
+**0.7.0 fast path.** A new **Polish backend** setting (Settings → Gemini)
+chooses what happens to the settled speech: **Display** (raw ASR only, no
+echo), **Gemini Echo Live** (the 0.6.2 pipeline), or **Groq** (raw ASR settles
+instantly, then a Groq polish pass rewrites it — Hinglish romanization
+included). `AUTO` dials Groq when a key is set and otherwise keeps the echo
+pipeline. A failed or slow polish never loses text: the raw ASR is inserted
+with a typed outcome code. The Groq key is stored in the Android Keystore, and
+no transcript text ever appears in logs.
+
 ---
 
 ## Quick start
