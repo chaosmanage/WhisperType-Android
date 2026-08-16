@@ -26,6 +26,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -44,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -55,22 +57,25 @@ import com.whispertype.android.core.audio.AudioInputSelection
 import com.whispertype.android.core.model.AudioSourcePreference
 import com.whispertype.android.core.model.HotkeyShortcut
 import com.whispertype.android.core.model.LanguageMode
+import com.whispertype.android.core.model.PolishBackend
 import com.whispertype.android.core.model.TranscriptionStyle
+import com.whispertype.android.core.groq.GroqKeyValidation
 import com.whispertype.android.data.secrets.KeyProvider
 import com.whispertype.android.data.settings.SettingsRepository
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 /**
- * Settings screen: runtime toggles from [SettingsRepository] plus Gemini API
- * key management via [KeyProvider]. Purely a UI shell — all persistence is
- * delegated to the repositories, which carry their own tests.
+ * Settings screen: runtime toggles from [SettingsRepository] plus Gemini and
+ * Groq API key management via [KeyProvider]. Purely a UI shell — all
+ * persistence is delegated to the repositories, which carry their own tests.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     settings: SettingsRepository,
     keyProvider: KeyProvider,
+    groqKeyProvider: KeyProvider,
     onBack: () -> Unit,
     scrollToGemini: Boolean = false,
     onGeminiScrollDone: () -> Unit = {},
@@ -107,14 +112,25 @@ fun SettingsScreen(
     val miniDotDelay by settings.miniDotDelaySeconds
         .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_MINI_DOT_DELAY_SECONDS)
     val darkMode by settings.darkMode.collectAsStateWithLifecycle(initialValue = false)
+    val polishBackend by settings.polishBackend
+        .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_POLISH_BACKEND)
 
     var hasKey by remember { mutableStateOf(keyProvider.hasKey()) }
     var keyInput by remember { mutableStateOf("") }
     var keyFeedback by remember { mutableStateOf<String?>(null) }
 
+    // 0.7.0 Groq key management (mirrors the Gemini key card).
+    var hasGroqKey by remember { mutableStateOf(groqKeyProvider.hasKey()) }
+    var groqKeyInput by remember { mutableStateOf("") }
+    var groqKeyFeedback by remember { mutableStateOf<String?>(null) }
+
     val keySavedMessage = stringResource(R.string.settings_key_saved)
     val keySaveFailedMessage = stringResource(R.string.settings_key_save_failed)
     val keyClearedMessage = stringResource(R.string.settings_key_cleared)
+    val groqSavedMessage = stringResource(R.string.settings_groq_saved)
+    val groqSaveFailedMessage = stringResource(R.string.settings_groq_save_failed)
+    val groqClearedMessage = stringResource(R.string.settings_groq_cleared)
+    val groqInvalidMessage = stringResource(R.string.settings_groq_invalid)
 
     Scaffold(
         topBar = {
@@ -465,6 +481,98 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.primary,
                     )
                 }
+
+                // 0.7.0: which backend polishes the settled raw ASR.
+                Text(
+                    text = stringResource(R.string.settings_polish_backend),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = stringResource(R.string.settings_polish_backend_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                POLISH_BACKEND_OPTIONS.forEach { option ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = polishBackend == option.backend,
+                                onClick = { scope.launch { settings.setPolishBackend(option.backend) } },
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = polishBackend == option.backend,
+                            onClick = { scope.launch { settings.setPolishBackend(option.backend) } },
+                        )
+                        Text(text = stringResource(option.labelRes))
+                    }
+                }
+
+                // 0.7.0 Groq account (auto-dialed when this key is present).
+                Text(
+                    text = stringResource(R.string.settings_groq_key),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = stringResource(
+                        if (hasGroqKey) R.string.settings_groq_key_configured else R.string.settings_groq_key_missing,
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (hasGroqKey) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+                OutlinedTextField(
+                    value = groqKeyInput,
+                    onValueChange = { groqKeyInput = it },
+                    label = { Text(stringResource(R.string.settings_groq_key_hint)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            val candidate = groqKeyInput.trim()
+                            if (!GroqKeyValidation.looksValid(candidate)) {
+                                groqKeyFeedback = groqInvalidMessage
+                            } else {
+                                scope.launch {
+                                    val saved = groqKeyProvider.storeKey(candidate)
+                                    groqKeyFeedback = if (saved) {
+                                        hasGroqKey = true
+                                        groqKeyInput = ""
+                                        groqSavedMessage
+                                    } else {
+                                        groqSaveFailedMessage
+                                    }
+                                }
+                            }
+                        },
+                    ) {
+                        Text(stringResource(R.string.settings_groq_save))
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                groqKeyProvider.deleteKey()
+                                hasGroqKey = false
+                                groqKeyFeedback = groqClearedMessage
+                            }
+                        },
+                    ) {
+                        Text(stringResource(R.string.settings_groq_clear))
+                    }
+                }
+                groqKeyFeedback?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
         }
     }
@@ -570,6 +678,15 @@ private fun polishLevelLabelRes(style: TranscriptionStyle): Int = when (style) {
     TranscriptionStyle.MEDIUM -> R.string.polish_medium
     TranscriptionStyle.HIGH -> R.string.polish_high
 }
+
+/** 0.7.0: the three user-selectable polish backends (NONE is internal-only). */
+private data class PolishBackendOption(val backend: PolishBackend, @StringRes val labelRes: Int)
+
+private val POLISH_BACKEND_OPTIONS: List<PolishBackendOption> = listOf(
+    PolishBackendOption(PolishBackend.AUTO, R.string.polish_backend_auto),
+    PolishBackendOption(PolishBackend.LIVE_ECHO, R.string.polish_backend_live_echo),
+    PolishBackendOption(PolishBackend.GROQ, R.string.polish_backend_groq),
+)
 
 @StringRes
 private fun audioSourceLabelRes(preference: AudioSourcePreference): Int = when (preference) {

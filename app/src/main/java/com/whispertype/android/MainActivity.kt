@@ -73,6 +73,7 @@ import com.whispertype.android.data.history.HistoryStats
 import com.whispertype.android.data.secrets.AndroidKeystoreKeyStore
 import com.whispertype.android.data.secrets.FileBlobStore
 import com.whispertype.android.data.secrets.JavaxAesGcmCipher
+import com.whispertype.android.data.secrets.GroqKeyProvider
 import com.whispertype.android.data.secrets.KeystoreKeyProvider
 import com.whispertype.android.data.secrets.KeyProvider
 import com.whispertype.android.data.settings.SettingsRepository
@@ -100,6 +101,7 @@ class MainActivity : ComponentActivity() {
 
     private val settingsRepository by lazy { SettingsRepository(applicationContext) }
     private val keyProvider by lazy { KeystoreKeyProvider(applicationContext) }
+    private val groqKeyProvider by lazy { GroqKeyProvider(applicationContext) }
     private val historyRepository by lazy {
         EncryptedHistoryRepository(
             keystore = AndroidKeystoreKeyStore(EncryptedHistoryRepository.DEFAULT_KEY_ALIAS),
@@ -333,6 +335,7 @@ class MainActivity : ComponentActivity() {
                     3 -> SettingsScreen(
                         settings = settings,
                         keyProvider = keyProvider,
+                        groqKeyProvider = groqKeyProvider,
                         onBack = { selectedTab = 0 },
                         scrollToGemini = settingsScrollToGemini,
                         onGeminiScrollDone = { settingsScrollToGemini = false },

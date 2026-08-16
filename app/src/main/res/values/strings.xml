@@ -133,6 +133,23 @@
     <string name="settings_key_save_failed" tools:ignore="UnusedResources">Could not save key</string>
     <string name="settings_key_cleared" tools:ignore="UnusedResources">Key removed</string>
 
+    <!-- 0.7.0: polish backend + Groq account -->
+    <string name="settings_polish_backend">Polish backend</string>
+    <string name="settings_polish_backend_desc">Which service turns the raw speech into inserted text. Display = Auto (Groq when a Groq key is set, otherwise the Gemini echo).</string>
+    <string name="polish_backend_auto">Display (Auto)</string>
+    <string name="polish_backend_groq">Groq</string>
+    <string name="polish_backend_live_echo">Gemini Echo (Live)</string>
+    <string name="settings_groq_key">Groq API key</string>
+    <string name="settings_groq_key_configured">Groq key configured</string>
+    <string name="settings_groq_key_missing">No Groq API key set</string>
+    <string name="settings_groq_key_hint">Paste your Groq API key (gsk_…)</string>
+    <string name="settings_groq_save">Save key</string>
+    <string name="settings_groq_clear">Clear key</string>
+    <string name="settings_groq_saved" tools:ignore="UnusedResources">Groq key saved</string>
+    <string name="settings_groq_save_failed" tools:ignore="UnusedResources">Could not save Groq key</string>
+    <string name="settings_groq_cleared" tools:ignore="UnusedResources">Groq key removed</string>
+    <string name="settings_groq_invalid" tools:ignore="UnusedResources">That does not look like a Groq API key (should start with gsk_).</string>
+
     <!-- 0.4.0 settings: auto-stop, polish, dictionary, history, bubble -->
     <string name="settings_auto_stop">Auto-stop timeout</string>
     <string name="settings_auto_stop_desc">Stop automatically after silence or the maximum recording time.</string>
