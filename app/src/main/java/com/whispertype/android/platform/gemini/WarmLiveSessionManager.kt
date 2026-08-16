@@ -3,6 +3,7 @@ package com.whispertype.android.platform.gemini
 import com.whispertype.android.core.contracts.GeminiLiveSession
 import com.whispertype.android.core.model.GeminiEvent
 import com.whispertype.android.core.model.LanguageMode
+import com.whispertype.android.core.model.PolishBackend
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -41,6 +42,9 @@ data class WarmSessionProfile(
     val inputAudioTranscription: Boolean,
     val outputAudioTranscription: Boolean,
     val credentialRevision: Long,
+    /** 0.7.0: resolved polish backend; GROQ/NONE sessions are stripped, so a
+     *  stripped warm session must never be reused for a LIVE_ECHO dictation. */
+    val polishBackend: PolishBackend = PolishBackend.AUTO,
 ) {
     init {
         require(model.isNotBlank()) { "model must not be blank" }

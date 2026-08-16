@@ -208,6 +208,9 @@ class OkHttpGeminiLiveSession(
      * 3.1 ongoing text is never completed with `clientContent.turnComplete`.
      */
     override suspend fun requestEchoFor(text: String): String? {
+        // 0.7.0: a stripped session (GROQ/NONE polish) has no echo channel — the
+        // outputTranscription reply can never arrive, so refuse up front.
+        if (!config.outputAudioTranscription) return null
         if (state.get() != State.Ready) return null
         if (startActivity() != SendResult.Accepted) return null
         val textQueued = synchronized(outboundLock) {

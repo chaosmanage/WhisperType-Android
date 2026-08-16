@@ -2,6 +2,7 @@ package com.whispertype.android.platform.gemini
 
 import com.whispertype.android.core.audio.GemAudioFormat
 import com.whispertype.android.core.model.LanguageMode
+import com.whispertype.android.core.model.PolishBackend
 
 /**
  * Immutable configuration for one [OkHttpGeminiLiveSession]. The model name
@@ -46,6 +47,12 @@ class GeminiSessionConfig(
     val apiVersion: String = DEFAULT_API_VERSION,
     /** Language mode stamped on emitted [com.whispertype.android.core.model.ResultCandidate]s. */
     val language: LanguageMode = LanguageMode.ENGLISH,
+    /** 0.7.0: how the settled raw ASR becomes the inserted text in this
+     *  session. The runtime reads this to decide whether the session is a
+     *  "strip" (raw transport, no echo instruction) or a LIVE_ECHO session.
+     *  Indexed for [PolishBackend.LIVE_ECHO] sessions so the host echo helper
+     *  shares the session when applicable. */
+    val polishBackend: PolishBackend = PolishBackend.AUTO,
 ) {
     companion object {
         const val DEFAULT_API_VERSION = "v1beta"
