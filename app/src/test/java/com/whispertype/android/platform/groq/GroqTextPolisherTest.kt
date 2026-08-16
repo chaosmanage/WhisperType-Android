@@ -47,13 +47,14 @@ class GroqTextPolisherTest {
 
     private fun polisher(
         scope: CoroutineScope,
+        language: LanguageMode = LanguageMode.ENGLISH,
         style: TranscriptionStyle = TranscriptionStyle.MEDIUM,
         model: String = "test-model",
     ) = GroqTextPolisher(
         apiKey = "test-key",
         okHttpClient = client,
         scope = scope,
-        languageMode = LanguageMode.ENGLISH,
+        languageMode = language,
         style = style,
         model = model,
         url = server.url("/openai/v1/chat/completions").toString(),
@@ -112,6 +113,29 @@ class GroqTextPolisherTest {
         assertTrue(body.contains("\"model\":\"test-model\""), "body must carry the model")
         assertTrue(body.contains("the raw speech"), "body must carry the settled raw text")
         assertEquals(0L, elapsed)
+    }
+
+    @Test
+    fun `Latin-only ASR in Hinglish mode gets English instructions`() = runBlocking {
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("""{"choices":[{"message":{"content":"Can you tell me what the weather is like today?"}}]}""")
+                .build(),
+        )
+        val polish = polisher(this, language = LanguageMode.HINGLISH)
+
+        val (outcome, _) = drive(this, polish, text = "can you tell me what the weather is like today")
+
+        assertEquals(PolishOutcome.SUCCESS, outcome)
+        val body = server.takeRequest().body!!.utf8()
+        assertTrue(body.contains("Keep the language of the speech"))
+        assertTrue(
+            !body.contains("Output Latin script only"),
+            "an English-only turn must not receive Hinglish romanization instructions",
+        )
+        assertTrue(body.contains("can you tell me what the weather is like today"))
     }
 
     @Test

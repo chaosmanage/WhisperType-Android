@@ -21,6 +21,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   prose instead of correcting line by line. It may reorder ideas, group related
   points, add paragraphs, and turn spoken enumerations into headings, bullets,
   or numbered lists, while preserving every fact and never inventing content.
+- **English stays English in Hinglish mode.** When Gemini's raw ASR contains no
+  Devanagari, the Groq request now uses English shaping instructions instead of
+  Hinglish romanization instructions. This prevents English dictation from
+  being translated into Hindi/romanized Hindi; the guard still rejects any
+  meaning-changing reply.
 
 ## [0.8.0] - 2026-08-16
 

@@ -107,7 +107,14 @@ class GroqTextPolisher(
     }
 
     private fun buildRequest(text: String, modelId: String): Request {
-        val messages = PolishPrompts.buildMessages(text, languageMode, style)
+        // Hinglish is a user-selected capability, not proof that every turn is
+        // Hindi. Gemini's raw ASR often returns an entirely Latin English turn;
+        // sending that through Hinglish instructions made the small model
+        // translate English into Hindi/romanized Hindi. Prompt that turn as
+        // English instead. The guard still receives the session's Hinglish mode
+        // and rejects any answer or meaning-changing output that slips through.
+        val promptLanguage = effectivePromptLanguage(text)
+        val messages = PolishPrompts.buildMessages(text, promptLanguage, style)
         val body = buildJsonObject {
             put("model", modelId)
             // 0.8.0: deterministic. Any sampling makes the level calibration
@@ -133,6 +140,13 @@ class GroqTextPolisher(
             .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
     }
+
+    private fun effectivePromptLanguage(text: String): LanguageMode =
+        if (languageMode == LanguageMode.HINGLISH && text.none { it in DEVANAGARI_RANGE }) {
+            LanguageMode.ENGLISH
+        } else {
+            languageMode
+        }
 
     private suspend fun awaitOutcome(call: Call): PolishOutcome {
         val response = try {
@@ -233,6 +247,7 @@ class GroqTextPolisher(
     private companion object {
         const val NANOS_PER_MILLISECOND = 1_000_000L
         const val PREAMBLE_MAX_LENGTH = 60
+        val DEVANAGARI_RANGE = '\u0900'..'\u097F'
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
 }
