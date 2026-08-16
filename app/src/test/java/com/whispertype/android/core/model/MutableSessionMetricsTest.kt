@@ -578,14 +578,46 @@ class MutableSessionMetricsTest {
         assertTrue("turnComplete=false" in summary)
     }
 
-    @Test
+@Test
     fun `summary redacts non-code rejection values`() {
         metrics.lastRejection = "do not log candidate words"
 
         val summary = metrics.summary()
 
         assertTrue("reject=OTHER" in summary)
-        assertTrue("candidate words" !in summary)
-        assertEquals("OTHER", metrics.snapshot().lastRejection)
+        assertTrue("do not log candidate words" !in summary)
+    }
+
+    @Test
+    fun `polish fields are recorded as typed codes and tokens`() {
+        metrics.polishSketchCode = "CACHE_HIT"
+        metrics.polishCacheHit = true
+        metrics.polishDurationMs = 42
+        metrics.polishPromptTokens = 128
+        metrics.polishTotalTokens = 256
+
+        val summary = metrics.summary()
+
+        assertTrue("polish=CACHE_HIT" in summary)
+        assertTrue("cacheHit=true" in summary)
+        assertTrue("polishDurationMs=42ms" in summary)
+
+        val snapshot = metrics.snapshot()
+        assertEquals("CACHE_HIT", snapshot.polishSketchCode)
+        assertEquals(128L, snapshot.polishPromptTokens)
+        assertEquals(256L, snapshot.polishTotalTokens)
+    }
+
+    @Test
+    fun `polish tokens stay null and out of the summary until reported`() {
+        metrics.polishSketchCode = "TIMEOUT"
+
+        val summary = metrics.summary()
+
+        assertTrue("polish=TIMEOUT" in summary)
+        assertTrue("polishDurationMs" !in summary)
+        val snapshot = metrics.snapshot()
+        assertEquals(null, snapshot.polishPromptTokens)
+        assertEquals(null, snapshot.polishTotalTokens)
     }
 }

@@ -509,6 +509,22 @@ class OkHttpGeminiLiveSessionTest {
     }
 
     @Test
+    fun `a stripped session refuses requestEchoFor without sending anything`() = runBlocking {
+        // 0.7.0: GROQ/NONE polish backends disable outputAudioTranscription, so
+        // the echo channel does not exist and requestEchoFor must refuse up
+        // front — no activityStart, no text, nothing on the wire.
+        val session = newSession(
+            config = GeminiSessionConfig(model = "test-model", outputAudioTranscription = false),
+        )
+        session.awaitReady()
+
+        val result = session.requestEchoFor("source text")
+        assertNull(result)
+        assertTrue(serverSocket.clientMessages.isEmpty(), "no frames may leave a stripped session")
+        session.close()
+    }
+
+    @Test
     fun `setupError fails awaitReady and emits Failed`() = runBlocking {
         val failing = MockWebServer()
         failing.enqueue(

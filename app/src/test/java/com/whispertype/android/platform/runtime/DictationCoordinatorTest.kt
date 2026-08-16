@@ -3,6 +3,7 @@ package com.whispertype.android.platform.runtime
 import com.whispertype.android.audio.AudioPipeline
 import com.whispertype.android.audio.AudioStartResult
 import com.whispertype.android.core.contracts.GeminiLiveSession
+import com.whispertype.android.core.contracts.TextPolishContract
 import com.whispertype.android.core.model.AudioChunk
 import com.whispertype.android.core.model.CancelReason
 import com.whispertype.android.core.model.DictationFailure
@@ -11,6 +12,8 @@ import com.whispertype.android.core.model.GeminiEvent
 import com.whispertype.android.core.model.InsertionResult
 import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.core.model.MutableSessionMetrics
+import com.whispertype.android.core.model.PolishBackend
+import com.whispertype.android.core.model.PolishOutcome
 import com.whispertype.android.core.model.SendResult
 import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.SettlePath
@@ -20,10 +23,13 @@ import kotlin.coroutines.ContinuationInterceptor
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
@@ -1862,5 +1868,215 @@ class DictationCoordinatorTest {
         val error = states(host).first { it is DictationState.Error } as DictationState.Error
         assertEquals("insert_target_ineligible", error.failure.code)
         assertTrue(states(host).none { it is DictationState.CopiedToClipboard })
+    }
+
+    // ------------------------------------------------------------------
+    // 0.7.0: GROQ polish backend settlement
+    // ------------------------------------------------------------------
+
+    /**
+     * Host-testable [TextPolishContract] stand-in: collects the replayed
+     * frame flow, then completes the attempt with [outcome] and
+     * [committedText] (delivered through the sink). null [outcome] never
+     * completes, which drives the coordinator's dial-timeout fallback.
+     */
+    private class FakePolish(
+        private val scope: kotlinx.coroutines.test.TestScope,
+        private val outcome: PolishOutcome? = PolishOutcome.SUCCESS,
+        private val committedText: String? = null,
+    ) : TextPolishContract {
+        override val backend: PolishBackend = PolishBackend.GROQ
+        override val languageMode: LanguageMode = LanguageMode.ENGLISH
+        override val style: com.whispertype.android.core.model.TranscriptionStyle =
+            com.whispertype.android.core.model.TranscriptionStyle.MEDIUM
+        override val maxAttempts: Int = 1
+        override var onTranscript: ((String) -> Unit)? = null
+        var driven = false
+        var receivedFrames = 0L
+        var cancelled = false
+        var closed = false
+
+        override fun driveAttempt(
+            audio: Flow<AudioChunk>,
+            frames: Long,
+            onOutcome: (PolishOutcome, Long) -> Unit,
+            onRequestStarted: () -> Unit,
+        ) {
+            driven = true
+            scope.launch {
+                audio.collect { receivedFrames++ }
+                onRequestStarted()
+                if (outcome != null) {
+                    committedText?.let { onTranscript?.invoke(it) }
+                    onOutcome(outcome, 10L)
+                }
+            }
+        }
+
+        override fun cancelAttempt() {
+            cancelled = true
+        }
+
+        override fun close() {
+            closed = true
+        }
+    }
+
+    @Test
+    fun `Groq session settles on the dialed polish text and records GROQ_POLISHED`() = runTest {
+        val host = FakeHost()
+        val polish = FakePolish(this, outcome = PolishOutcome.SUCCESS, committedText = "The polished text.")
+        host.resolveResult = SessionResolve.Ok(
+            SessionResolution(
+                host.session,
+                LanguageMode.ENGLISH,
+                echoEnabled = false,
+                polishBackend = PolishBackend.GROQ,
+                polish = polish,
+            ),
+        )
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        host.capture.chunksChannel.send(chunk(0))
+        host.capture.chunksChannel.send(chunk(1))
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "the raw speech text")
+        advanceTimeBy(300)
+        runCurrent()
+
+        assertTrue(polish.driven, "settlement must dial the Groq polish attempt")
+        assertTrue(polish.receivedFrames > 0, "the dial must receive the buffered capture frames")
+        assertEquals(1, host.insertions.size)
+        assertEquals("The polished text.", host.insertions[0].second)
+        assertEquals(SettlePath.GROQ_POLISHED, coordinator.activeMetrics()!!.settlePath)
+        assertEquals("SUCCESS", coordinator.activeMetrics()!!.polishSketchCode)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `Groq session falls back to the raw ASR when the polish attempt fails`() = runTest {
+        val host = FakeHost()
+        val polish = FakePolish(this, outcome = PolishOutcome.NETWORK_ERROR, committedText = null)
+        host.resolveResult = SessionResolve.Ok(
+            SessionResolution(
+                host.session,
+                LanguageMode.ENGLISH,
+                echoEnabled = false,
+                polishBackend = PolishBackend.GROQ,
+                polish = polish,
+            ),
+        )
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "keep the raw words")
+        advanceTimeBy(300)
+        runCurrent()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("keep the raw words", host.insertions[0].second)
+        assertEquals(SettlePath.RAW_ONLY, coordinator.activeMetrics()!!.settlePath)
+        assertEquals("NETWORK_ERROR", coordinator.activeMetrics()!!.polishSketchCode)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `Groq session falls back to raw when the dial times out`() = runTest {
+        val host = FakeHost()
+        val polish = FakePolish(this, outcome = null) // never completes
+        host.resolveResult = SessionResolve.Ok(
+            SessionResolution(
+                host.session,
+                LanguageMode.ENGLISH,
+                echoEnabled = false,
+                polishBackend = PolishBackend.GROQ,
+                polish = polish,
+            ),
+        )
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "fallback on timeout")
+        advanceTimeBy(300)
+        runCurrent()
+        assertTrue(host.insertions.isEmpty(), "the dial is still in flight")
+
+        advanceTimeBy(12_000) // past the polishDialTimeoutMs backstop
+        runCurrent()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("fallback on timeout", host.insertions[0].second)
+        assertEquals(SettlePath.RAW_ONLY, coordinator.activeMetrics()!!.settlePath)
+        assertEquals("TIMEOUT", coordinator.activeMetrics()!!.polishSketchCode)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `Groq session with no captured frames still inserts the raw ASR`() = runTest {
+        val host = FakeHost()
+        val polish = FakePolish(this, outcome = PolishOutcome.SUCCESS, committedText = null)
+        host.resolveResult = SessionResolve.Ok(
+            SessionResolution(
+                host.session,
+                LanguageMode.ENGLISH,
+                echoEnabled = false,
+                polishBackend = PolishBackend.GROQ,
+                polish = polish,
+            ),
+        )
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        // The transcript arrives without any audio frames having been buffered.
+        sendTranscript(host, "text only")
+        advanceTimeBy(300)
+        runCurrent()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("text only", host.insertions[0].second)
+        assertEquals(SettlePath.RAW_ONLY, coordinator.activeMetrics()!!.settlePath)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `teardown closes the polish contract`() = runTest {
+        val host = FakeHost()
+        val polish = FakePolish(this, outcome = null)
+        host.resolveResult = SessionResolve.Ok(
+            SessionResolution(
+                host.session,
+                LanguageMode.ENGLISH,
+                echoEnabled = false,
+                polishBackend = PolishBackend.GROQ,
+                polish = polish,
+            ),
+        )
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        coordinator.cancel()
+        advanceUntilIdle()
+
+        assertTrue(polish.cancelled, "teardown must cancel the polish attempt")
+        assertTrue(polish.closed, "teardown must close the polish contract")
     }
 }
