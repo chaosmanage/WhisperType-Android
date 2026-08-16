@@ -130,6 +130,88 @@ class PolishGuardTest {
         assertEquals("not_romanized", v.code)
     }
 
+    // ------------------------------------------------------------------
+    // Answer detection (the 0.8.0 device regression)
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `an answer to a dictated English question in Hinglish mode is rejected`() {
+        // Shipped broken once: Hinglish mode + an English question came back as
+        // an answer in romanized Hindi, and the script-only check accepted it.
+        val raw = "can you tell me what the weather is like today"
+        val polished = "Maine dekha hai ki aaj ka din bahut garm hai aur sunehra rahega."
+        val v = verdict(raw, polished, TranscriptionStyle.MEDIUM, LanguageMode.HINGLISH)
+        assertIs<PolishGuard.Verdict.Reject>(v)
+        assertEquals("retention", v.code)
+    }
+
+    @Test
+    fun `an answer that invents content is rejected`() {
+        // A question that comes back as an answer grows beyond the level's
+        // budget. Depending on how much it grows, it is rejected as either
+        // `too_long` (the length bound fires first) or `invented` (the
+        // new-word bound fires first) - both are correct rejections; the point
+        // is that it must never be inserted.
+        val raw = "what is the capital of france"
+        val polished = "The capital of France is Paris, a city known for the Eiffel Tower and its " +
+            "world-famous museums along the Seine."
+        val v = verdict(raw, polished, TranscriptionStyle.MEDIUM)
+        assertIs<PolishGuard.Verdict.Reject>(v)
+        assertTrue(
+            v.code == "invented" || v.code == "too_long",
+            "an answer must be rejected, got ${v.code}",
+        )
+    }
+
+    @Test
+    fun `a concise same-language answer is caught by the new-word bound`() {
+        // Every raw word survives (so retention alone passes) but the reply
+        // appends an answer word - the invention check is what catches it.
+        val raw = "what is the capital of france"
+        val polished = "The capital of France is Paris, full stop."
+        val v = verdict(raw, polished, TranscriptionStyle.MEDIUM)
+        assertIs<PolishGuard.Verdict.Reject>(v)
+        assertEquals("invented", v.code)
+    }
+
+    @Test
+    fun `a dictated question transcribed as a question is accepted`() {
+        val raw = "can you tell me what the weather is like today"
+        listOf(TranscriptionStyle.LOW, TranscriptionStyle.MEDIUM).forEach { style ->
+            assertIs<PolishGuard.Verdict.Accept>(
+                verdict(raw, "Can you tell me what the weather is like today?", style),
+                "level $style",
+            )
+        }
+    }
+
+    @Test
+    fun `English spoken in Hinglish mode is validated like English`() {
+        val raw = "so i was reviewing the pull request and i think we should merge it tomorrow"
+        val polished = "So I was reviewing the pull request, and I think we should merge it tomorrow."
+        assertIs<PolishGuard.Verdict.Accept>(
+            verdict(raw, polished, TranscriptionStyle.MEDIUM, LanguageMode.HINGLISH),
+        )
+    }
+
+    @Test
+    fun `a cross-script reply that drops the English loanwords is rejected`() {
+        val raw = "मुझे कल का plan cancel करना है क्योंकि meeting postpone हो गई"
+        val polished = "Mujhe kal ka kaam rok dena hai kyonki baithak aage badh gayi."
+        val v = verdict(raw, polished, TranscriptionStyle.MEDIUM, LanguageMode.HINGLISH)
+        assertIs<PolishGuard.Verdict.Reject>(v)
+        assertEquals("loanwords_lost", v.code)
+    }
+
+    @Test
+    fun `a cross-script reply that keeps the loanwords is accepted`() {
+        val raw = "मुझे कल का plan cancel करना है क्योंकि meeting postpone हो गई"
+        val polished = "Mujhe kal ka plan cancel karna hai kyonki meeting postpone ho gayi."
+        assertIs<PolishGuard.Verdict.Accept>(
+            verdict(raw, polished, TranscriptionStyle.MEDIUM, LanguageMode.HINGLISH),
+        )
+    }
+
     @Test
     fun `Hinglish keeps English loanwords without tripping the script check`() {
         val raw = "मैं अभी office जा रहा हूँ फिर मैं आपको call करूंगा"
