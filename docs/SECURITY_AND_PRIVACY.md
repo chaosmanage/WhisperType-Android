@@ -1,5 +1,12 @@
 # WhisperType Android — Security and Privacy
 
+> **⚠️ MODEL POLICY — NON-NEGOTIABLE.** Exactly one Gemini model may ever be
+> called: the Gemini Live model `gemini-3.1-flash-live-preview`
+> (`BidiGenerateContent` / Live API). **Audio leaves the device only to Gemini
+> Live** — never to Groq or any other service (no Whisper, no audio upload
+> endpoints). Groq receives **text only**, on its free tier. Enforced by
+> `ModelPolicyTest`; the build fails on violation.
+
 WhisperType Android is a private, local-first dictation app. Its security model is centered on keeping the Gemini API key encrypted on the device, keeping transcripts and audio out of storage and logs by default, and keeping the Accessibility Service's reach minimal. This document is the security and privacy reference for the app and describes how it handles secrets, transcripts, history, the clipboard, logging, Accessibility access, and the microphone.
 
 ## Vulnerability reporting
@@ -57,8 +64,23 @@ The Gemini API key is the only secret the app stores.
 the alias `whispertype_groq_key` (file `groq_api_key.bin`): Keystore AES-GCM,
 no backup, never logged, cleared from memory after use. Entry is validated for
 the `gsk_` shape before saving. A Groq key only travels to the Groq endpoint
-(`wss://api.groq.com/…`, a constant) over TLS; the shared OkHttp client adds no
+(`https://api.groq.com/openai/v1/chat/completions`, a constant) over TLS, and it
+carries **text only — never audio** (0.8.0); the shared OkHttp client adds no
 logging of payload content.
+
+## What leaves the device (0.8.0)
+
+| Data | Destination | Notes |
+| --- | --- | --- |
+| Microphone audio (PCM16 frames) | **Gemini Live only** (`wss://generativelanguage.googleapis.com`, the pinned Live model) | Never written to disk, never sent anywhere else. No Whisper, no audio upload endpoint. |
+| Settled transcript text | Groq chat completions, only when a text stage runs (`LOW`/`MEDIUM`/`HIGH`, or any Hinglish level) and a Groq key is stored | One request per dictation, max one 429 retry. `NONE` in English sends nothing. |
+| Nothing else | — | No analytics, no crash reporting, no backend of our own. |
+
+Both providers are used on their **free tiers**. Note that Google's free tier
+states that inputs may be used to improve their products; Groq's free tier
+offers a zero-data-retention option. Users who need stricter handling should use
+paid keys with the respective provider's data policy — the app itself adds no
+retention.
 
 ## Backup exclusion
 

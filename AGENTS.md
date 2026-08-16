@@ -1,5 +1,20 @@
 # AGENTS.md
 
+## ⚠️ MODEL POLICY — NON-NEGOTIABLE
+
+**Exactly one Gemini model may ever be called: the Gemini Live model
+`gemini-3.1-flash-live-preview` (`BidiGenerateContent` / Live API), pinned as
+`GeminiSessionFactory.LIVE_MODEL`.**
+
+No other Gemini model is permitted — not `generateContent`, not Flash, Pro,
+Flash-Lite, native-audio or TTS variants, not any REST/batch surface. Only the
+Live model is free with the owner's API key; anything else would incur charges
+and is explicitly refused. **Audio goes only to Gemini Live** (no Whisper, no
+audio upload anywhere); **text-only** shaping runs on Groq's free tier. If a
+change needs a different model, it does not ship. Enforced by
+`app/src/test/java/com/whispertype/android/platform/gemini/ModelPolicyTest.kt` —
+the build fails on violation. Do not weaken or delete that test.
+
 WhisperType: an Android voice-to-text app (Gemini Live) with a floating mic bubble.
 Single Gradle module `:app`, Kotlin + Jetpack Compose. `docs/` is the authoritative
 reference (README is just a hub). Start with `docs/CONTRIBUTING.md` before changing

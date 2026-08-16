@@ -1,5 +1,14 @@
 # WhisperType Android — Architecture
 
+> **⚠️ MODEL POLICY — NON-NEGOTIABLE.** Exactly one Gemini model may ever be
+> called: the Gemini Live model `gemini-3.1-flash-live-preview`
+> (`BidiGenerateContent` / Live API), pinned as
+> `GeminiSessionFactory.LIVE_MODEL`. No `generateContent`, no Flash/Pro/
+> Flash-Lite/native-audio/TTS, no REST or batch Gemini surface — only the Live
+> model is free with the owner's API key and anything else is explicitly
+> refused. **Audio goes only to Gemini Live**; text-only shaping runs on Groq's
+> free tier. Enforced by `ModelPolicyTest`.
+
 This document describes the current runtime architecture of WhisperType Android
 (`app/src/main/java/com/whispertype/android`): the two processes, the module map,
 and where to go for the voice engine and the 0.4.0 evolution.
@@ -81,14 +90,19 @@ All paths are under `app/src/main/java/com/whispertype/android/`.
    accessibility process re-validates the target and commits text at the cursor;
    a typed result flows back. When history is enabled, the settled transcript is
    recorded encrypted.
-4a. **0.7.0 polish stage** — the `PolishBackend` setting decides how the settled
-   raw ASR becomes the inserted text. `GROQ` (and `AUTO` with a Groq key) strips
-   the session to raw transport (no echo, no `systemInstruction`) and settles on
-   the raw ASR immediately, then dials the Groq audio endpoint
-   (`platform/groq/GroqSpeechProvider` over the shared OkHttp client) with a
-   bounded replay of the captured frames; streamed transcript text crosses back
-   through `insertSettled`. A failed/slow/empty polish always falls back to raw
-   with a typed outcome code. `LIVE_ECHO` keeps the 0.6.2 pipeline.
+4a. **0.8.0 text stage** — the Live session is **raw-ASR transport only** (no
+   echo channel, no `systemInstruction`), so settlement adopts the raw
+   `inputTranscription` after one 250 ms quiet window (single 2.5 s tail
+   backstop). The `TranscriptionStyle` then decides the text stage:
+   `NONE` inserts the raw ASR with **zero network calls**; `LOW`/`MEDIUM`/`HIGH`
+   and every Hinglish dictation make exactly **one** Groq chat call
+   (`platform/groq/GroqTextPolisher`, `llama-3.1-8b-instant`, `temperature = 0`)
+   that applies the level and, for Hinglish, romanizes Devanagari to colloquial
+   Latin. The reply is adopted only if `core/transcript/PolishGuard` accepts the
+   edit magnitude for that level; otherwise the unpolished ASR is inserted, so
+   words are never lost and MEDIUM can never restructure speech. A 429 is
+   retried once on the fallback model's separate token budget. Audio never
+   leaves to Groq.
 5. Failures surface as typed `DictationFailure`s with a Retry/Dismiss panel; a
    failed insertion offers an explicit Copy fallback.
 

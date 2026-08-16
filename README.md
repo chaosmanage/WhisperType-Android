@@ -1,5 +1,22 @@
 # WhisperType — AI Voice to Text for Android
 
+> ## ⚠️ MODEL POLICY — NON-NEGOTIABLE
+>
+> **This project uses EXACTLY ONE Gemini model: the Gemini Live model**
+> (`gemini-3.1-flash-live-preview`, the `BidiGenerateContent` / Live API).
+>
+> No other Gemini model may be called — **not** `generateContent`, **not** Flash,
+> Pro, Flash-Lite, native-audio, TTS, or any other REST/batch variant. The Gemini
+> Live model is the only one included at no cost with the project owner's API key.
+> **Any other Gemini model would incur charges and is explicitly refused.**
+>
+> - **Audio** goes ONLY to Gemini Live. Never to any other service.
+> - **Text** polishing/romanization runs ONLY on Groq's free tier.
+> - If a change requires a different model, **it does not ship.**
+>
+> This is enforced by `ModelPolicyTest` — the build fails if any other Gemini
+> model ID or a `:generateContent` endpoint appears in the source.
+
 Voice to text for Android that keeps your normal keyboard. Stream your speech to
 Google's Gemini Live API and get the transcription inserted at the cursor of
 whatever text field is focused — in Messages, Gmail, Notes, WhatsApp, or any
@@ -73,27 +90,34 @@ App (Messages, Gmail, Notes…)            WhisperType
 3. A recording pill with a live waveform shows while you speak.
 4. The validated transcription is inserted at the cursor; your keyboard returns.
 
-**The engine.** Audio streams over TLS to a Gemini Live realtime session that
-uses only the **`gemini-3.1-flash-live-preview`** live model. The model's
-instructed echo (`outputTranscription`) is the primary dictation source — the
-`systemInstruction` tells the model to repeat your speech back with the selected
-polish level (Latin script for Hinglish) — with the raw ASR
-(`inputTranscription`) as a fast fallback. Because the echo streams as
-word-level deltas and the model can condense very long turns, 0.4.2 adds an
-**echo completeness gate**: the polished echo is accepted only when its content
-covers the raw ASR, otherwise the complete raw is salvaged; a truncated echo
-never triggers a retry. The recording re-transcription backstop was removed —
-there is no other model or endpoint to fall back on. See `docs/GEMINI_LIVE.md`
-for the full engine and wire reference.
+**The engine (0.8.0).** Audio streams over TLS to a Gemini Live realtime
+session that uses only the **`gemini-3.1-flash-live-preview`** live model, and
+that session is **raw-ASR transport only**: WhisperType reads the server's
+`inputTranscription` and never enables the model's echo channel or sends a
+`systemInstruction`. When you press Done, settlement waits a single **250 ms**
+quiet window (with one 2.5 s tail backstop) — the 0.6.2 echo barriers, the
+generation gate, the 20 s deadline and the second transliteration session are
+all gone, which is where the old 5-10 s wait came from. See
+`docs/GEMINI_LIVE.md` for the wire reference.
 
-**0.7.0 fast path.** A new **Polish backend** setting (Settings → Gemini)
-chooses what happens to the settled speech: **Display** (raw ASR only, no
-echo), **Gemini Echo Live** (the 0.6.2 pipeline), or **Groq** (raw ASR settles
-instantly, then a Groq polish pass rewrites it — Hinglish romanization
-included). `AUTO` dials Groq when a key is set and otherwise keeps the echo
-pipeline. A failed or slow polish never loses text: the raw ASR is inserted
-with a typed outcome code. The Groq key is stored in the Android Keystore, and
-no transcript text ever appears in logs.
+**The text stage.** What happens to the settled text is decided by
+`Settings → Transcription style`:
+
+| Level | Behaviour | Network |
+| --- | --- | --- |
+| **None** | Inserted exactly as recognized | none |
+| **Low** | Removes `um`/`uh`/`ah` and stutters, fixes punctuation — nothing else | 1 Groq call |
+| **Medium** | Fixes grammar and word choice **without restructuring** your sentences | 1 Groq call |
+| **High** | Rewrites into clean written prose from what you said | 1 Groq call |
+
+Hinglish additionally romanizes Devanagari into colloquial Latin at every level,
+in the same single call, keeping English words as English. The stage runs on
+Groq's free tier (`llama-3.1-8b-instant`, measured 150-260 ms) and is
+**text-only — your audio never goes to Groq**. A reply that edits more than the
+level allows is rejected by `PolishGuard` and your unpolished words are inserted
+instead, so a slow, failed, rate-limited or over-eager model can never lose or
+rewrite your speech. The Groq key is stored in the Android Keystore, and no
+transcript text ever appears in logs.
 
 ---
 
