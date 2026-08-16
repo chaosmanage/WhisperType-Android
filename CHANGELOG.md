@@ -4,6 +4,71 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-08-16
+
+> **Fast, calibrated dictation** — post-stop latency drops from 5-10 s to well
+> under 2 s by deleting the echo channel and the barrier stack it required, and
+> the polish levels are recalibrated so MEDIUM stops rewriting your speech.
+
+### Model policy (non-negotiable)
+
+- **Only the Gemini Live model** (`gemini-3.1-flash-live-preview`) may ever be
+  called — no `generateContent`, no Flash/Pro/Flash-Lite/native-audio/TTS, no
+  REST or batch Gemini surface. Only the Live model is free with the owner's
+  key. **Audio goes only to Gemini Live**; Groq receives **text only**, on its
+  free tier. Documented at the top of `README.md` and enforced by
+  `ModelPolicyTest`, which fails the build on violation.
+
+### Latency
+
+- **Echo channel removed (`gemini`)** — the Live session is now raw-ASR
+  transport: no `outputAudioTranscription`, no `systemInstruction`,
+  no `requestEchoFor`. Style is applied afterwards on Groq.
+- **Barrier stack removed (`runtime`)** — the 900 ms echo quiet, 2.5 s echo
+  stall backstop, generation-in-flight gate, 2 s source-missing grace and 20 s
+  hard deadline are replaced by **one 250 ms ASR quiet window** plus a single
+  2.5 s tail backstop.
+- **Second Gemini session removed (`runtime`)** — Hinglish no longer opens a
+  dedicated transliteration session (handshake + setup + echo, 15 s timeouts);
+  romanization is part of the single Groq text call.
+- **Text stage on `llama-3.1-8b-instant`** (was `llama-3.3-70b-versatile`):
+  measured 150-260 ms per call, and 14,400 requests/day of free-tier headroom
+  instead of 1,000. Dial budget cut from 12 s to 4 s.
+- **Connection warm-up (`groq`)** — the TLS/HTTP2 connection to Groq is opened
+  when dictation starts, so settlement pays only the request itself.
+- **Rate-limit rescue (`groq`)** — free-tier tokens-per-minute is per model
+  (measured 6,000 TPM), so a 429 is retried once on the fallback model's own
+  budget instead of losing the polish.
+- Groq key decrypt moved off the main thread.
+
+### Transcription styles (recalibrated)
+
+- **NONE** — raw ASR inserted verbatim, **zero network calls**.
+- **LOW** — removes `um/uh/ah/er` and stutter repeats and fixes punctuation
+  only; no rewording, no restructuring.
+- **MEDIUM** — polishes grammar and word choice **without restructuring**: no
+  sentence reordering/merging/splitting, no synonym swaps, no added content.
+- **HIGH** — full rewrite into clean prose from what was said.
+- **Hinglish** — Devanagari→colloquial Latin romanization at every level, in the
+  same single call; English loanwords are preserved.
+- Prompts are deterministic (`temperature = 0`) and anchored by few-shot
+  examples. The old echo instruction that told the model to *"restructure
+  freely… add bullet points"* is deleted — that was the cause of MEDIUM
+  rewriting dictations.
+- **`PolishGuard` (`core`)** — a validator that rejects over-edited replies
+  (content-word retention and length bounds per level; script + length for
+  cross-script Hinglish) and inserts the unpolished ASR instead. A model that
+  ignores "do not restructure" can no longer rewrite your words.
+- **Hinglish invariant preserved** — a failed romanization is a retryable
+  failure, never a Devanagari insert.
+
+### Removed
+
+- `PolishBackend` setting and its Settings radio group (Auto/Groq/Gemini Echo):
+  there is now exactly one pipeline, so the choice was meaningless.
+- `LanguageMode.liveInstruction`, instruction hashing, and the echo fields of
+  the warm-session profile.
+
 ## [0.7.0] - 2026-08-16
 
 > **Fast path with Groq polish** — dictations now settle on the raw ASR the
