@@ -39,13 +39,17 @@ import com.whispertype.android.core.model.InsertionResult
 import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.core.model.MutableSessionMetrics
 import com.whispertype.android.core.model.OverlayIntent
+import com.whispertype.android.core.model.PolishBackend
 import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.TargetEligibility
 import com.whispertype.android.core.model.TranscriptionStyle
+import com.whispertype.android.core.model.liveInstructionFor
+import com.whispertype.android.core.model.needsLiveEcho
 import com.whispertype.android.data.history.EncryptedHistoryRepository
 import com.whispertype.android.data.history.HistoryRepository
 import com.whispertype.android.data.secrets.AndroidKeystoreKeyStore
 import com.whispertype.android.data.secrets.FileBlobStore
+import com.whispertype.android.data.secrets.GroqKeyProvider
 import com.whispertype.android.data.secrets.JavaxAesGcmCipher
 import com.whispertype.android.data.secrets.KeystoreKeyProvider
 import com.whispertype.android.data.secrets.KeyProvider
@@ -58,6 +62,9 @@ import com.whispertype.android.platform.gemini.GeminiSessionFactory
 import com.whispertype.android.platform.gemini.WarmLiveSessionManager
 import com.whispertype.android.platform.gemini.WarmSessionClaim
 import com.whispertype.android.platform.gemini.WarmSessionProfile
+import com.whispertype.android.platform.groq.GroqEndpoints
+import com.whispertype.android.platform.groq.GroqSpeechProvider
+import com.whispertype.android.platform.groq.GroqWebSocketClient
 import com.whispertype.android.platform.ipc.RuntimeIpc
 import com.whispertype.android.platform.overlay.OverlayOwners
 import com.whispertype.android.platform.overlay.PersistentOverlayHost
@@ -114,6 +121,8 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     // Context-dependent; lazy so they initialize on first use (in onCreate),
     // never during the Service constructor when the base Context is unattached.
     private val keyProvider: KeyProvider by lazy { KeystoreKeyProvider(this) }
+    /** 0.7.0: Groq API key, stored exactly like the Gemini key. */
+    private val groqKeyProvider: KeyProvider by lazy { GroqKeyProvider(this) }
     private val settings: SettingsRepository by lazy { SettingsRepository(this) }
 
     /** 0.5.8: sensitive-marked clipboard write for the no-target fallback. */
@@ -166,6 +175,10 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
 
     @Volatile
     private var cachedPolishLevel: TranscriptionStyle = TranscriptionStyle.MEDIUM
+
+    /** 0.7.0: which backend polishes the settled raw ASR. */
+    @Volatile
+    private var cachedPolishBackend: PolishBackend = SettingsRepository.DEFAULT_POLISH_BACKEND
 
     @Volatile
     private var cachedAutoStopSeconds: Int = SettingsRepository.DEFAULT_AUTO_STOP_SECONDS
@@ -255,6 +268,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         scope.launch { settings.historyEnabled.collect { cachedHistoryEnabled = it } }
         scope.launch { settings.historyRetentionDays.collect { cachedHistoryRetentionDays = it } }
         scope.launch { settings.polishLevel.collect { cachedPolishLevel = it } }
+        scope.launch { settings.polishBackend.collect { cachedPolishBackend = it } }
         scope.launch { settings.autoStopSeconds.collect { cachedAutoStopSeconds = it } }
         scope.launch { settings.segmentAtSilence.collect { cachedSegmentAtSilence = it } }
         scope.launch { settings.audioSourcePreference.collect { cachedAudioSourcePreference = it } }
@@ -391,6 +405,8 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                         language = lease.profile.language,
                         ready = true,
                         echoEnabled = lease.profile.outputAudioTranscription,
+                        polishBackend = resolvePolishBackend(),
+                        polish = polishContractFor(),
                     ),
                 )
             }
@@ -409,6 +425,9 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         }
         val language = profile.language
         val model = profile.model
+        val polishBackend = resolvePolishBackend()
+        val echoEnabled = needsLiveEcho(polishBackend, language, cachedPolishLevel)
+        val polish = polishContractFor()
         metrics.mark(MutableSessionMetrics.Event.SettingsReady)
         metrics.mark(MutableSessionMetrics.Event.SocketCreated)
         val session = GeminiSessionFactory.create(
@@ -417,11 +436,14 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                 model = model,
                 apiVersion = profile.apiVersion,
                 language = language,
-                systemInstruction = language.liveInstruction(cachedPolishLevel),
+                // 0.7.0: the echo instruction only exists for the LIVE_ECHO
+                // backend; GROQ/NONE sessions are stripped to raw-ASR transport.
+                systemInstruction = liveInstructionFor(polishBackend, language, cachedPolishLevel),
                 automaticActivityDetectionDisabled = profile.automaticActivityDetectionDisabled,
                 activityHandlingNoInterruption = profile.activityHandlingNoInterruption,
                 inputAudioTranscription = profile.inputAudioTranscription,
-                outputAudioTranscription = profile.outputAudioTranscription,
+                outputAudioTranscription = echoEnabled,
+                polishBackend = polishBackend,
                 // Release B production protocol: manual activity signaling
                 // (automaticActivityDetection disabled by default) and no text
                 // prime. The systemInstruction carries the polish level and (for
@@ -435,14 +457,38 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                 session = session,
                 language = language,
                 ready = false,
-                echoEnabled = profile.outputAudioTranscription,
+                echoEnabled = echoEnabled,
+                polishBackend = polishBackend,
+                polish = polish,
             ),
+        )
+    }
+
+    /**
+     * 0.7.0: resolves the effective polish backend. AUTO dials Groq when a
+     * Groq key is present, otherwise the Gemini live echo.
+     */
+    private fun resolvePolishBackend(): PolishBackend {
+        val configured = cachedPolishBackend
+        if (configured != PolishBackend.AUTO) return configured
+        return if (groqKeyProvider.hasKey()) PolishBackend.GROQ else PolishBackend.LIVE_ECHO
+    }
+
+    /** 0.7.0: a session-scoped Groq polish contract under the GROQ backend. */
+    private suspend fun polishContractFor(): com.whispertype.android.core.contracts.TextPolishContract? {
+        if (resolvePolishBackend() != PolishBackend.GROQ) return null
+        val key = groqKeyProvider.provideKey() ?: return null
+        return GroqSpeechProvider(
+            client = GroqWebSocketClient(key, GroqEndpoints.DEFAULT_WS_URL, sharedOkHttpClient),
+            scope = scope,
         )
     }
 
     /** Cold session construction shared by the live path and the warm pool.
      *  The exact [profile] (language, echo setting, activity signaling) shapes
-     *  the session so a warm session is never reused under different settings. */
+     *  the session so a warm session is never reused under different settings.
+     *  0.7.0: the profile also carries the polish backend so a stripped
+     *  (GROQ/NONE) session is never reused for a LIVE_ECHO dictation. */
     private suspend fun createColdSession(profile: WarmSessionProfile): com.whispertype.android.core.contracts.GeminiLiveSession {
         val key = withContext(Dispatchers.IO) { keyProvider.provideKey() }
             ?: throw GeminiLiveException(
@@ -458,11 +504,12 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                 model = profile.model,
                 apiVersion = profile.apiVersion,
                 language = profile.language,
-                systemInstruction = profile.language.liveInstruction(cachedPolishLevel),
+                systemInstruction = liveInstructionFor(profile.polishBackend, profile.language, cachedPolishLevel),
                 automaticActivityDetectionDisabled = profile.automaticActivityDetectionDisabled,
                 activityHandlingNoInterruption = profile.activityHandlingNoInterruption,
                 inputAudioTranscription = profile.inputAudioTranscription,
-                outputAudioTranscription = profile.outputAudioTranscription,
+                outputAudioTranscription = needsLiveEcho(profile.polishBackend, profile.language, cachedPolishLevel),
+                polishBackend = profile.polishBackend,
             ),
             client = sharedOkHttpClient,
         )
@@ -472,30 +519,35 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     private fun warmProfile(): WarmSessionProfile {
         val language = cachedSpeechMode
         val style = cachedPolishLevel
+        val polishBackend = resolvePolishBackend()
         return WarmSessionProfile(
             model = GeminiSessionFactory.DEFAULT_MODEL,
             apiVersion = GeminiSessionConfig.DEFAULT_API_VERSION,
             language = language,
-            polishInstructionHash = stableInstructionHash(language, style),
+            polishInstructionHash = stableInstructionHash(polishBackend, language, style),
             automaticActivityDetectionDisabled = true,
             activityHandlingNoInterruption = cachedSegmentAtSilence,
             inputAudioTranscription = true,
-            outputAudioTranscription = echoEnabledFor(language, style),
+            outputAudioTranscription = needsLiveEcho(polishBackend, language, style),
             credentialRevision = 0L,
+            polishBackend = polishBackend,
         )
     }
 
-    /** The echo (outputTranscription) is the polish pipeline for MEDIUM/HIGH and
-     *  for Hinglish (Latin script). NONE/LOW get the raw ASR directly (0.6.0),
-     *  which the Live ASR already punctuates — settling it is ~0.7 s flat. */
-    private fun echoEnabledFor(language: LanguageMode, style: TranscriptionStyle): Boolean =
-        language == LanguageMode.HINGLISH ||
-            (style != TranscriptionStyle.NONE && style != TranscriptionStyle.LOW)
-
-    /** Stable, non-secret digest of the systemInstruction for warm-profile match. */
-    private fun stableInstructionHash(language: LanguageMode, style: TranscriptionStyle): String {
+    /**
+     * Stable, non-secret digest of the effective systemInstruction for
+     * warm-profile match. Stops being a no-op for stripped (GROQ/NONE)
+     * sessions: the empty instruction hashes to a constant, so any one
+     * stripped profile is interchangeable with another for session purposes.
+     */
+    private fun stableInstructionHash(
+        polishBackend: PolishBackend,
+        language: LanguageMode,
+        style: TranscriptionStyle,
+    ): String {
+        val instruction = liveInstructionFor(polishBackend, language, style) ?: ""
         val digest = MessageDigest.getInstance("SHA-256")
-            .digest(language.liveInstruction(style).toByteArray())
+            .digest(instruction.toByteArray())
         return digest.joinToString("") { "%02x".format(it) }
     }
 

@@ -4,6 +4,7 @@ import com.whispertype.android.audio.AudioPipeline
 import com.whispertype.android.audio.PreReadyAudioBuffer
 import com.whispertype.android.audio.PreReadyOffer
 import com.whispertype.android.core.contracts.GeminiLiveSession
+import com.whispertype.android.core.contracts.TextPolishContract
 import com.whispertype.android.core.model.AudioChunk
 import com.whispertype.android.core.model.CancelReason
 import com.whispertype.android.core.model.DictationFailure
@@ -12,6 +13,8 @@ import com.whispertype.android.core.model.GeminiEvent
 import com.whispertype.android.core.model.InsertionResult
 import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.core.model.MutableSessionMetrics
+import com.whispertype.android.core.model.PolishBackend
+import com.whispertype.android.core.model.PolishOutcome
 import com.whispertype.android.core.model.ResultCandidate
 import com.whispertype.android.core.model.SendResult
 import com.whispertype.android.core.model.SessionId
@@ -34,6 +37,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
@@ -88,12 +93,16 @@ sealed interface SessionResolve {
 /** A created Live session plus the language it should stamp on candidates.
  *  [ready] is true when the session was already connected (warm claim).
  *  [echoEnabled] is false when the session was configured without the output
- *  echo (NONE/LOW polish), in which case settlement uses the raw ASR only. */
+ *  echo (NONE/LOW polish), in which case settlement uses the raw ASR only.
+ *  0.7.0: [polishBackend] is the resolved backend for this session, and
+ *  [polish] (when set) is the Groq polish contract dialed at settlement. */
 data class SessionResolution(
     val session: GeminiLiveSession,
     val language: LanguageMode,
     val ready: Boolean = false,
     val echoEnabled: Boolean = true,
+    val polishBackend: PolishBackend = PolishBackend.AUTO,
+    val polish: TextPolishContract? = null,
 )
 
 /** Outcome of [DictationHost.startCapture]. */
@@ -117,6 +126,12 @@ private class ActiveLiveSession(
 ) {
     var session: GeminiLiveSession? = null
     var capture: AudioPipeline? = null
+    /** 0.7.0: resolved polish backend and (for GROQ) the dial contract. */
+    var polishBackend: PolishBackend = PolishBackend.AUTO
+    var polish: TextPolishContract? = null
+    /** 0.7.0: bounded re-broadcast of the settled capture, replayed into the
+     *  polish dial at settlement. */
+    val polishFrames = ArrayDeque<AudioChunk>()
 
     /** True when the session is configured to emit the output echo. NONE/LOW
      *  polish turns the echo off and settles on the raw ASR (0.6.0). */
@@ -176,6 +191,9 @@ private class ActiveLiveSession(
 
     /** 0.6.2: rearmed on every echo revision; fires the stall backstop. */
     var echoStallJob: Job? = null
+
+    /** 0.7.0: the Groq dialoging job at settlement. */
+    var polishJob: Job? = null
 
     /** Exact duration represented by captured frames, used for echo-only plausibility. */
     var capturedAudioDurationMs: Long = 0L
@@ -272,6 +290,12 @@ class DictationCoordinator(
         val segmentSilenceMs: Long = 700,
         /** Mic amplitude (0..1) above which the user is considered speaking. */
         val speechAmplitudeThreshold: Float = 0.02f,
+        /** 0.7.0: maximum settling-time budget for the Groq dial before falling
+         *  back to the raw ASR. */
+        val polishDialTimeoutMs: Long = 12_000,
+        /** 0.7.0: bounded re-broadcast buffer for the settled capture (20 ms
+         *  frames); the tail is kept and older frames are dropped. */
+        val polishMaxBufferedFrames: Int = 3_000,
     )
 
     @Volatile
@@ -436,6 +460,8 @@ class DictationCoordinator(
             holder.session = resolution.session
             holder.language = resolution.language
             holder.echoEnabled = resolution.echoEnabled
+            holder.polishBackend = resolution.polishBackend
+            holder.polish = resolution.polish
             // Event collector installed as soon as the session exists, before
             // awaiting readiness, so setup failures/closure are processed promptly.
             holder.eventJob = scope.launch {
@@ -557,6 +583,14 @@ class DictationCoordinator(
                 is AudioStreamSignal.Frame -> {
                     val chunk = signal.chunk
                     recordCapturedFrame(holder, capture, chunk)
+                    // 0.7.0: retain a bounded re-broadcast of the capture for the
+                    // settlement dial (drops the oldest frames past the bound).
+                    if (holder.polish != null) {
+                        if (holder.polishFrames.size >= config.polishMaxBufferedFrames) {
+                            holder.polishFrames.removeFirst()
+                        }
+                        holder.polishFrames.addLast(chunk)
+                    }
                     if (connected) {
                         if (!sendChunk(holder, session, chunk)) return
                     } else {
@@ -1012,6 +1046,14 @@ class DictationCoordinator(
             settleHinglish(holder)
             return
         }
+        // 0.7.0 GROQ: the raw ASR settles the session (fast path) and the
+        // buffered capture is then replayed into the polish dial; the polished
+        // text replaces the raw on success, otherwise the raw is inserted
+        // verbatim.
+        if (holder.polish != null) {
+            settleWithPolish(holder)
+            return
+        }
         val selected = selectSettledText(holder)
         holder.metrics.settlePath = selected?.second ?: SettlePath.NONE
         val raw = selected?.first
@@ -1058,6 +1100,59 @@ class DictationCoordinator(
                 }
                 holder.settledText = selection.text
                 insertSettled(holder, selection.text)
+            }
+        }
+    }
+
+    /**
+     * 0.7.0 GROQ settlement. The raw ASR settles immediately as the insertion
+     * text; the bounded captured frames are replayed into the polish dial. A
+     * SUCCESS outcome with a committed text crosses back through the provider's
+     * text sink and replaces the raw; every other outcome (timeout, network,
+     * rate limit) falls back to the raw ASR.
+     */
+    private fun settleWithPolish(holder: ActiveLiveSession) {
+        val raw = holder.accumulator.settledText()?.takeIf { it.isNotBlank() }
+            ?: run {
+                holder.metrics.settlePath = SettlePath.NONE
+                failNoTranscript(holder)
+                return
+            }
+        holder.metrics.settlePath = SettlePath.RAW_ONLY
+        val polish = holder.polish
+            ?: run {
+                holder.settledText = raw
+                insertSettled(holder, raw)
+                return
+            }
+        holder.polishJob = scope.launch {
+            val audio: Flow<AudioChunk> = flow {
+                holder.polishFrames.forEach { emit(it) }
+            }
+            val done = CompletableDeferred<PolishOutcome>()
+            var committed: String? = null
+            polish.onTranscript = { committed = it }
+            polish.driveAttempt(
+                audio = audio,
+                frames = holder.polishFrames.size.toLong(),
+                onOutcome = { outcome, elapsedMillis ->
+                    holder.metrics.polishDurationMs = elapsedMillis
+                    done.complete(outcome)
+                },
+                onRequestStarted = { /* no hint carriers in this effort unit */ },
+            )
+            val outcome = withTimeoutOrNull(config.polishDialTimeoutMs) { done.await() }
+                ?: PolishOutcome.TIMEOUT
+            if (active !== holder) return@launch
+            holder.metrics.polishSketchCode = outcome.name
+            val text = committed?.takeIf { it.isNotBlank() }
+            if (text != null) {
+                holder.metrics.settlePath = SettlePath.GROQ_POLISHED
+                holder.settledText = text
+                insertSettled(holder, text)
+            } else {
+                holder.settledText = raw
+                insertSettled(holder, raw)
             }
         }
     }
@@ -1274,6 +1369,7 @@ class DictationCoordinator(
         holder.captureFailureJob?.cancel()
         holder.eventJob?.cancel()
         holder.transliterationJob?.cancel()
+        holder.polishJob?.cancel()
         holder.insertionResultJob?.cancel()
         holder.capture?.let { capture ->
             scope.launch {
@@ -1288,6 +1384,10 @@ class DictationCoordinator(
         }
         holder.session?.let { session ->
             scope.launch { session.close() }
+        }
+        holder.polish?.let { polish ->
+            polish.cancelAttempt()
+            scope.launch { polish.close() }
         }
     }
 
