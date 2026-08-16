@@ -4,6 +4,24 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-08-16
+
+### Fixed
+
+- **The text stage transcribed instead of answering.** A dictated question
+  (especially English spoken in Hinglish mode) could come back as an answer —
+  in romanized Hindi — because the polish prompt did not treat the transcript as
+  data and the guard's Hinglish check only looked at script. Prompts now wrap
+  the transcript in delimiters, forbid answering explicitly, and carry
+  question-shaped few-shot examples; `PolishGuard` applies content retention and
+  an invention bound whenever the raw text is Latin-script, and tokenizes
+  Devanagari combining marks correctly.
+- **HIGH style now performs a holistic rewrite.** It first understands the
+  complete message, then rewrites it from scratch as refined, publication-ready
+  prose instead of correcting line by line. It may reorder ideas, group related
+  points, add paragraphs, and turn spoken enumerations into headings, bullets,
+  or numbered lists, while preserving every fact and never inventing content.
+
 ## [0.8.0] - 2026-08-16
 
 > **Fast, calibrated dictation** — post-stop latency drops from 5-10 s to well

@@ -173,7 +173,7 @@ The level decides what the Groq text stage does to your settled speech (0.8.0):
 | **None** | Inserts exactly what was recognized | no call |
 | **Low** | Removes `um`/`uh`/`ah` and stutter repeats, fixes punctuation. Nothing else — no rewording, no restructuring | 1 call |
 | **Medium** | Fixes grammar and word choice but **keeps your sentence structure**: no reordering, merging or splitting sentences, no synonym swaps, no added content | 1 call |
-| **High** | Rewrites into clean written prose based on what you said | 1 call |
+| **High** | Holistically rewrites the complete message into refined prose; it may reorder ideas, add paragraphs, and turn spoken enumerations into bullets or numbered lists, without inventing facts | 1 call |
 
 In Hinglish mode every level also romanizes Devanagari into colloquial Latin
 (English words stay English), in the same single call.

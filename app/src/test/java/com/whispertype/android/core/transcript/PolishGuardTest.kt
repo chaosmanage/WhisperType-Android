@@ -73,6 +73,30 @@ class PolishGuardTest {
     }
 
     @Test
+    fun `HIGH accepts a structured rewrite with bullets`() {
+        // 0.8.1: HIGH is an editor, so an enumerated dictation may come back as
+        // a bulleted list. The guard must accept it: every fact traces back.
+        val raw = "so we need to fix three things first the login is broken second the payments " +
+            "page crashes on load and third the emails are not going out so can we please get " +
+            "these done this week"
+        val polished = "Please address these three issues this week:\n" +
+            "- Login is broken.\n" +
+            "- The payments page crashes on load.\n" +
+            "- Emails are not being sent."
+        assertIs<PolishGuard.Verdict.Accept>(verdict(raw, polished, TranscriptionStyle.HIGH))
+    }
+
+    @Test
+    fun `HIGH rejects a rewrite that invents new facts`() {
+        val raw = "so the login page is broken and users cannot sign in"
+        val polished = "The login page has been down since Tuesday due to a misconfigured load " +
+            "balancer, and roughly forty percent of users are affected."
+        val v = verdict(raw, polished, TranscriptionStyle.HIGH)
+        assertIs<PolishGuard.Verdict.Reject>(v)
+        assertTrue(v.code == "invented" || v.code == "too_long", "got ${v.code}")
+    }
+
+    @Test
     fun `HIGH permits a rewrite that MEDIUM would reject`() {
         val raw = "so basically the build is slow because we run all the tests every time and " +
             "also the cache is not working so like every commit takes ten minutes"

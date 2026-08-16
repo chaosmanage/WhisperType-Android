@@ -94,7 +94,11 @@ class PolishPromptsTest {
     fun `HIGH permits a full rewrite but not invention`() {
         val system = systemOf(LanguageMode.ENGLISH, TranscriptionStyle.HIGH)
         assertTrue(system.contains("rewrite"))
-        assertTrue(system.contains("Reorganize for clarity"))
+        assertTrue(system.contains("Rebuild the organization holistically"))
+        assertTrue(system.contains("bullets or a numbered"))
+        assertTrue(system.contains("understand the complete transcript as one message"))
+        assertTrue(system.contains("Do not process sentence by sentence"))
+        assertTrue(system.contains("from scratch"))
         assertTrue(system.contains("Do not add facts"))
     }
 
