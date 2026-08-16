@@ -4,6 +4,24 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2026-08-17
+
+### Added
+
+- **Quick Settings tile** — add `WhisperType bubble` to Android's Quick
+  Settings panel to turn the overlay bubble on or off. It uses the same setting
+  as the Settings screen, starts the runtime when enabling, and opens overlay
+  permission settings if permission is missing.
+
+## [0.8.2] - 2026-08-17
+
+### Fixed
+
+- **English remains English in Hinglish mode.** Latin-only raw ASR turns now
+  receive English shaping instructions, preventing them from being translated
+  into Hindi or romanized Hindi. The PolishGuard remains as a second safety
+  boundary against meaning-changing output.
+
 ## [0.8.1] - 2026-08-16
 
 ### Fixed

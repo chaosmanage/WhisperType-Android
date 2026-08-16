@@ -59,6 +59,17 @@
                 tools:targetApi="34" />
         </service>
 
+        <service
+            android:name=".platform.quicksettings.OverlayQuickSettingsTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_bubble_logo"
+            android:label="@string/quick_settings_overlay_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <!-- Runs in a dedicated :accessibility process per the locked rebuild
              decision (§3): the actor that sees the screen (focus / target /
              insertion) is isolated from the main process which owns the overlay,

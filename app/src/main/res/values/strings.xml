@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">WhisperType</string>
+    <string name="quick_settings_overlay_label">WhisperType bubble</string>
+    <string name="quick_settings_overlay_on">WhisperType bubble on</string>
+    <string name="quick_settings_overlay_off">WhisperType bubble off</string>
 
     <string name="flow_runtime_label" tools:ignore="UnusedResources">WhisperType runtime</string>
 

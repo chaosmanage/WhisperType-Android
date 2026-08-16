@@ -250,6 +250,19 @@ until re-enabled. Turning it back **on** restarts the runtime and restores the
 bubble. Leave it on for normal use; turn it off to completely stop WhisperType
 without touching any permissions.
 
+### Quick Settings tile
+
+Android's Quick Settings panel can control the same kill switch:
+
+1. Pull down the notification shade and tap the pencil/Edit button.
+2. Find **WhisperType bubble** in the available tiles.
+3. Drag it into the active Quick Settings area.
+4. Tap the tile to turn the bubble on or off. The tile state and
+   `Settings → General → App enabled` stay synchronized.
+
+If overlay permission has not been granted, enabling the tile opens the system
+overlay-permission screen instead of starting a bubble that cannot appear.
+
 ## Set up the custom dictionary
 
 Open the `Dictionary` tab (bottom navigation).
