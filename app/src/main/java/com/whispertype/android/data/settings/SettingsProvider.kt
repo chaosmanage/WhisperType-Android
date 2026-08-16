@@ -3,6 +3,7 @@ package com.whispertype.android.data.settings
 import com.whispertype.android.core.dictionary.DictionaryEntry
 import com.whispertype.android.core.model.AudioSourcePreference
 import com.whispertype.android.core.model.LanguageMode
+import com.whispertype.android.core.model.PolishBackend
 import com.whispertype.android.core.model.TranscriptionStyle
 import kotlinx.coroutines.flow.Flow
 
@@ -18,6 +19,14 @@ interface SettingsProvider {
     val onboardingCompleted: Flow<Boolean>
     val autoStopSeconds: Flow<Int>
     val polishLevel: Flow<TranscriptionStyle>
+
+    /**
+     * 0.7.0: which backend polishes the settled raw ASR text. AUTO resolves at
+     * session setup: Groq when a Groq key is present, otherwise LIVE_ECHO.
+     * NONE and GROQ are surfaces of the resolver/fallback, not explicit
+     * settings (see [PolishBackend]).
+     */
+    val polishBackend: Flow<PolishBackend>
 
     /** 0.6.0: recording input device; [AudioSourcePreference.DEFAULT] is the phone mic. */
     val audioSourcePreference: Flow<AudioSourcePreference>
