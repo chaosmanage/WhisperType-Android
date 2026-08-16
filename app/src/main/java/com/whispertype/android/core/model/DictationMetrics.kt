@@ -105,6 +105,16 @@ data class DictationMetrics(
     val insertionReplySentAtMonotonicNanos: Long? = null,
     val insertionReplyReceivedAtMonotonicNanos: Long? = null,
     val terminalAtMonotonicNanos: Long? = null,
+    /** 0.7.0: typed polish-path code, e.g. CACHE_HIT or SKETCH; never text. */
+    val polishSketchCode: String? = null,
+    /** 0.7.0: wall time of the polish attempt from first frame to outcome. */
+    val polishDurationMs: Long = 0,
+    /** 0.7.0: Groq prompt tokens when the backend reports usage; null otherwise. */
+    val polishPromptTokens: Long? = null,
+    /** 0.7.0: Groq completion tokens when the backend reports usage; null otherwise. */
+    val polishTotalTokens: Long? = null,
+    /** 0.7.0: true when the polish attempt reused a warm sketch instead of a fresh request. */
+    val polishCacheHit: Boolean = false,
 ) {
     /** Explicit phase-name aliases for legacy fields. */
     val tapToCaptureStartedMs: Long? get() = tapToCaptureMs

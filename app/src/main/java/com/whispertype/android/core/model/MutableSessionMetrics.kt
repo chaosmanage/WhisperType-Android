@@ -306,6 +306,38 @@ class MutableSessionMetrics(
         get() = usedLenientFallbackValue.get()
         set(value) = usedLenientFallbackValue.set(value)
 
+    /** 0.7.0: true when the polish attempt reused a warm sketch instead of
+     *  starting a fresh request (dedup hit). Never carries text. */
+    private val polishCacheHitValue = AtomicBoolean()
+    var polishCacheHit: Boolean
+        get() = polishCacheHitValue.get()
+        set(value) = polishCacheHitValue.set(value)
+
+    /** 0.7.0: typed polish-path code, e.g. CACHE_HIT or SKETCH; never text. */
+    private val polishSketchCodeValue = AtomicReference<String?>(null)
+    var polishSketchCode: String?
+        get() = polishSketchCodeValue.get()
+        set(value) = polishSketchCodeValue.set(value?.let(::safeDiagnosticCode))
+
+    /** 0.7.0: wall time of the polish attempt, from first frame to outcome. */
+    private val polishDurationMsValue = AtomicLong()
+    var polishDurationMs: Long
+        get() = polishDurationMsValue.get()
+        set(value) = polishDurationMsValue.set(value)
+
+    /** 0.7.0: Groq prompt tokens when the backend reports usage; null when the
+     *  transport does not expose token counts (e.g. the audio stream). */
+    private val polishPromptTokensValue = AtomicReference<Long?>(null)
+    var polishPromptTokens: Long?
+        get() = polishPromptTokensValue.get()
+        set(value) = polishPromptTokensValue.set(value)
+
+    /** 0.7.0: Groq completion tokens when the backend reports usage. */
+    private val polishTotalTokensValue = AtomicReference<Long?>(null)
+    var polishTotalTokens: Long?
+        get() = polishTotalTokensValue.get()
+        set(value) = polishTotalTokensValue.set(value)
+
     /** 0.4.2 reliability: which source the settled transcript came from. */
     private val settlePathValue = AtomicReference<SettlePath?>(null)
     var settlePath: SettlePath?
@@ -779,6 +811,11 @@ class MutableSessionMetrics(
             insertionIpcRoundTripMs = insertionIpcRoundTripMs(),
             terminalOutcome = terminalOutcome,
             tapToTerminalMs = tapToTerminalMs(),
+            polishSketchCode = polishSketchCode?.let(::safeDiagnosticCode),
+            polishDurationMs = polishDurationMs,
+            polishPromptTokens = polishPromptTokens,
+            polishTotalTokens = polishTotalTokens,
+            polishCacheHit = polishCacheHit,
             startedAtMonotonicNanos = startedAtNanos,
             endedAtMonotonicNanos = endedAtNanos,
             warmClaimResolvedAtMonotonicNanos = warmClaimResolvedAt,
@@ -867,6 +904,9 @@ class MutableSessionMetrics(
         settlePath?.let { add("settlePath=$it") }
         lastRejection?.let { add("reject=${safeDiagnosticCode(it)}") }
         if (usedLenientFallback) add("lenient=true")
+        polishSketchCode?.let { add("polish=${safeDiagnosticCode(it)}") }
+        if (polishCacheHit) add("cacheHit=true")
+        if (polishDurationMs > 0L) add("polishDurationMs=${polishDurationMs}ms")
         terminalOutcome?.let { add("terminalOutcome=$it") }
     }.joinToString(" ")
 
@@ -1020,4 +1060,6 @@ enum class SettlePath {
     RAW_ONLY,
     ECHO_ONLY,
     NONE,
+    /** 0.7.0: the settled text came from the Groq polish backend. */
+    GROQ_POLISHED,
 }
