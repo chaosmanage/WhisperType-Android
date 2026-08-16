@@ -20,7 +20,7 @@ import kotlinx.serialization.json.put
  * feeds received strings back through [parseServerMessage].
  *
  * Wire contract (per the Live API reference):
- *  - the first client message is `{"setup": {model, generationConfig, systemInstruction}}`
+ *  - the first client message is `{"setup": {model, generationConfig, inputAudioTranscription}}`
  *    and the server replies `setupComplete` (or `setupError`);
  *  - audio is sent as `{"realtimeInput": {"audio": {"data": <base64>, "mimeType": "audio/pcm;rate=16000"}}}`;
  *  - ongoing text is sent through `realtimeInput.text`; manual activity
@@ -58,20 +58,14 @@ object GeminiLiveWire {
                 },
             )
             // Voice-to-text: enable transcription of the user's speech so the
-            // server returns serverContent.inputTranscription.text (the dictation
-            // source). The model's own output stays audio and is never read.
+            // server returns serverContent.inputTranscription.text — the ONLY
+            // dictation source (0.8.0). The model's own audio output is never
+            // transcribed and never read: there is no echo channel.
             // NOTE: the Live API rejects a languageCode field on this config
-            // ("unknown name language code"), so no language is sent here; the
-            // Hinglish Latin-script bias comes from the systemInstruction instead.
+            // ("unknown name language code"), so no language is sent here;
+            // Hinglish romanization happens on Groq after settlement.
             if (config.inputAudioTranscription) {
                 put("inputAudioTranscription", buildJsonObject {})
-            }
-            // Echo fallback: outputAudioTranscription transcribes the model's own
-            // audio reply. When the model is instructed to repeat the user's words
-            // verbatim, outputTranscription.text is the dictation text — used as a
-            // fallback because the server does not always deliver inputTranscription.
-            if (config.outputAudioTranscription) {
-                put("outputAudioTranscription", buildJsonObject {})
             }
             // Push-to-talk manual activity signaling (Release A experiment): with
             // automatic detection disabled, the client delimits each utterance
@@ -89,19 +83,6 @@ object GeminiLiveWire {
                         if (config.activityHandlingNoInterruption) {
                             put("activityHandling", "NO_INTERRUPTION")
                         }
-                    },
-                )
-            }
-            config.systemInstruction?.let { instruction ->
-                put(
-                    "systemInstruction",
-                    buildJsonObject {
-                        put(
-                            "parts",
-                            kotlinx.serialization.json.buildJsonArray {
-                                add(buildJsonObject { put("text", instruction) })
-                            },
-                        )
                     },
                 )
             }

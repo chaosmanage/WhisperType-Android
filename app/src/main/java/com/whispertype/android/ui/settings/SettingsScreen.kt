@@ -57,7 +57,6 @@ import com.whispertype.android.core.audio.AudioInputSelection
 import com.whispertype.android.core.model.AudioSourcePreference
 import com.whispertype.android.core.model.HotkeyShortcut
 import com.whispertype.android.core.model.LanguageMode
-import com.whispertype.android.core.model.PolishBackend
 import com.whispertype.android.core.model.TranscriptionStyle
 import com.whispertype.android.core.groq.GroqKeyValidation
 import com.whispertype.android.data.secrets.KeyProvider
@@ -112,8 +111,6 @@ fun SettingsScreen(
     val miniDotDelay by settings.miniDotDelaySeconds
         .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_MINI_DOT_DELAY_SECONDS)
     val darkMode by settings.darkMode.collectAsStateWithLifecycle(initialValue = false)
-    val polishBackend by settings.polishBackend
-        .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_POLISH_BACKEND)
 
     var hasKey by remember { mutableStateOf(keyProvider.hasKey()) }
     var keyInput by remember { mutableStateOf("") }
@@ -482,32 +479,7 @@ fun SettingsScreen(
                     )
                 }
 
-                // 0.7.0: which backend polishes the settled raw ASR.
-                Text(
-                    text = stringResource(R.string.settings_polish_backend),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Text(
-                    text = stringResource(R.string.settings_polish_backend_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                POLISH_BACKEND_OPTIONS.forEach { option ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .selectable(
-                                selected = polishBackend == option.backend,
-                                onClick = { scope.launch { settings.setPolishBackend(option.backend) } },
-                            ),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(
-                            selected = polishBackend == option.backend,
-                            onClick = { scope.launch { settings.setPolishBackend(option.backend) } },
-                        )
-                        Text(text = stringResource(option.labelRes))
-                    }
-                }
+
 
                 // 0.7.0 Groq account (auto-dialed when this key is present).
                 Text(
@@ -680,13 +652,7 @@ private fun polishLevelLabelRes(style: TranscriptionStyle): Int = when (style) {
 }
 
 /** 0.7.0: the three user-selectable polish backends (NONE is internal-only). */
-private data class PolishBackendOption(val backend: PolishBackend, @StringRes val labelRes: Int)
 
-private val POLISH_BACKEND_OPTIONS: List<PolishBackendOption> = listOf(
-    PolishBackendOption(PolishBackend.AUTO, R.string.polish_backend_auto),
-    PolishBackendOption(PolishBackend.LIVE_ECHO, R.string.polish_backend_live_echo),
-    PolishBackendOption(PolishBackend.GROQ, R.string.polish_backend_groq),
-)
 
 @StringRes
 private fun audioSourceLabelRes(preference: AudioSourcePreference): Int = when (preference) {

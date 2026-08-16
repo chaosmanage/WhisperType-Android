@@ -12,7 +12,6 @@ import com.whispertype.android.core.model.GeminiEvent
 import com.whispertype.android.core.model.InsertionResult
 import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.core.model.MutableSessionMetrics
-import com.whispertype.android.core.model.PolishBackend
 import com.whispertype.android.core.model.PolishOutcome
 import com.whispertype.android.core.model.SendResult
 import com.whispertype.android.core.model.SessionId
@@ -23,7 +22,6 @@ import kotlin.coroutines.ContinuationInterceptor
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -144,7 +142,6 @@ class DictationCoordinatorTest {
         var resolveResult: SessionResolve = SessionResolve.Ok(SessionResolution(session, LanguageMode.ENGLISH))
         var captureStart: CaptureStart = CaptureStart.Started(capture)
         var insertionAccepted = true
-        var transliterateResult: String? = null
         val transliterateCalls = mutableListOf<String>()
         var clipboardResult = true
         val clipboardCopies = mutableListOf<Pair<SessionId, String>>()
@@ -167,10 +164,6 @@ class DictationCoordinatorTest {
             return clipboardResult
         }
 
-        override suspend fun transliterateToLatin(sessionId: SessionId, text: String): String? {
-            transliterateCalls += text
-            return transliterateResult
-        }
 
         override fun onSessionFinished(state: DictationState, metrics: MutableSessionMetrics, transcript: String?) {
             finished += state to metrics
@@ -478,93 +471,6 @@ class DictationCoordinatorTest {
     }
 
     @Test
-    fun `duplicate echo does not reset the global quiet debounce`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(this, host)
-        coordinator.start()
-        runCurrent()
-        coordinator.stop()
-        runCurrent()
-
-        sendEcho(host, "hello world")
-        host.session.events.send(GeminiEvent.GenerationComplete)
-        runCurrent()
-        advanceTimeBy(500)
-        sendEcho(host, "hello world")
-        runCurrent()
-        advanceTimeBy(401)
-        runCurrent()
-
-        assertEquals(listOf("hello world"), host.insertions.map { it.second })
-        assertEquals(1L, coordinator.activeMetrics()!!.outputTranscriptionCount)
-        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `raw revision arriving after echo grace settles after quiet not hard deadline`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(
-            this,
-            host,
-            DictationCoordinator.Config(
-                hardDeadlineMs = 5_000,
-                echoFallbackWaitMs = 2_000,
-                settleDebounceMs = 600,
-            ),
-        )
-        coordinator.start()
-        runCurrent()
-        coordinator.stop()
-        runCurrent()
-
-        advanceTimeBy(2_100)
-        sendTranscript(host, "late but complete raw transcript")
-        runCurrent()
-        advanceTimeBy(599)
-        assertTrue(host.insertions.isEmpty())
-        advanceTimeBy(2)
-        runCurrent()
-
-        assertEquals("late but complete raw transcript", host.insertions.single().second)
-        val metrics = coordinator.activeMetrics()!!
-        assertEquals(SettlementReason.RAW_FALLBACK_TIMEOUT, metrics.settlementReason)
-        assertFalse(metrics.usedHardDeadline)
-        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `generation complete is a hint and a later echo resets global quiet`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(this, host)
-        coordinator.start()
-        runCurrent()
-        coordinator.stop()
-        runCurrent()
-
-        sendTranscript(host, "we should meet")
-        host.session.events.send(GeminiEvent.GenerationComplete)
-        runCurrent()
-        advanceTimeBy(200)
-        assertTrue(host.insertions.isEmpty(), "the lifecycle hint cannot bypass transcript quiet")
-
-        sendEcho(host, "We should meet.")
-        runCurrent()
-        advanceTimeBy(249)
-        assertTrue(host.insertions.isEmpty(), "the echo revision must restart global quiet")
-        advanceTimeBy(651)
-        runCurrent()
-
-        assertEquals("We should meet.", host.insertions.single().second)
-        val metrics = coordinator.activeMetrics()!!
-        assertTrue(metrics.generationCompleteArrived)
-        assertEquals(SettlementReason.GENERATION_COMPLETE_QUIET, metrics.settlementReason)
-        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
     fun `settlement is prohibited until activity end is queued`() = runTest {
         val host = FakeHost()
         host.session.endGate = kotlinx.coroutines.CompletableDeferred()
@@ -574,7 +480,7 @@ class DictationCoordinatorTest {
         coordinator.stop()
         runCurrent()
 
-        sendEcho(host, "hello world")
+        sendTranscript(host, "hello world")
         host.session.events.send(GeminiEvent.TurnComplete)
         runCurrent()
         advanceTimeBy(1_000)
@@ -583,65 +489,14 @@ class DictationCoordinatorTest {
 
         host.session.endGate!!.complete(Unit)
         runCurrent()
-        advanceTimeBy(899)
+        // 0.8.0: one ASR quiet window (250 ms), no echo barrier.
+        advanceTimeBy(249)
         assertTrue(host.insertions.isEmpty())
         advanceTimeBy(2)
         runCurrent()
 
         assertEquals("hello world", host.insertions.single().second)
         coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `transcript arriving just before the deadline is settled and inserted`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(
-            this,
-            host,
-            DictationCoordinator.Config(hardDeadlineMs = 3_000, echoFallbackWaitMs = 4_000),
-        )
-        coordinator.start()
-        advanceUntilIdle()
-        coordinator.stop()
-        runCurrent()
-
-        advanceTimeBy(2_800)
-        sendTranscript(host, "the birch canoe")
-        advanceUntilIdle()
-
-        assertEquals(1, host.insertions.size)
-        assertEquals("the birch canoe", host.insertions[0].second)
-        assertTrue(coordinator.activeMetrics()!!.usedHardDeadline)
-        coordinator.onInsertionResult(host.insertions[0].first, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `deadline cannot be extended by repeated transcript revisions`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(
-            this,
-            host,
-            DictationCoordinator.Config(hardDeadlineMs = 3_000, echoFallbackWaitMs = 4_000),
-        )
-        coordinator.start()
-        advanceUntilIdle()
-        coordinator.stop()
-        runCurrent()
-
-        // Continuous revisions keep resetting the debounce; the absolute 3s
-        // deadline must still settle regardless.
-        for (i in 1..29) {
-            advanceTimeBy(100)
-            sendTranscript(host, "schedule the meeting please")
-        }
-        advanceUntilIdle()
-
-        assertEquals(1, host.insertions.size)
-        assertEquals("schedule the meeting please", host.insertions[0].second)
-        assertTrue(coordinator.activeMetrics()!!.usedHardDeadline)
-        coordinator.onInsertionResult(host.insertions[0].first, InsertionResult.Inserted)
         advanceUntilIdle()
     }
 
@@ -666,34 +521,6 @@ class DictationCoordinatorTest {
         coordinator.onInsertionResult(host.insertions[0].first, InsertionResult.Inserted)
         advanceUntilIdle()
     }
-
-    @Test
-    fun `clearly provisional single-character transcript at the hard deadline fails`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(
-            this,
-            host,
-            DictationCoordinator.Config(hardDeadlineMs = 3_000, echoFallbackWaitMs = 4_000),
-        )
-        coordinator.start()
-        advanceUntilIdle()
-        coordinator.stop()
-        runCurrent()
-
-        advanceTimeBy(2_900)
-        sendTranscript(host, "t")
-        advanceTimeBy(200) // crosses the 3s deadline with only "t"
-
-        assertTrue(host.insertions.isEmpty())
-        val error = states(host).first { it is DictationState.Error }
-        assertEquals("gemini_no_transcript", (error as DictationState.Error).failure.code)
-        assertTrue(coordinator.activeMetrics()!!.usedHardDeadline)
-        advanceUntilIdle()
-    }
-
-    // ------------------------------------------------------------------
-    // Release F: immediate capture and pre-ready buffering
-    // ------------------------------------------------------------------
 
     @Test
     fun `cold session buffers pre-ready audio and drains in strict order once ready`() = runTest {
@@ -1080,44 +907,14 @@ class DictationCoordinatorTest {
     // 0.4.1: echo (outputTranscription) is the primary dictation source
     // ------------------------------------------------------------------
 
-    private suspend fun sendEcho(host: FakeHost, text: String) {
-        host.session.events.send(
-            GeminiEvent.TranscriptCandidates(
-                listOf(com.whispertype.android.core.model.ResultCandidate(raw = text, cleaned = null, language = LanguageMode.ENGLISH)),
-                source = GeminiEvent.TranscriptSource.ECHO,
-            ),
-        )
-    }
 
     @Test
-    fun `echo transcript is preferred over raw input at settlement`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(this, host)
-        coordinator.start()
-        advanceUntilIdle()
-        val sessionId = listeningId(host)
-        coordinator.stop()
-        runCurrent()
-
-        sendTranscript(host, "um we should like meet") // raw input arrives first
-        sendEcho(host, "We should meet.") // styled echo covers the raw content
-        host.session.events.send(GeminiEvent.GenerationComplete)
-        runCurrent()
-        advanceTimeBy(901) // past the 900ms echo quiet window
-
-        assertEquals(1, host.insertions.size)
-        assertEquals("We should meet.", host.insertions[0].second)
-        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `echo-disabled session settles on the raw ASR right after quiet elapses`() = runTest {
-        // 0.6.0 NONE/LOW instant path: no output echo is configured, so the raw
-        // ASR is the dictation source and settlement needs no echo-fallback wait.
+    fun `session settles on the raw ASR right after quiet elapses`() = runTest {
+        // 0.8.0: the raw ASR is the only dictation source, so settlement is one
+        // quiet debounce with no echo barriers at all.
         val host = FakeHost()
         host.resolveResult = SessionResolve.Ok(
-            SessionResolution(host.session, LanguageMode.ENGLISH, echoEnabled = false),
+            SessionResolution(host.session, LanguageMode.ENGLISH),
         )
         val coordinator = coordinator(this, host)
         coordinator.start()
@@ -1138,10 +935,10 @@ class DictationCoordinatorTest {
     }
 
     @Test
-    fun `echo-disabled session inserts raw even when no echo will ever arrive`() = runTest {
+    fun `session inserts raw ASR with no further waiting`() = runTest {
         val host = FakeHost()
         host.resolveResult = SessionResolve.Ok(
-            SessionResolution(host.session, LanguageMode.ENGLISH, echoEnabled = false),
+            SessionResolution(host.session, LanguageMode.ENGLISH),
         )
         val coordinator = coordinator(this, host)
         coordinator.start()
@@ -1237,401 +1034,16 @@ class DictationCoordinatorTest {
     }
 
     @Test
-    fun `hinglish repair failure on a long recording surfaces a fragment error`() = runTest {
-        val host = FakeHost()
-        host.resolveResult = SessionResolve.Ok(
-            SessionResolution(host.session, LanguageMode.HINGLISH),
-        )
-        host.transliterateResult = null // the Devanagari -> Latin repair fails
-        val coordinator = coordinator(this, host)
-        coordinator.start()
-        runCurrent()
-        host.capture.chunksChannel.send(chunk(0, frameMillis = 30_000))
-        runCurrent()
-        coordinator.stop()
-        runCurrent()
-
-        // Tiny Latin echo + Devanagari raw; the repair fails, leaving only a
-        // fragment. Never inserted. (Echo settlement waits for the stall backstop
-        // when no completion signal arrives.)
-        sendEcho(host, "yes")
-        sendTranscript(host, "हाँ")
-        advanceTimeBy(2_500)
-        runCurrent()
-
-        assertTrue(host.insertions.isEmpty(), "a Hinglish fragment must never be inserted")
-        val error = states(host).filterIsInstance<DictationState.Error>().last()
-        assertEquals("gemini_transcript_fragment", error.failure.code)
-        coordinator.dismiss()
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `echo absent falls back to raw input after the echo-fallback window`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(this, host) // echoFallbackWaitMs default 2000
-        coordinator.start()
-        advanceUntilIdle()
-        val sessionId = listeningId(host)
-        coordinator.stop()
-        runCurrent()
-
-        sendTranscript(host, "the birch canoe slid")
-        advanceTimeBy(1_000)
-        assertTrue(host.insertions.isEmpty(), "must wait for the echo before the fallback window")
-
-        advanceTimeBy(1_500) // crosses the 2s fallback
-        assertEquals(1, host.insertions.size)
-        assertEquals("the birch canoe slid", host.insertions[0].second)
-        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `an arriving echo prevents the fast raw fallback from settling`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(this, host)
-        coordinator.start()
-        advanceUntilIdle()
-        val sessionId = listeningId(host)
-        coordinator.stop()
-        runCurrent()
-
-        sendTranscript(host, "we should meet tomorrow") // raw arrives immediately
-        advanceTimeBy(500)
-        sendEcho(host, "We should meet tomorrow.")
-        advanceTimeBy(2_500) // well past the echo-fallback window
-        runCurrent() // the stall backstop fires exactly on the advance boundary
-
-        assertEquals(1, host.insertions.size)
-        assertEquals("We should meet tomorrow.", host.insertions[0].second, "a complete echo must win over raw")
-        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    // ------------------------------------------------------------------
-    // 0.6.2: never settle while the echo generation is still in flight
-    // ------------------------------------------------------------------
-
-    @Test
-    fun `the actual regression - an echo with 600ms gaps is fully transcribed`() = runTest {
-        // The real device failure: the echo streams with 300-600ms gaps; the old
-        // 250ms debounce settled mid-reply and truncated long dictations. A
-        // completion signal must arrive and the 900ms echo quiet must elapse
-        // before settlement, so ALL echo content is captured.
-        val host = FakeHost()
-        val coordinator = coordinator(this, host)
-        coordinator.start()
-        runCurrent()
-        coordinator.stop()
-        runCurrent()
-
-        sendEcho(host, "main aaj bazaar gaya tha")
-        advanceTimeBy(600)
-        sendEcho(host, "aur sabzi khareedi")
-        advanceTimeBy(600)
-        sendEcho(host, "phir ghar aaya")
-        host.session.events.send(GeminiEvent.GenerationComplete)
-        runCurrent()
-        advanceTimeBy(901)
-        runCurrent()
-
-        assertEquals(
-            "main aaj bazaar gaya tha aur sabzi khareedi phir ghar aaya",
-            host.insertions.single().second,
-        )
-        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `no completion signal settles only after the stall backstop`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(this, host)
-        coordinator.start()
-        runCurrent()
-        coordinator.stop()
-        runCurrent()
-
-        sendEcho(host, "hello world")
-        runCurrent()
-        advanceTimeBy(899)
-        assertTrue(host.insertions.isEmpty(), "the 900ms echo quiet must not settle without a completion signal")
-        advanceTimeBy(1_700) // crosses 2500ms stall backstop from the echo
-        runCurrent()
-
-        assertEquals(1, host.insertions.size)
-        assertEquals("hello world", host.insertions[0].second)
-        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `completion signal settles after the echo quiet window`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(this, host)
-        coordinator.start()
-        runCurrent()
-        coordinator.stop()
-        runCurrent()
-
-        sendEcho(host, "hello world")
-        host.session.events.send(GeminiEvent.GenerationComplete)
-        runCurrent()
-        advanceTimeBy(899)
-        assertTrue(host.insertions.isEmpty())
-        advanceTimeBy(2)
-        runCurrent()
-
-        assertEquals(1, host.insertions.size)
-        assertEquals("hello world", host.insertions[0].second)
-        assertEquals(SettlementReason.GENERATION_COMPLETE_QUIET, coordinator.activeMetrics()!!.settlementReason)
-        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `interrupted generation cannot settle on a gap`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(this, host)
-        coordinator.start()
-        runCurrent()
-        coordinator.stop()
-        runCurrent()
-
-        sendEcho(host, "hello world")
-        host.session.events.send(GeminiEvent.Interrupted)
-        runCurrent()
-        advanceTimeBy(900)
-        assertTrue(host.insertions.isEmpty(), "an interrupted generation is still in flight")
-        advanceTimeBy(1_700) // stall backstop re-armed by the interruption
-        runCurrent()
-
-        assertEquals(1, host.insertions.size)
-        assertEquals("hello world", host.insertions[0].second)
-        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    // ------------------------------------------------------------------
-    // 0.4.2 reliability: completeness gate, delta echo, audio recovery
-    // ------------------------------------------------------------------
-
-    @Test
-    fun `partial echo salvages the complete raw instead of losing words`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(this, host)
-        coordinator.start()
-        advanceUntilIdle()
-        val sessionId = listeningId(host)
-        coordinator.stop()
-        runCurrent()
-
-        sendEcho(host, "We should") // echo truncated to the first words
-        sendTranscript(host, "We should meet on Thursday") // complete raw ASR
-        advanceUntilIdle()
-
-        assertEquals(1, host.insertions.size)
-        assertEquals("We should meet on Thursday", host.insertions[0].second)
-        assertEquals(SettlePath.ECHO_PARTIAL_RAW, coordinator.activeMetrics()!!.settlePath)
-        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `one word summary echo with a complete raw never loses the words`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(this, host)
-        coordinator.start()
-        advanceUntilIdle()
-        val sessionId = listeningId(host)
-        coordinator.stop()
-        runCurrent()
-
-        sendEcho(host, "Meeting") // model condensed the whole turn to one word
-        sendTranscript(host, "The team meeting is scheduled for nine in the morning")
-        advanceUntilIdle()
-
-        assertEquals(1, host.insertions.size)
-        assertEquals("The team meeting is scheduled for nine in the morning", host.insertions[0].second)
-        assertEquals(SettlePath.ECHO_PARTIAL_RAW, coordinator.activeMetrics()!!.settlePath)
-        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `delta-style echo chunks are accumulated into the full echo`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(this, host)
-        coordinator.start()
-        advanceUntilIdle()
-        val sessionId = listeningId(host)
-        coordinator.stop()
-        runCurrent()
-
-        // The server streams outputTranscription as word deltas (0.4.2 probe).
-        sendEcho(host, "This is")
-        advanceTimeBy(200)
-        sendEcho(host, " a test")
-        advanceTimeBy(200)
-        sendEcho(host, " of the")
-        advanceTimeBy(200)
-        sendEcho(host, " system.")
-        advanceUntilIdle()
-
-        assertEquals(1, host.insertions.size)
-        assertEquals("This is a test of the system.", host.insertions[0].second)
-        // No raw arrived in this session, so the reconstructed echo is the only
-        // source (ECHO_ONLY); the completeness gate has no baseline to compare.
-        assertEquals(SettlePath.ECHO_ONLY, coordinator.activeMetrics()!!.settlePath)
-        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `settle during a long echo gap still salvages the raw`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(this, host)
-        coordinator.start()
-        advanceUntilIdle()
-        val sessionId = listeningId(host)
-        coordinator.stop()
-        runCurrent()
-
-        // Echo deltas stop for longer than the old debounce. 0.6.2: an echo gap
-        // must NOT settle the session mid-reply — only the stall backstop ends it,
-        // and then the complete raw is salvaged over the partial echo.
-        sendEcho(host, "The quick brown")
-        sendTranscript(host, "The quick brown fox jumps over the lazy dog")
-        advanceTimeBy(901)
-        runCurrent()
-        assertTrue(host.insertions.isEmpty(), "an echo gap must not settle mid-reply")
-
-        advanceTimeBy(1_700) // crosses the 2500ms stall backstop from the echo
-        runCurrent()
-        assertEquals(1, host.insertions.size)
-        assertEquals("The quick brown fox jumps over the lazy dog", host.insertions[0].second)
-        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `tiny echo-only result is rejected for a long captured duration`() = runTest {
-        val host = FakeHost()
-        val coordinator = coordinator(
-            this,
-            host,
-            DictationCoordinator.Config(hardDeadlineMs = 2_000),
-        )
-        coordinator.start()
-        runCurrent()
-        host.capture.chunksChannel.send(chunk(0, frameMillis = 60_000))
-        runCurrent()
-        coordinator.stop()
-        runCurrent()
-
-        sendEcho(host, "brief reply")
-        host.session.events.send(GeminiEvent.GenerationComplete)
-        runCurrent()
-        advanceTimeBy(700)
-
-        assertTrue(host.insertions.isEmpty())
-        assertTrue(states(host).none { it is DictationState.Error })
-
-        advanceTimeBy(1_400)
-        runCurrent()
-        val error = states(host).filterIsInstance<DictationState.Error>().last()
-        assertEquals("gemini_no_transcript", error.failure.code)
-        assertEquals(SettlePath.NONE, coordinator.activeMetrics()!!.settlePath)
-        coordinator.dismiss()
-        advanceUntilIdle()
-    }
-
-    // ------------------------------------------------------------------
-    // 0.5.0 Hinglish: echo-only settlement, Latin output, live transliteration
-    // ------------------------------------------------------------------
-
-    private fun hinglishCoordinator(
-        scope: kotlinx.coroutines.test.TestScope,
-        host: FakeHost,
-    ): DictationCoordinator {
-        host.resolveResult = SessionResolve.Ok(SessionResolution(host.session, LanguageMode.HINGLISH))
-        return coordinator(scope, host)
-    }
-
-    @Test
-    fun `Hinglish with a complete Latin echo inserts the echo without transliterating`() = runTest {
-        val host = FakeHost()
-        val coordinator = hinglishCoordinator(this, host)
-        coordinator.start()
-        advanceUntilIdle()
-        val sessionId = listeningId(host)
-        coordinator.stop()
-        runCurrent()
-
-        sendTranscript(host, "आज का मौसम बहुत अच्छा है") // raw ASR is Devanagari
-        sendEcho(host, "Aaj ka mausam bahut achcha hai.") // instructed Latin echo covers it
-        advanceUntilIdle()
-
-        assertEquals(1, host.insertions.size)
-        assertEquals("Aaj ka mausam bahut achcha hai.", host.insertions[0].second)
-        assertTrue(host.transliterateCalls.isEmpty(), "a complete echo must not transliterate")
-        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `Hinglish with no echo transliterates the Devanagari raw to Latin`() = runTest {
-        val host = FakeHost()
-        host.transliterateResult = "Aaj ka mausam bahut achcha hai aur ham picnic par jaa sakte hain"
-        val coordinator = hinglishCoordinator(this, host)
-        coordinator.start()
-        advanceUntilIdle()
-        val sessionId = listeningId(host)
-        coordinator.stop()
-        runCurrent()
-
-        sendTranscript(host, "आज का मौसम बहुत अच्छा है और हम पिकनिक पर जा सकते हैं")
-        advanceUntilIdle()
-
-        assertEquals(1, host.transliterateCalls.size)
-        assertEquals(1, host.insertions.size)
-        assertEquals("Aaj ka mausam bahut achcha hai aur ham picnic par jaa sakte hain", host.insertions[0].second)
-        val metrics = coordinator.activeMetrics()!!
-        assertTrue(metrics.repairStartedAt != null)
-        assertTrue(metrics.repairCompletedAt != null)
-        assertEquals(0L, metrics.repairDurationMs())
-        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
-    fun `Hinglish with a partial echo transliterates the complete raw to Latin`() = runTest {
-        val host = FakeHost()
-        host.transliterateResult = "Aaj ka mausam bahut achcha hai aur ham picnic par jaa sakte hain"
-        val coordinator = hinglishCoordinator(this, host)
-        coordinator.start()
-        advanceUntilIdle()
-        val sessionId = listeningId(host)
-        coordinator.stop()
-        runCurrent()
-
-        sendEcho(host, "Aaj ka") // truncated echo
-        sendTranscript(host, "आज का मौसम बहुत अच्छा है और हम पिकनिक पर जा सकते हैं")
-        advanceUntilIdle()
-
-        assertEquals(1, host.transliterateCalls.size)
-        assertEquals(1, host.insertions.size)
-        assertEquals("Aaj ka mausam bahut achcha hai aur ham picnic par jaa sakte hain", host.insertions[0].second)
-        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    @Test
     fun `Hinglish never inserts the raw Devanagari text`() = runTest {
+        // 0.8.0 invariant: the raw ASR for Hindi is Devanagari, which is not
+        // usable dictation output. When the Groq romanization stage fails, the
+        // dictation fails with a retry instead of pasting Devanagari.
         val host = FakeHost()
-        host.transliterateResult = null // transliteration unavailable
-        val coordinator = hinglishCoordinator(this, host)
+        val polish = FakePolish(this, outcome = PolishOutcome.NETWORK_ERROR, committedText = null)
+        host.resolveResult = SessionResolve.Ok(
+            SessionResolution(host.session, LanguageMode.HINGLISH, polish = polish),
+        )
+        val coordinator = coordinator(this, host)
         coordinator.start()
         advanceUntilIdle()
         coordinator.stop()
@@ -1642,33 +1054,8 @@ class DictationCoordinatorTest {
 
         assertTrue(host.insertions.isEmpty(), "Devanagari raw must never be inserted")
         val error = states(host).first { it is DictationState.Error }
-        assertEquals("gemini_no_transcript", (error as DictationState.Error).failure.code)
+        assertEquals("polish_romanization_failed", (error as DictationState.Error).failure.code)
     }
-
-    @Test
-    fun `Hinglish transliteration failure falls back to a partial Latin echo`() = runTest {
-        val host = FakeHost()
-        host.transliterateResult = null
-        val coordinator = hinglishCoordinator(this, host)
-        coordinator.start()
-        advanceUntilIdle()
-        val sessionId = listeningId(host)
-        coordinator.stop()
-        runCurrent()
-
-        sendEcho(host, "Aaj ka mausam") // partial Latin echo
-        sendTranscript(host, "आज का मौसम बहुत अच्छा है और हम पिकनिक पर जा सकते हैं")
-        advanceUntilIdle()
-
-        assertEquals(1, host.insertions.size)
-        assertEquals("Aaj ka mausam", host.insertions[0].second, "best available Latin text is kept")
-        coordinator.onInsertionResult(sessionId, InsertionResult.Inserted)
-        advanceUntilIdle()
-    }
-
-    // ------------------------------------------------------------------
-    // Exactly-once insertion result timeout
-    // ------------------------------------------------------------------
 
     @Test
     fun `missing insertion result times out without retrying the commit`() = runTest {
@@ -1875,36 +1262,35 @@ class DictationCoordinatorTest {
     // ------------------------------------------------------------------
 
     /**
-     * Host-testable [TextPolishContract] stand-in: collects the replayed
-     * frame flow, then completes the attempt with [outcome] and
-     * [committedText] (delivered through the sink). null [outcome] never
-     * completes, which drives the coordinator's dial-timeout fallback.
+     * Host-testable [TextPolishContract] stand-in: records the dialed settled
+     * text, then completes the attempt with [outcome] and [committedText]
+     * (delivered through the sink). null [outcome] never completes, which
+     * drives the coordinator's dial-timeout fallback.
      */
     private class FakePolish(
         private val scope: kotlinx.coroutines.test.TestScope,
         private val outcome: PolishOutcome? = PolishOutcome.SUCCESS,
         private val committedText: String? = null,
     ) : TextPolishContract {
-        override val backend: PolishBackend = PolishBackend.GROQ
         override val languageMode: LanguageMode = LanguageMode.ENGLISH
         override val style: com.whispertype.android.core.model.TranscriptionStyle =
             com.whispertype.android.core.model.TranscriptionStyle.MEDIUM
         override val maxAttempts: Int = 1
         override var onTranscript: ((String) -> Unit)? = null
+        override var onUsage: ((Long, Long) -> Unit)? = null
         var driven = false
-        var receivedFrames = 0L
+        var receivedText: String? = null
         var cancelled = false
         var closed = false
 
         override fun driveAttempt(
-            audio: Flow<AudioChunk>,
-            frames: Long,
+            text: String,
             onOutcome: (PolishOutcome, Long) -> Unit,
             onRequestStarted: () -> Unit,
         ) {
             driven = true
+            receivedText = text
             scope.launch {
-                audio.collect { receivedFrames++ }
                 onRequestStarted()
                 if (outcome != null) {
                     committedText?.let { onTranscript?.invoke(it) }
@@ -1925,13 +1311,17 @@ class DictationCoordinatorTest {
     @Test
     fun `Groq session settles on the dialed polish text and records GROQ_POLISHED`() = runTest {
         val host = FakeHost()
-        val polish = FakePolish(this, outcome = PolishOutcome.SUCCESS, committedText = "The polished text.")
+        val polish = FakePolish(
+            this,
+            outcome = PolishOutcome.SUCCESS,
+            // Must stay within PolishGuard's allowance for the level: a
+            // corrected version of the same sentence, not a rewrite.
+            committedText = "The raw speech text.",
+        )
         host.resolveResult = SessionResolve.Ok(
             SessionResolution(
                 host.session,
                 LanguageMode.ENGLISH,
-                echoEnabled = false,
-                polishBackend = PolishBackend.GROQ,
                 polish = polish,
             ),
         )
@@ -1948,9 +1338,13 @@ class DictationCoordinatorTest {
         runCurrent()
 
         assertTrue(polish.driven, "settlement must dial the Groq polish attempt")
-        assertTrue(polish.receivedFrames > 0, "the dial must receive the buffered capture frames")
+        assertEquals(
+            "the raw speech text",
+            polish.receivedText,
+            "the dial must receive the settled raw ASR text",
+        )
         assertEquals(1, host.insertions.size)
-        assertEquals("The polished text.", host.insertions[0].second)
+        assertEquals("The raw speech text.", host.insertions[0].second)
         assertEquals(SettlePath.GROQ_POLISHED, coordinator.activeMetrics()!!.settlePath)
         assertEquals("SUCCESS", coordinator.activeMetrics()!!.polishSketchCode)
         coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
@@ -1965,8 +1359,6 @@ class DictationCoordinatorTest {
             SessionResolution(
                 host.session,
                 LanguageMode.ENGLISH,
-                echoEnabled = false,
-                polishBackend = PolishBackend.GROQ,
                 polish = polish,
             ),
         )
@@ -1996,8 +1388,6 @@ class DictationCoordinatorTest {
             SessionResolution(
                 host.session,
                 LanguageMode.ENGLISH,
-                echoEnabled = false,
-                polishBackend = PolishBackend.GROQ,
                 polish = polish,
             ),
         )
@@ -2031,8 +1421,6 @@ class DictationCoordinatorTest {
             SessionResolution(
                 host.session,
                 LanguageMode.ENGLISH,
-                echoEnabled = false,
-                polishBackend = PolishBackend.GROQ,
                 polish = polish,
             ),
         )
@@ -2055,6 +1443,93 @@ class DictationCoordinatorTest {
     }
 
     @Test
+    fun `an over-editing polish reply is rejected and the raw ASR is inserted`() = runTest {
+        // The owner's 0.7.x complaint: MEDIUM rewrote the speech. PolishGuard
+        // makes that structurally impossible — a restructured reply is dropped
+        // and the user's own words are inserted instead.
+        val host = FakeHost()
+        val polish = FakePolish(
+            this,
+            outcome = PolishOutcome.SUCCESS,
+            committedText = "Continuous integration throughput has degraded substantially and " +
+                "requires immediate prioritisation by the platform team.",
+        )
+        host.resolveResult = SessionResolve.Ok(
+            SessionResolution(host.session, LanguageMode.ENGLISH, polish = polish),
+        )
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "the build is slow because we run all the tests every time")
+        advanceTimeBy(300)
+        runCurrent()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals(
+            "the build is slow because we run all the tests every time",
+            host.insertions[0].second,
+            "a rewritten reply must never replace the speaker's words",
+        )
+        assertEquals(SettlePath.RAW_ONLY, coordinator.activeMetrics()!!.settlePath)
+        assertEquals("GUARD_RETENTION", coordinator.activeMetrics()!!.polishSketchCode)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `settlement waits only one quiet window and never the old echo barriers`() = runTest {
+        // 0.8.0 latency guard: post-stop settlement is a single 250 ms ASR quiet
+        // window. The 0.6.2 stack (900 ms echo quiet + 2.5 s stall + 2 s grace +
+        // 20 s deadline) is gone, so nothing may delay insertion beyond it.
+        val host = FakeHost()
+        host.resolveResult = SessionResolve.Ok(
+            SessionResolution(host.session, LanguageMode.ENGLISH),
+        )
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "the birch canoe slid on the smooth planks")
+        advanceTimeBy(249)
+        assertTrue(host.insertions.isEmpty(), "must observe the quiet window")
+        advanceTimeBy(2)
+        runCurrent()
+
+        assertEquals(1, host.insertions.size, "insertion must happen at the quiet window, not later")
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `a silent session settles at the ASR tail backstop instead of hanging`() = runTest {
+        // No transcript ever arrives: the single backstop must terminate the
+        // session promptly (2.5 s), where 0.6.2 waited on the 20 s deadline.
+        val host = FakeHost()
+        host.resolveResult = SessionResolve.Ok(
+            SessionResolution(host.session, LanguageMode.ENGLISH),
+        )
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        runCurrent()
+        coordinator.stop()
+        runCurrent()
+
+        advanceTimeBy(2_499)
+        assertTrue(states(host).none { it is DictationState.Error })
+        advanceTimeBy(2)
+        runCurrent()
+
+        assertTrue(host.insertions.isEmpty())
+        val error = states(host).first { it is DictationState.Error } as DictationState.Error
+        assertEquals("gemini_no_transcript", error.failure.code)
+    }
+
+    @Test
     fun `teardown closes the polish contract`() = runTest {
         val host = FakeHost()
         val polish = FakePolish(this, outcome = null)
@@ -2062,8 +1537,6 @@ class DictationCoordinatorTest {
             SessionResolution(
                 host.session,
                 LanguageMode.ENGLISH,
-                echoEnabled = false,
-                polishBackend = PolishBackend.GROQ,
                 polish = polish,
             ),
         )

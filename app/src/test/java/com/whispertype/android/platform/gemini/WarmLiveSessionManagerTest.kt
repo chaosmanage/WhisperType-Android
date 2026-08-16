@@ -84,8 +84,10 @@ class WarmLiveSessionManagerTest {
 
     @Test
     fun `exact claim reports mismatch age and profile change replaces stale session`() = runTest {
-        val firstProfile = profile(instructionHash = "instruction-a")
-        val secondProfile = profile(instructionHash = "instruction-b")
+        // 0.8.0: language is the profile dimension that can differ (the echo
+        // instruction digest is gone with the echo channel).
+        val firstProfile = profile(language = LanguageMode.ENGLISH)
+        val secondProfile = profile(language = LanguageMode.HINGLISH)
         val h = Harness()
         val manager = h.managerFor(
             scope = backgroundScope,
@@ -252,8 +254,10 @@ class WarmLiveSessionManagerTest {
 
     @Test
     fun `claimed session keeps terminal events and manager never closes it`() = runTest {
-        val firstProfile = profile(instructionHash = "instruction-a")
-        val secondProfile = profile(instructionHash = "instruction-b")
+        // 0.8.0: language is the profile dimension that can differ (the echo
+        // instruction digest is gone with the echo channel).
+        val firstProfile = profile(language = LanguageMode.ENGLISH)
+        val secondProfile = profile(language = LanguageMode.HINGLISH)
         val h = Harness()
         val manager = h.managerFor(
             scope = backgroundScope,
@@ -305,17 +309,15 @@ class WarmLiveSessionManagerTest {
     }
 
     private fun profile(
-        instructionHash: String = "instruction",
+        language: LanguageMode = LanguageMode.ENGLISH,
         credentialRevision: Long = 1L,
     ): WarmSessionProfile =
         WarmSessionProfile(
             model = "gemini-live-test",
             apiVersion = "v1beta",
-            language = LanguageMode.ENGLISH,
-            polishInstructionHash = instructionHash,
+            language = language,
             automaticActivityDetectionDisabled = true,
             inputAudioTranscription = true,
-            outputAudioTranscription = true,
             credentialRevision = credentialRevision,
         )
 

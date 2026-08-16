@@ -131,7 +131,10 @@ class OkHttpGeminiLiveSessionTest {
             (modalities as kotlinx.serialization.json.JsonArray).map { it.jsonPrimitive.content },
         )
         assertTrue(setup.containsKey("inputAudioTranscription"))
-        assertTrue(setup.containsKey("outputAudioTranscription"), "output transcription (echo) must be on by default")
+        assertFalse(
+            setup.containsKey("outputAudioTranscription"),
+            "0.8.0: the echo channel must never be requested",
+        )
         val automaticActivityDetection = setup["realtimeInputConfig"]!!.jsonObject["automaticActivityDetection"]!!.jsonObject
         assertTrue(automaticActivityDetection["disabled"]!!.jsonPrimitive.boolean)
         assertFalse(setup.containsKey("systemInstruction"))
@@ -464,63 +467,6 @@ class OkHttpGeminiLiveSessionTest {
 
         serverSocket.push("""{"serverContent":{"turnComplete":true}}""")
         assertEquals(GeminiEvent.TurnComplete, receiveWithTimeout(events))
-        session.close()
-    }
-
-    @Test
-    fun `requestEchoFor uses manual realtime text order and returns on TurnComplete`() = runBlocking {
-        val session = newSession()
-        session.awaitReady()
-
-        val result = async(start = CoroutineStart.UNDISPATCHED) {
-            session.requestEchoFor("source text")
-        }
-        awaitMessages { countMessages(serverSocket.clientMessages, "activityEnd") == 1 }
-
-        val messages = serverSocket.clientMessages.toList()
-        val frames = realtimeInputFrames(messages)
-        assertEquals(
-            listOf("activityStart", "text", "activityEnd"),
-            frames.map { it.keys.single() },
-        )
-        assertEquals("source text", frames[1]["text"]!!.jsonPrimitive.content)
-        assertTrue(messages.none { it.contains("clientContent") })
-
-        serverSocket.push("""{"serverContent":{"generationComplete":true}}""")
-        serverSocket.push("""{"serverContent":{"outputTranscription":{"text":"latin text"}}}""")
-        serverSocket.push("""{"serverContent":{"turnComplete":true}}""")
-        assertEquals("latin text", withTimeout(5_000) { result.await() })
-        session.close()
-    }
-
-    @Test
-    fun `requestEchoFor returns immediately on Failed without another event`() = runBlocking {
-        val session = newSession()
-        session.awaitReady()
-
-        val result = async(start = CoroutineStart.UNDISPATCHED) {
-            session.requestEchoFor("source text")
-        }
-        awaitMessages { countMessages(serverSocket.clientMessages, "activityEnd") == 1 }
-
-        serverSocket.push("""{"error":{"message":"synthetic failure"}}""")
-        assertNull(withTimeout(5_000) { result.await() })
-        session.close()
-    }
-
-    @Test
-    fun `a stripped session refuses requestEchoFor without sending anything`() = runBlocking {
-        // 0.7.0: GROQ/NONE polish backends disable outputAudioTranscription, so
-        // the echo channel does not exist and requestEchoFor must refuse up
-        // front — no activityStart, no text, nothing on the wire.
-        val session = newSession(
-            config = GeminiSessionConfig(model = "test-model", outputAudioTranscription = false),
-        )
-        session.awaitReady()
-
-        val result = session.requestEchoFor("source text")
-        assertNull(result)
-        assertTrue(serverSocket.clientMessages.isEmpty(), "no frames may leave a stripped session")
         session.close()
     }
 

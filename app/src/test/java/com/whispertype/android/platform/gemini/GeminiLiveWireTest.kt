@@ -17,7 +17,6 @@ class GeminiLiveWireTest {
     private val config = GeminiSessionConfig(
         model = "gemini-test-live",
         responseModalities = listOf("AUDIO"),
-        systemInstruction = "Transcribe speech only.",
         inputSampleRateHz = 16_000,
         language = LanguageMode.HINGLISH,
     )
@@ -34,16 +33,12 @@ class GeminiLiveWireTest {
     }
 
     @Test
-    fun `buildSetup emits responseModalities and systemInstruction`() {
+    fun `buildSetup emits responseModalities`() {
         val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(config)).jsonObject
         val setup = root["setup"]!!.jsonObject
         val generationConfig = setup["generationConfig"]!!.jsonObject
         val modalities = generationConfig["responseModalities"]!!.jsonArray
         assertEquals(listOf("AUDIO"), modalities.map { it.jsonPrimitive.content })
-
-        val instruction = setup["systemInstruction"]!!.jsonObject["parts"]!!
-            .jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
-        assertEquals("Transcribe speech only.", instruction)
     }
 
     @Test
@@ -101,25 +96,32 @@ class GeminiLiveWireTest {
         assertFalse(realtime.containsKey("activityHandling"))
     }
 
+    /**
+     * 0.8.0 regression guard: the echo channel is gone. The Live session is raw
+     * ASR transport, so the setup must never enable `outputAudioTranscription`
+     * (which produced the reply that the 900 ms/2.5 s barrier stack waited on)
+     * and must never carry a `systemInstruction` (which is what made MEDIUM
+     * restructure the user's speech). Style now lives entirely in the Groq
+     * text stage.
+     */
     @Test
-    fun `buildSetup includes outputAudioTranscription by default`() {
-        val bare = GeminiSessionConfig(model = "m")
-        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(bare)).jsonObject
-        assertTrue(root["setup"]!!.jsonObject.containsKey("outputAudioTranscription"))
-    }
-
-    @Test
-    fun `buildSetup omits outputAudioTranscription when explicitly disabled`() {
-        val off = GeminiSessionConfig(model = "m", outputAudioTranscription = false)
-        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(off)).jsonObject
-        assertFalse(root["setup"]!!.jsonObject.containsKey("outputAudioTranscription"))
-    }
-
-    @Test
-    fun `buildSetup omits systemInstruction when null`() {
-        val bare = GeminiSessionConfig(model = "m")
-        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(bare)).jsonObject
-        assertFalse(root["setup"]!!.jsonObject.containsKey("systemInstruction"))
+    fun `buildSetup never enables the echo channel or a systemInstruction`() {
+        listOf(config, GeminiSessionConfig(model = "m")).forEach { candidate ->
+            val setup = Json.parseToJsonElement(GeminiLiveWire.buildSetup(candidate))
+                .jsonObject["setup"]!!.jsonObject
+            assertFalse(
+                setup.containsKey("outputAudioTranscription"),
+                "the echo channel must never be requested",
+            )
+            assertFalse(
+                setup.containsKey("systemInstruction"),
+                "the Live session must never carry a style instruction",
+            )
+            assertTrue(
+                setup.containsKey("inputAudioTranscription"),
+                "raw ASR is the only dictation source and must be enabled",
+            )
+        }
     }
 
     @Test

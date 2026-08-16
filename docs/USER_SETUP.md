@@ -166,26 +166,26 @@ Open:
 
 Choose None, Low, Medium, or High. The default is Medium.
 
-Higher polish levels ask the transcription engine to clean up filler words, disfluencies, and speech quirks; None keeps the raw transcript. The level is passed to the Gemini session as a system instruction (see `docs/GEMINI_LIVE.md`).
+The level decides what the Groq text stage does to your settled speech (0.8.0):
 
-## Choose the polish backend (0.7.0)
+| Level | What it does | Network |
+| --- | --- | --- |
+| **None** | Inserts exactly what was recognized | no call |
+| **Low** | Removes `um`/`uh`/`ah` and stutter repeats, fixes punctuation. Nothing else — no rewording, no restructuring | 1 call |
+| **Medium** | Fixes grammar and word choice but **keeps your sentence structure**: no reordering, merging or splitting sentences, no synonym swaps, no added content | 1 call |
+| **High** | Rewrites into clean written prose based on what you said | 1 call |
 
-Open:
+In Hinglish mode every level also romanizes Devanagari into colloquial Latin
+(English words stay English), in the same single call.
 
-`WhisperType → Settings tab → Gemini → Polish backend`
+If the model edits more than the level allows, the reply is **discarded** and
+your unpolished words are inserted instead — so Medium can never hand back a
+rewritten version of your dictation. A failed, slow, or rate-limited stage never
+loses your words either: the raw text is inserted with a typed outcome in the
+metrics. (In Hinglish, a failed romanization surfaces a retry instead of
+inserting Devanagari.)
 
-- `Display (Auto)` — the default. Settles on the raw ASR immediately; if a Groq
-  key is set, a Groq polish pass rewrites the text before insertion, otherwise
-  the Gemini Echo pipeline (0.6.2 behavior) is kept.
-- `Gemini Echo (Live)` — the classic echo pipeline; the model repeats your
-  speech back through `outputTranscription`.
-- `Groq` — settles on the raw ASR immediately and always dials Groq for the
-  polish pass. Requires a Groq key (below).
-
-A failed, slow, or empty polish never loses your words: the raw ASR text is
-inserted with a typed outcome recorded in the metrics. 
-
-### Configure the Groq API key (optional, 0.7.0)
+### Configure the Groq API key (required for Low/Medium/High and Hinglish)
 
 Open:
 

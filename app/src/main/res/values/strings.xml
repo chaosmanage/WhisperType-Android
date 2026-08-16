@@ -134,11 +134,6 @@
     <string name="settings_key_cleared" tools:ignore="UnusedResources">Key removed</string>
 
     <!-- 0.7.0: polish backend + Groq account -->
-    <string name="settings_polish_backend">Polish backend</string>
-    <string name="settings_polish_backend_desc">Which service turns the raw speech into inserted text. Display = Auto (Groq when a Groq key is set, otherwise the Gemini echo).</string>
-    <string name="polish_backend_auto">Display (Auto)</string>
-    <string name="polish_backend_groq">Groq</string>
-    <string name="polish_backend_live_echo">Gemini Echo (Live)</string>
     <string name="settings_groq_key">Groq API key</string>
     <string name="settings_groq_key_configured">Groq key configured</string>
     <string name="settings_groq_key_missing">No Groq API key set</string>

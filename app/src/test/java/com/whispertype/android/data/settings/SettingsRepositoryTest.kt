@@ -6,7 +6,6 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.whispertype.android.core.dictionary.DictionaryEntry
 import com.whispertype.android.core.model.AudioSourcePreference
 import com.whispertype.android.core.model.LanguageMode
-import com.whispertype.android.core.model.PolishBackend
 import com.whispertype.android.core.model.TranscriptionStyle
 import java.io.File
 import kotlinx.coroutines.flow.first
@@ -124,33 +123,6 @@ class SettingsRepositoryTest {
         dataStore.edit { it[stringPreferencesKey("polish_level")] = "ULTRA" }
 
         assertEquals(TranscriptionStyle.MEDIUM, repo.polishLevel.first())
-    }
-
-    @Test
-    fun `polish backend defaults to AUTO and setter round-trips`() = runTest {
-        val repo = newRepository()
-
-        assertEquals(PolishBackend.AUTO, repo.polishBackend.first())
-
-        repo.setPolishBackend(PolishBackend.GROQ)
-        assertEquals(PolishBackend.GROQ, repo.polishBackend.first())
-
-        repo.setPolishBackend(PolishBackend.NONE)
-        assertEquals(PolishBackend.NONE, repo.polishBackend.first())
-    }
-
-    @Test
-    fun `unknown stored polish backend maps to AUTO`() = runTest {
-        val dataStore =
-            PreferenceDataStoreFactory.create(
-                produceFile = { File(tmp.root, "corrupt-backend.preferences_pb") },
-            )
-        val repo = SettingsRepository(dataStore)
-
-        repo.setPolishBackend(PolishBackend.AUTO)
-        dataStore.edit { it[stringPreferencesKey("polish_backend")] = "CLAUDE" }
-
-        assertEquals(PolishBackend.AUTO, repo.polishBackend.first())
     }
 
     @Test

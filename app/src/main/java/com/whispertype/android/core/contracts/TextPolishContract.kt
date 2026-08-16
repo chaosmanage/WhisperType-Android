@@ -1,60 +1,47 @@
 package com.whispertype.android.core.contracts
 
-import com.whispertype.android.core.model.AudioChunk
 import com.whispertype.android.core.model.LanguageMode
-import com.whispertype.android.core.model.PolishBackend
 import com.whispertype.android.core.model.PolishOutcome
 import com.whispertype.android.core.model.TranscriptionStyle
-import kotlinx.coroutines.flow.Flow
 
 /**
- * 0.7.0: one-shot text polish. Implemented by [GeminiLiveSession] (a dedicated
- * all-silence session echo, i.e. running transcription) and by a Groq
- * SpeechCompletions client. The GatedSessionResolver/DictationMachine pairs
- * dial the winning backend at settlement; producers read the outcome.
+ * 0.7.0: contract between the runtime and a polish backend.
  *
- * Audio is a frame-of-reference / VAD-scored chunk so a provider can run
- * local WebRTC VAD before spending network or emit a privacy-safe density
- * metric with its result.
+ * One attempt takes the **settled raw ASR text** and returns the polished
+ * text through [onTranscript] with a typed [PolishOutcome] (never text). The
+ * host adopts the raw text unconditionally first; polish only ever upgrades
+ * the insertion, so a failure, timeout, or empty response cannot lose words.
  *
- * Producers never receive transcript text — committed text crosses back only
- * as the [SettledText] returned from [DictationBridge.onSettledSink]. All
- * failure signals are [PolishOutcome] codes so diagnostics stay privacy-safe.
- *
- * [ConsumeSession] must be invoked once per settled capture; calling it sums
- * one [inputTranscriptionCount] and frees the session. Attempts are
- * first-wins: a second attempt returns CANCELLED.
+ * Driving again while an attempt is active reports [PolishOutcome.CANCELLED]
+ * to the new caller. [onRequestStarted] fires once the attempt has left the
+ * device. Cancellation ([cancelAttempt]) aborts the in-flight attempt without
+ * reporting; [close] releases backend resources.
  */
 interface TextPolishContract {
-    val backend: PolishBackend
+
     val languageMode: LanguageMode
     val style: TranscriptionStyle
     val maxAttempts: Int
 
-    /**
-     * Host-supplied sink for the polish-committed text (the "[SettledText]
-     * returned from [DictationBridge]"). The host sets this before driving an
-     * attempt; providers deliver final (or streaming-final) transcript text
-     * through it. Producers never read text.
-     */
+    /** Host-supplied sink for the polished text; null until the host dials. */
     var onTranscript: ((String) -> Unit)?
 
-    /**
-     * Starts (or resumes) an attempt. Reporters fire exactly once per attempt
-     * unless the drive loops; [Flow] producers must recollect at CANCELLED.
-     *
-     * The [onRequestStarted] callback relates streaming frames to a network
-     * request on the hint-bearing reporters (notably WebSocket mode) and is
-     * invoked by the provider when the first network interaction begins.
-     */
+    /** Optional sink for reported token usage (integers only). */
+    var onUsage: ((promptTokens: Long, totalTokens: Long) -> Unit)?
+
     fun driveAttempt(
-        audio: Flow<AudioChunk>,
-        frames: Long,
+        text: String,
         onOutcome: (PolishOutcome, Long) -> Unit,
         onRequestStarted: () -> Unit = {},
     )
 
-    /** Cancels the running attempt (fire-and-forget). */
+    /**
+     * 0.8.0: optional, best-effort connection warm-up called when dictation
+     * starts, so the TLS/HTTP2 handshake is not paid at settlement time. Must
+     * never block, never send transcript data, and never fail the dictation.
+     */
+    fun warmUp() {}
+
     fun cancelAttempt()
 
     fun close()

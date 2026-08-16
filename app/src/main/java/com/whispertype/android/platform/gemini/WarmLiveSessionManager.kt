@@ -3,7 +3,6 @@ package com.whispertype.android.platform.gemini
 import com.whispertype.android.core.contracts.GeminiLiveSession
 import com.whispertype.android.core.model.GeminiEvent
 import com.whispertype.android.core.model.LanguageMode
-import com.whispertype.android.core.model.PolishBackend
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -28,28 +27,23 @@ import kotlinx.coroutines.withTimeout
  * Immutable, non-secret fingerprint of every setup choice that can make a warm
  * Gemini session unsuitable for the next dictation.
  *
- * [polishInstructionHash] must be a stable digest, never the instruction text.
- * [credentialRevision] is an opaque local revision counter, never key material
- * or a digest of key material.
+ * 0.8.0: the session is raw-ASR transport only (no echo, no systemInstruction),
+ * so the instruction digest and echo flag are gone — language and the activity
+ * flags are all that can differ. [credentialRevision] is an opaque local
+ * revision counter, never key material or a digest of key material.
  */
 data class WarmSessionProfile(
     val model: String,
     val apiVersion: String,
     val language: LanguageMode,
-    val polishInstructionHash: String,
     val automaticActivityDetectionDisabled: Boolean,
     val activityHandlingNoInterruption: Boolean = false,
     val inputAudioTranscription: Boolean,
-    val outputAudioTranscription: Boolean,
     val credentialRevision: Long,
-    /** 0.7.0: resolved polish backend; GROQ/NONE sessions are stripped, so a
-     *  stripped warm session must never be reused for a LIVE_ECHO dictation. */
-    val polishBackend: PolishBackend = PolishBackend.AUTO,
 ) {
     init {
         require(model.isNotBlank()) { "model must not be blank" }
         require(apiVersion.isNotBlank()) { "apiVersion must not be blank" }
-        require(polishInstructionHash.isNotBlank()) { "polishInstructionHash must not be blank" }
         require(credentialRevision >= 0L) { "credentialRevision must not be negative" }
     }
 }

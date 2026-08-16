@@ -202,50 +202,6 @@ class OkHttpGeminiLiveSession(
 
     override fun events(): Flow<GeminiEvent> = _events.receiveAsFlow()
 
-    /**
-     * Sends [text] as a manually delimited realtime activity and collects the
-     * model's spoken reply via `outputTranscription` (delta-accumulated). Gemini
-     * 3.1 ongoing text is never completed with `clientContent.turnComplete`.
-     */
-    override suspend fun requestEchoFor(text: String): String? {
-        // 0.7.0: a stripped session (GROQ/NONE polish) has no echo channel — the
-        // outputTranscription reply can never arrive, so refuse up front.
-        if (!config.outputAudioTranscription) return null
-        if (state.get() != State.Ready) return null
-        if (startActivity() != SendResult.Accepted) return null
-        val textQueued = synchronized(outboundLock) {
-            if (state.get() != State.ActivityStarted) return@synchronized false
-            val ws = socket ?: return@synchronized false
-            if (!sendTextFrame(ws, GeminiLiveWire.buildRealtimeText(text))) {
-                state.set(State.Closed)
-                return@synchronized false
-            }
-            true
-        }
-        if (!textQueued) return null
-        if (endActivity() != SendResult.Accepted) return null
-
-        val accumulator = TranscriptAccumulator(appendDeltas = true)
-        val terminal = withTimeoutOrNull(ECHO_TIMEOUT_MS) {
-            events().firstOrNull { event ->
-                when (event) {
-                    is GeminiEvent.TranscriptCandidates -> {
-                        if (event.source == GeminiEvent.TranscriptSource.ECHO) {
-                            event.candidates.forEach { accumulator.accept(it.raw) }
-                        }
-                        false
-                    }
-                    GeminiEvent.TurnComplete,
-                    GeminiEvent.Interrupted,
-                    GeminiEvent.SessionEnd -> true
-                    is GeminiEvent.Failed -> true
-                    else -> false
-                }
-            }
-        } ?: return null
-        return if (terminal == GeminiEvent.TurnComplete) accumulator.settledText() else null
-    }
-
     override suspend fun close() {
         synchronized(outboundLock) {
             if (closed.compareAndSet(false, true)) {
@@ -452,7 +408,6 @@ class OkHttpGeminiLiveSession(
     private companion object {
         const val TAG = "OkHttpGeminiLiveSession"
         const val READY_TIMEOUT_MS = 15_000L
-        const val ECHO_TIMEOUT_MS = 15_000L
         const val NORMAL_CLOSE_CODE = 1000
         const val REASON_NOT_READY = "session_not_ready"
         const val REASON_CLOSED = "socket_closed"

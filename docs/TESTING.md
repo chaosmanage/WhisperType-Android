@@ -15,11 +15,11 @@ There are **no instrumented tests**. `app/src/androidTest` contains only a manif
 | Package | Coverage |
 | --- | --- |
 | `com.whispertype.android.platform.runtime` | `DictationCoordinatorTest` — virtual-time orchestration (duplicate START, cancel during setup, STOP immediately, stale insertion responses, capture failure, rejected boundaries, exactly-once insertion), settlement (deadline/debounce, provisional rejection, retained early turn-complete), pre-ready buffering (order drain, overflow → `connection_too_slow`), failsafes (lenient fallback insert, retry, persistent errors), auto-stop (silence threshold + hard cap), echo completeness gate. |
-| `com.whispertype.android.platform.gemini` | `GeminiLiveWireTest` (exact wire codec: setup fields, realtime activity builders, server parse), `OkHttpGeminiLiveSessionTest` (MockWebServer WebSocket: setup-first ordering, single activity start/end, audio rejection before start/after end, no `clientContent`, output transcription never a candidate, automatic-VAD variant, setup errors, close idempotence, 0.7.0 stripped-session refusal), `WarmLiveSessionManagerTest` (prewarm/claim/backoff/idle). |
-| `com.whispertype.android.platform.groq` | `GroqSpeechProviderTest` — MockWebServer WebSocket protocol (pickle payload streamed, peer text → transcript sink, SUCCESS/TIMEOUT/NETWORK_ERROR/CANCELLED outcomes), **never a live key**. |
-| `com.whispertype.android.core.transcript` | `TranscriptAccumulatorTest` (cumulative merge rules), `TranscriptCompletenessTest`, `TranscriptSelectorTest` (user-speech trust policy, `diagnose()`, long-sentence regression). |
-| `com.whispertype.android.core.model` | `MutableSessionMetricsTest` (monotonic timing/counters/summary), `LanguageModeTest` (Hinglish instruction; polish styles × languages), `PolishBackendTest` (0.7.0 needsLiveEcho / liveInstructionFor routing). |
-| `com.whispertype.android.core.audio` | `AudioPickleCodecTest` (0.7.0 WTV1 round trips + header rejection), `NetworkVadScorerTest` (0.7.0 energy scores, silence → full scale). |
+| `com.whispertype.android.platform.gemini` | `ModelPolicyTest` (**build-failing** guard: only the pinned Live model ID may appear in production sources, no `generateContent`/Files endpoints, no speech-to-text/Whisper endpoints, endpoint builder is the Live WebSocket), `GeminiLiveWireTest` (exact wire codec: setup fields, 0.8.0 regression guard that the echo channel and `systemInstruction` are never sent, realtime activity builders, server parse), `OkHttpGeminiLiveSessionTest` (MockWebServer WebSocket: setup-first ordering, single activity start/end, audio rejection before start/after end, no `clientContent`, output transcription never a candidate, automatic-VAD variant, setup errors, close idempotence, 0.8.0 echo-free setup), `WarmLiveSessionManagerTest` (prewarm/claim/backoff/idle). |
+| `com.whispertype.android.platform.groq` | `GroqTextPolisherTest` — MockWebServer REST chat-completions (bearer auth + JSON body shape, polished text → transcript sink, usage integers, outcome mapping, 0.8.0 one-shot 429 rescue on the fallback model, model-preamble unwrapping), `PolishPromptsTest` (0.8.0 per-level calibration goldens: LOW forbids rewording, MEDIUM forbids restructuring, HIGH permits rewrite, Hinglish always Latin), **never a live key**. |
+| `com.whispertype.android.core.transcript` | `TranscriptAccumulatorTest` (cumulative merge rules), `TranscriptCompletenessTest`, `TranscriptSelectorTest` (user-speech trust policy, `diagnose()`, long-sentence regression), `PolishGuardTest` (0.8.0 over-edit rejection per level + cross-script Hinglish). |
+| `com.whispertype.android.core.model` | `MutableSessionMetricsTest` (monotonic timing/counters/summary). |
+| `com.whispertype.android.core.audio` | `AudioInputSelectionTest` (0.7.0 input priorities and fallbacks). |
 | `com.whispertype.android.core.groq` | `GroqKeyValidationTest` (0.7.0 key shape rules). |
 | `com.whispertype.android.audio` | `AudioCaptureOrderlyShutdownTest` (producer-owned flush, zero-padded partial frame, unblocking a blocking read, timeout fallback), `PreReadyAudioBufferTest` (bounded FIFO, overflow, close). |
 | `com.whispertype.android.core.state` | `DictationReducerTest` — state transitions, stale-session rejection, exactly-once consumption. |
@@ -248,12 +248,16 @@ Before each private release:
 - Lint passes with no warnings (`:app:lintDebug`).
 - Samsung manual matrix passes (the S25 row is the actively tested device).
 - Remaining device matrix rows are `Pending` or `Pass`, never silently ignored.
-- **0.7.0 device gate — Groq polish path:** with a Groq key set, a dictation in
-  English and in Hinglish must (a) insert polished text (or raw on a failed/slow
-  dial, never nothing), (b) skip the echo entirely in logcat aggregate metrics
-  (`polish=SUCCESS` / `GROQ_POLISHED` path), and (c) show no transcript content in
-  logs. `AUTO` with no key must behave exactly like 0.6.2. The Groq endpoint
-  constant itself is a manual gate (unverified `wss://…/audio/transcriptions`).
+- **0.8.0 device gate — latency and calibration:** for English and Hinglish, a
+  10-15 s dictation must (a) insert within ~2 s of pressing Done, (b) report a
+  single `stopToLastInputRevision` + `polishDurationMs` in the `SESSION DONE`
+  line with **no** `stopToFirstEcho`/`stopToLastEcho` tokens (the echo channel is
+  gone), (c) at MEDIUM return the speaker's own sentence corrected — not
+  restructured — and at LOW differ from raw only by fillers and punctuation,
+  (d) for Hinglish always insert Latin script, never Devanagari, and (e) show no
+  transcript content in logs. With no Groq key stored, the raw ASR must still be
+  inserted (English) and Hinglish must surface a retryable error rather than
+  inserting Devanagari.
 - No secrets scan matches.
 - No forbidden logging matches.
 - Accessibility disclosure is current.
