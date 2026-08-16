@@ -1,5 +1,11 @@
 # Optimization Plan — WhisperType Android
 
+> **SUPERSEDED (0.7.0, 2026-08-16)** — the latency/quality work in this plan
+> (long-dictation settlement, echo reliability) shipped in 0.4.2–0.6.2. The
+> 0.7.0 fast path (raw-ASR settlement + Groq polish) replaces the echo-first
+> strategy for GROQ/NONE backends and is documented in
+> `docs/FAST_PATH_PLAN.md`; this file is retained for history only.
+
 Branched from `main` as `feature/perf-overhaul` (WIP commit `35aa37f` + baseline
 test fix `ba48716`). This document is the authoritative record of the perf and
 correctness work, why each change exists, and how it is verified.

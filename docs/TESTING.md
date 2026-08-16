@@ -4,7 +4,7 @@
 
 Testing has two automated tiers plus a mandatory manual tier:
 
-1. **JVM unit tests** (`app/src/test`) — 424 tests, fast and device-free; run with `:app:testDebugUnitTest`.
+1. **JVM unit tests** (`app/src/test`) — 623 tests, fast and device-free; run with `:app:testDebugUnitTest`.
 2. **Lint** — `:app:lintDebug`, treated as warnings-as-errors.
 3. **Manual device acceptance** — required for accessibility/overlay/insertion behavior; see the [on-device protocol](#on-device-test-protocol) below.
 
@@ -15,9 +15,12 @@ There are **no instrumented tests**. `app/src/androidTest` contains only a manif
 | Package | Coverage |
 | --- | --- |
 | `com.whispertype.android.platform.runtime` | `DictationCoordinatorTest` — virtual-time orchestration (duplicate START, cancel during setup, STOP immediately, stale insertion responses, capture failure, rejected boundaries, exactly-once insertion), settlement (deadline/debounce, provisional rejection, retained early turn-complete), pre-ready buffering (order drain, overflow → `connection_too_slow`), failsafes (lenient fallback insert, retry, persistent errors), auto-stop (silence threshold + hard cap), echo completeness gate. |
-| `com.whispertype.android.platform.gemini` | `GeminiLiveWireTest` (exact wire codec: setup fields, realtime activity builders, server parse), `OkHttpGeminiLiveSessionTest` (MockWebServer WebSocket: setup-first ordering, single activity start/end, audio rejection before start/after end, no `clientContent`, output transcription never a candidate, automatic-VAD variant, setup errors, close idempotence), `WarmLiveSessionManagerTest` (prewarm/claim/backoff/idle). |
+| `com.whispertype.android.platform.gemini` | `GeminiLiveWireTest` (exact wire codec: setup fields, realtime activity builders, server parse), `OkHttpGeminiLiveSessionTest` (MockWebServer WebSocket: setup-first ordering, single activity start/end, audio rejection before start/after end, no `clientContent`, output transcription never a candidate, automatic-VAD variant, setup errors, close idempotence, 0.7.0 stripped-session refusal), `WarmLiveSessionManagerTest` (prewarm/claim/backoff/idle). |
+| `com.whispertype.android.platform.groq` | `GroqSpeechProviderTest` — MockWebServer WebSocket protocol (pickle payload streamed, peer text → transcript sink, SUCCESS/TIMEOUT/NETWORK_ERROR/CANCELLED outcomes), **never a live key**. |
 | `com.whispertype.android.core.transcript` | `TranscriptAccumulatorTest` (cumulative merge rules), `TranscriptCompletenessTest`, `TranscriptSelectorTest` (user-speech trust policy, `diagnose()`, long-sentence regression). |
-| `com.whispertype.android.core.model` | `MutableSessionMetricsTest` (monotonic timing/counters/summary), `LanguageModeTest` (Hinglish instruction; polish styles × languages). |
+| `com.whispertype.android.core.model` | `MutableSessionMetricsTest` (monotonic timing/counters/summary), `LanguageModeTest` (Hinglish instruction; polish styles × languages), `PolishBackendTest` (0.7.0 needsLiveEcho / liveInstructionFor routing). |
+| `com.whispertype.android.core.audio` | `AudioPickleCodecTest` (0.7.0 WTV1 round trips + header rejection), `NetworkVadScorerTest` (0.7.0 energy scores, silence → full scale). |
+| `com.whispertype.android.core.groq` | `GroqKeyValidationTest` (0.7.0 key shape rules). |
 | `com.whispertype.android.audio` | `AudioCaptureOrderlyShutdownTest` (producer-owned flush, zero-padded partial frame, unblocking a blocking read, timeout fallback), `PreReadyAudioBufferTest` (bounded FIFO, overflow, close). |
 | `com.whispertype.android.core.state` | `DictationReducerTest` — state transitions, stale-session rejection, exactly-once consumption. |
 | `com.whispertype.android.core.privacy` | `LogRedactorTest`. |
@@ -245,6 +248,12 @@ Before each private release:
 - Lint passes with no warnings (`:app:lintDebug`).
 - Samsung manual matrix passes (the S25 row is the actively tested device).
 - Remaining device matrix rows are `Pending` or `Pass`, never silently ignored.
+- **0.7.0 device gate — Groq polish path:** with a Groq key set, a dictation in
+  English and in Hinglish must (a) insert polished text (or raw on a failed/slow
+  dial, never nothing), (b) skip the echo entirely in logcat aggregate metrics
+  (`polish=SUCCESS` / `GROQ_POLISHED` path), and (c) show no transcript content in
+  logs. `AUTO` with no key must behave exactly like 0.6.2. The Groq endpoint
+  constant itself is a manual gate (unverified `wss://…/audio/transcriptions`).
 - No secrets scan matches.
 - No forbidden logging matches.
 - Accessibility disclosure is current.
@@ -262,5 +271,5 @@ Before each private release:
 ./gradlew :app:testDebugUnitTest :app:lintDebug
 ```
 
-- `:app:testDebugUnitTest` (424 JVM unit tests) and `:app:lintDebug` require no device.
+- `:app:testDebugUnitTest` (623 JVM unit tests) and `:app:lintDebug` require no device.
 - There is no `connectedDebugAndroidTest` step: there are no instrumented tests. On-device validation is performed manually against the protocol above.

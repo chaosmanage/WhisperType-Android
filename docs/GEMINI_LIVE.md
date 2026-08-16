@@ -416,6 +416,12 @@ punctuation, and code-switching survive because only the four rules above fire.
 
 #### 7.3 Settlement timing and failsafes (`DictationCoordinator`)
 
+- **0.7.0 GROQ/NONE sessions settle on the raw ASR first.** With a non-`LIVE_ECHO`
+  backend the session is stripped (no echo, no `systemInstruction`, see
+  §10.4) and settlement adopts the raw input on the 250 ms debounce; the polish
+  stage then dials the backend and upgrades the inserted text when it commits
+  (`SettlePath.GROQ_POLISHED`). `polishDialTimeoutMs = 12_000`; a failure,
+  timeout, or empty reply inserts the raw text with a typed `polish=` code.
 - **Echo is the primary source.** Settlement prefers the echo; only when it is
   empty does it fall back to the raw input — except in Hinglish, which settles
   **echo-only** (see §9.2).
@@ -572,6 +578,23 @@ ASR was salvaged instead.
 - On-device protocol + acceptance matrix: `docs/TESTING.md`.
 - Remaining gates (require the phone): the full acceptance matrix, warm/cold
   latency budgets, StrictMode off-main confirmation, and the prewarm billing check.
+
+### 10.4 The 0.7.0 stripped session (GROQ/NONE polish)
+
+When the resolved polish backend is not `LIVE_ECHO`, the session is stripped to
+raw ASR transport:
+
+- `systemInstruction` is replaced by `null` (`liveInstructionFor` returns null
+  for non-`LIVE_ECHO` backends; `FlowRuntimeService.stableInstructionHash`
+  hashes `""` for a stripped instruction and the warm profile records the
+  backend, keeping warm-pool hits semantically correct).
+- `outputAudioTranscription` is **not** requested (`needsLiveEcho` is false);
+  `OkHttpGeminiLiveSession.requestEchoFor` refuses up front when it is absent,
+  so a stripped session can never hang waiting for an echo that cannot arrive.
+- Settlement adopts the raw ASR and the polish stage
+  (`DictationCoordinator.settleWithPolish`) replays the bounded capture frames
+  to the backend contract (`TextPolishContract.driveAttempt`) and commits the
+  streamed transcript through `insertSettled` when the attempt succeeds.
 
 ---
 

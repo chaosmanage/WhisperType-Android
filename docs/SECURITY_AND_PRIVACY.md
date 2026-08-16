@@ -53,6 +53,13 @@ The Gemini API key is the only secret the app stores.
 - If the Keystore reports `KEY_INVALIDATED` (for example after device lock-state or key-access changes), the stored ciphertext is discarded and the recovery path asks the user to re-enter the key.
 - Keys are not bound to user authentication; a lock-screen credential is not required to use the key.
 
+**0.7.0: Groq key** — the optional Groq API key is stored the same way under
+the alias `whispertype_groq_key` (file `groq_api_key.bin`): Keystore AES-GCM,
+no backup, never logged, cleared from memory after use. Entry is validated for
+the `gsk_` shape before saving. A Groq key only travels to the Groq endpoint
+(`wss://api.groq.com/…`, a constant) over TLS; the shared OkHttp client adds no
+logging of payload content.
+
 ## Backup exclusion
 
 - `android:allowBackup="false"` is set in the application manifest.

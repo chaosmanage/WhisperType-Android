@@ -81,6 +81,14 @@ All paths are under `app/src/main/java/com/whispertype/android/`.
    accessibility process re-validates the target and commits text at the cursor;
    a typed result flows back. When history is enabled, the settled transcript is
    recorded encrypted.
+4a. **0.7.0 polish stage** — the `PolishBackend` setting decides how the settled
+   raw ASR becomes the inserted text. `GROQ` (and `AUTO` with a Groq key) strips
+   the session to raw transport (no echo, no `systemInstruction`) and settles on
+   the raw ASR immediately, then dials the Groq audio endpoint
+   (`platform/groq/GroqSpeechProvider` over the shared OkHttp client) with a
+   bounded replay of the captured frames; streamed transcript text crosses back
+   through `insertSettled`. A failed/slow/empty polish always falls back to raw
+   with a typed outcome code. `LIVE_ECHO` keeps the 0.6.2 pipeline.
 5. Failures surface as typed `DictationFailure`s with a Retry/Dismiss panel; a
    failed insertion offers an explicit Copy fallback.
 

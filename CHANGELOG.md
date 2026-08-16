@@ -4,6 +4,31 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-08-16
+
+> **Fast path with Groq polish** — dictations now settle on the raw ASR the
+> moment you stop speaking, and a Groq polish pass rewrites the settled text
+> (Hinglish romanization included) before insertion. No key, no change: `AUTO`
+> keeps today's echo behavior.
+
+- **Polish backend setting (`settings`)** — new Settings → Gemini section: a
+  backend picker (Display, Gemini Echo Live, Groq) and a Groq API key field
+  (validated, stored in the device keystore). `AUTO` dials Groq when a key is
+  present and otherwise keeps the 0.6.2 echo pipeline unchanged.
+- **Raw-ASR settlement (`runtime`)** — with Groq (or Display), the session is
+  stripped to raw transport (no echo, no `systemInstruction`) and settlement
+  adopts the raw ASR immediately; the polish stage then upgrades the inserted
+  text. A failed, slow (>12 s), or empty polish never loses text — the raw ASR
+  is inserted with a typed outcome code.
+- **Groq streaming client (`platform/groq`)** — WebSocket client over the
+  shared OkHttp client; energy-VAD frame density is packed into a versioned
+  pickle payload and streamed to the Groq audio endpoint; streamed transcript
+  frames cross back through the existing insertion path. Endpoint is a
+  constant; wrong-URL/network failures degrade safely to raw insertion.
+- **Polish metrics (`core`)** — typed `polish=`/`cacheHit=`/`polishDurationMs`
+  summary tokens and snapshot fields (`polishSketchCode`, `polishPromptTokens`,
+  `polishTotalTokens`, `polishCacheHit`); never transcript text.
+
 ## [0.6.2] - 2026-08-12
 
 > **Long-dictation truncation fix** — the app was settling before the model
