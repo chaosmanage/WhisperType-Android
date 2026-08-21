@@ -99,7 +99,7 @@ All paths are under `app/src/main/java/com/whispertype/android/`.
    backstop). The `TranscriptionStyle` then decides the text stage:
    `NONE` inserts the raw ASR with **zero network calls**; `LOW`/`MEDIUM`/`HIGH`
    and every Hinglish dictation make exactly **one** Groq chat call
-   (`platform/groq/GroqTextPolisher`, `llama-3.1-8b-instant`, `temperature = 0`)
+   (`platform/groq/GroqTextPolisher`, `openai/gpt-oss-120b`, `temperature = 0`)
    that applies the level and, for Hinglish, romanizes Devanagari to colloquial
    Latin. The reply is adopted only if `core/transcript/PolishGuard` accepts the
    edit magnitude for that level; otherwise the unpolished ASR is inserted, so

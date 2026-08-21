@@ -231,10 +231,11 @@ class DictationCoordinator(
         val segmentSilenceMs: Long = 700,
         /** Mic amplitude (0..1) above which the user is considered speaking. */
         val speechAmplitudeThreshold: Float = 0.02f,
-        /** 0.8.0: budget for the Groq text stage before falling back to the raw
-         *  ASR. `llama-3.1-8b-instant` answers a dictation-sized prompt in
-         *  ~0.2-0.5 s, so a 12 s cap (0.7.0) only ever meant a 12 s stall on a
-         *  hung request. 4 s covers a slow mobile network with margin. */
+        /** 0.9.0: budget for the Groq text stage before falling back to the raw
+         *  ASR. `openai/gpt-oss-120b` answers a dictation-sized prompt in
+         *  ~0.7 s (measured live), so an oversized cap only ever means a long
+         *  stall on a hung request. 4 s covers a slow mobile network with
+         *  margin. */
         val polishDialTimeoutMs: Long = 4_000,
     )
 

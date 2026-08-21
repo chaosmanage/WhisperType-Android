@@ -4,6 +4,7 @@ import com.whispertype.android.core.contracts.TextPolishContract
 import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.core.model.PolishOutcome
 import com.whispertype.android.core.model.TranscriptionStyle
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -50,9 +51,9 @@ class GroqTextPolisher(
     private val model: String = GroqEndpoints.CHAT_MODEL,
     /**
      * Used for a single retry when [model] returns 429. The free tier's binding
-     * constraint is tokens-per-minute *per model* (measured: 6,000 TPM on
-     * `llama-3.1-8b-instant`), so the fallback has its own budget and rescues a
-     * dictation whose primary bucket is momentarily drained. Null disables it.
+     * constraint is tokens-per-minute *per model*, so the fallback runs on a
+     * different deployment with its own budget and rescues a dictation whose
+     * primary bucket is momentarily drained. Null disables it.
      */
     private val fallbackModel: String? = GroqEndpoints.CHAT_MODEL_FALLBACK,
     private val url: String = GroqEndpoints.CHAT_COMPLETIONS_URL,
@@ -172,6 +173,13 @@ class GroqTextPolisher(
                 call.execute()
             } catch (e: IOException) {
                 return@withContext PolishOutcome.NETWORK_ERROR
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // An unexpected client-side failure (e.g. call already
+                // executed, TLS state error) is still a failed attempt — map
+                // it instead of crashing the drive scope unhandled.
+                return@withContext PolishOutcome.OTHER
             }
             val bodyText = runCatching { response.body.string() }.getOrNull()
             response.close()

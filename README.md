@@ -112,7 +112,7 @@ all gone, which is where the old 5-10 s wait came from. See
 
 Hinglish additionally romanizes Devanagari into colloquial Latin at every level,
 in the same single call, keeping English words as English. The stage runs on
-Groq's free tier (`llama-3.1-8b-instant`, measured 150-260 ms) and is
+Groq's free tier (`openai/gpt-oss-120b`, measured ~0.7 s) and is
 **text-only — your audio never goes to Groq**. A reply that edits more than the
 level allows is rejected by `PolishGuard` and your unpolished words are inserted
 instead, so a slow, failed, rate-limited or over-eager model can never lose or
