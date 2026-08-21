@@ -31,10 +31,24 @@ class FileBlobStore(file: File) : BlobStore {
             null
         }
 
+    // Crash-safe write: bytes land in a temp file in the same directory and are
+    // moved onto the target with an atomic rename, so a crash mid-write can
+    // never leave a truncated target behind.
     override fun write(data: ByteArray): Boolean =
         try {
-            target.writeBytes(data)
-            true
+            val temp = File.createTempFile("${target.name}.", ".tmp", target.parentFile)
+            try {
+                temp.writeBytes(data)
+                if (temp.renameTo(target)) {
+                    true
+                } else {
+                    temp.delete()
+                    false
+                }
+            } catch (_: Throwable) {
+                temp.delete()
+                false
+            }
         } catch (_: Throwable) {
             false
         }

@@ -1,8 +1,5 @@
 package com.whispertype.android.ui.history
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +27,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,13 +35,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.whispertype.android.R
 import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.data.history.HistoryRepository
+import com.whispertype.android.data.secrets.SensitiveClipboard
 import com.whispertype.android.data.settings.SettingsRepository
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -63,11 +61,11 @@ import kotlinx.coroutines.launch
 fun HistoryScreen(
     historyRepository: HistoryRepository,
     settings: SettingsRepository,
+    sensitiveClipboard: SensitiveClipboard,
     onBack: () -> Unit,
     onCopied: (String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
     val clearedLabel = stringResource(R.string.history_cleared)
     val copiedLabel = stringResource(R.string.history_copied)
     val historyEnabled by settings.historyEnabled.collectAsStateWithLifecycle(initialValue = false)
@@ -169,18 +167,33 @@ fun HistoryScreen(
                             )
                         }
                         if (historyEnabled) {
+                            // Drag updates local state only; the DataStore write
+                            // happens once on release so a swipe does not spam
+                            // commits/recompositions. While idle the local value
+                            // tracks the persisted setting.
+                            var retentionDragDays by remember { mutableFloatStateOf(retentionDays.toFloat()) }
+                            var draggingRetention by remember { mutableStateOf(false) }
+                            LaunchedEffect(retentionDays) {
+                                if (!draggingRetention) retentionDragDays = retentionDays.toFloat()
+                            }
                             Text(
                                 text = stringResource(R.string.settings_history_retention),
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                             Text(
-                                text = "$retentionDays ${stringResource(R.string.days_unit)}",
+                                text = "${retentionDragDays.roundToInt()} ${stringResource(R.string.days_unit)}",
                                 style = MaterialTheme.typography.titleMedium,
                             )
                             Slider(
-                                value = retentionDays.toFloat(),
-                                onValueChangeFinished = { /* commit on release only */ },
-                                onValueChange = { scope.launch { settings.setHistoryRetentionDays(it.roundToInt()) } },
+                                value = retentionDragDays,
+                                onValueChange = {
+                                    retentionDragDays = it
+                                    draggingRetention = true
+                                },
+                                onValueChangeFinished = {
+                                    draggingRetention = false
+                                    scope.launch { settings.setHistoryRetentionDays(retentionDragDays.roundToInt()) }
+                                },
                                 valueRange = RETENTION_RANGE_DAYS_F,
                             )
                         }
@@ -205,10 +218,12 @@ fun HistoryScreen(
                     HistoryEntryCard(
                         entry = entry,
                         onCopy = {
-                            val clipboard =
-                                context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText(null, entry.text))
-                            onCopied(copiedLabel)
+                            // Transcripts are sensitive: always via the
+                            // SensitiveClipboard abstraction (EXTRA_IS_SENSITIVE).
+                            scope.launch {
+                                sensitiveClipboard.copySensitive(entry.text)
+                                onCopied(copiedLabel)
+                            }
                         },
                         onDelete = {
                             scope.launch {

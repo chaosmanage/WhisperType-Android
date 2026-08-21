@@ -8,6 +8,7 @@ import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -31,7 +32,9 @@ class EncryptedHistoryRepository(
     private val lock = Any()
 
     override fun events(): Flow<List<HistoryRepository.HistoryEntry>> =
-        flow { emit(currentEntries()) }
+        // Cold flow, but the blob read + Keystore + AES-GCM decrypt + JSON parse
+        // must not run on the collector's thread (Main when the UI collects).
+        flow { emit(currentEntries()) }.flowOn(Dispatchers.IO)
 
     override suspend fun record(entry: HistoryRepository.HistoryEntry): Boolean =
         // Blob read + AES-GCM decrypt + JSON re-encode + re-encrypt + write must
@@ -65,10 +68,14 @@ class EncryptedHistoryRepository(
 
     override suspend fun clear(): Boolean =
         withContext(Dispatchers.IO) {
-            try {
-                blobStore.delete()
-            } catch (_: Throwable) {
-                false
+            // Same lock as record()/delete() so a concurrent record cannot
+            // resurrect cleared entries by re-writing its read-modify-write.
+            synchronized(lock) {
+                try {
+                    blobStore.delete()
+                } catch (_: Throwable) {
+                    false
+                }
             }
         }
 

@@ -26,7 +26,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -36,6 +35,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -45,7 +45,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -372,18 +371,18 @@ fun SettingsScreen(
             SettingsSection(stringResource(R.string.settings_section_bubble)) {
                 SettingSlider(
                     title = stringResource(R.string.settings_bubble_size),
-                    description = stringResource(R.string.settings_bubble_size_value, bubbleSizeDp),
                     value = bubbleSizeDp.toFloat(),
                     range = BUBBLE_SIZE_RANGE_DP_F,
-                    onValueChange = { scope.launch { settings.setBubbleSizeDp(it.roundToInt()) } },
+                    describe = { stringResource(R.string.settings_bubble_size_value, it) },
+                    onCommit = { scope.launch { settings.setBubbleSizeDp(it.roundToInt()) } },
                 )
 
                 SettingSlider(
                     title = stringResource(R.string.settings_bubble_opacity),
-                    description = stringResource(R.string.settings_bubble_opacity_value, bubbleOpacity),
                     value = bubbleOpacity.toFloat(),
                     range = BUBBLE_OPACITY_RANGE_PERCENT_F,
-                    onValueChange = { scope.launch { settings.setBubbleOpacityPercent(it.roundToInt()) } },
+                    describe = { stringResource(R.string.settings_bubble_opacity_value, it) },
+                    onCommit = { scope.launch { settings.setBubbleOpacityPercent(it.roundToInt()) } },
                 )
 
                 SettingRow(
@@ -398,10 +397,10 @@ fun SettingsScreen(
 
                 SettingSlider(
                     title = stringResource(R.string.settings_mini_dot_delay),
-                    description = stringResource(R.string.settings_mini_dot_delay_value, miniDotDelay),
                     value = miniDotDelay.toFloat(),
                     range = MINI_DOT_DELAY_RANGE_SECONDS_F,
-                    onValueChange = { scope.launch { settings.setMiniDotDelaySeconds(it.roundToInt()) } },
+                    describe = { stringResource(R.string.settings_mini_dot_delay_value, it) },
+                    onCommit = { scope.launch { settings.setMiniDotDelaySeconds(it.roundToInt()) } },
                 )
 
                 SettingRow(
@@ -573,15 +572,25 @@ private fun SettingsSection(
 }
 
 /** 0.4.2 slider row: the label/value on its own line and the full-width slider
- *  beneath it (a slider squeezed into a [SettingRow] truncates the text). */
+ *  beneath it (a slider squeezed into a [SettingRow] truncates the text).
+ *
+ *  Commit-on-release: dragging updates local [mutableFloatStateOf] state only;
+ *  [onCommit] fires once from [Slider.onValueChangeFinished]. While not
+ *  dragging, the local value tracks the persisted [value] so external changes
+ *  (and the commit echo) stay in sync. */
 @Composable
 private fun SettingSlider(
     title: String,
-    description: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,
-    onValueChange: (Float) -> Unit,
+    describe: @Composable (Int) -> String,
+    onCommit: (Float) -> Unit,
 ) {
+    var dragValue by remember { mutableFloatStateOf(value) }
+    var dragging by remember { mutableStateOf(false) }
+    LaunchedEffect(value) {
+        if (!dragging) dragValue = value
+    }
     Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -590,13 +599,19 @@ private fun SettingSlider(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = title, style = MaterialTheme.typography.titleMedium)
-                Text(text = description, style = MaterialTheme.typography.bodySmall)
+                Text(text = describe(dragValue.roundToInt()), style = MaterialTheme.typography.bodySmall)
             }
         }
         Slider(
-            value = value,
-            onValueChangeFinished = { /* commit on release only */ },
-            onValueChange = onValueChange,
+            value = dragValue,
+            onValueChange = {
+                dragValue = it
+                dragging = true
+            },
+            onValueChangeFinished = {
+                dragging = false
+                onCommit(dragValue)
+            },
             valueRange = range,
             modifier = Modifier.fillMaxWidth(),
         )

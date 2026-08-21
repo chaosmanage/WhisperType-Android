@@ -47,7 +47,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -67,6 +66,7 @@ import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.whispertype.android.data.history.EncryptedHistoryRepository
 import com.whispertype.android.data.history.HistoryStats
@@ -76,6 +76,7 @@ import com.whispertype.android.data.secrets.JavaxAesGcmCipher
 import com.whispertype.android.data.secrets.GroqKeyProvider
 import com.whispertype.android.data.secrets.KeystoreKeyProvider
 import com.whispertype.android.data.secrets.KeyProvider
+import com.whispertype.android.data.secrets.SystemSensitiveClipboard
 import com.whispertype.android.data.settings.SettingsRepository
 import com.whispertype.android.platform.accessibility.EligibilityExplanation
 import com.whispertype.android.platform.accessibility.WhisperTypeAccessibilityService
@@ -86,9 +87,11 @@ import com.whispertype.android.ui.onboarding.OnboardingScreen
 import com.whispertype.android.ui.settings.SettingsScreen
 import com.whispertype.android.ui.theme.WhisperTypeTheme
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Feature host. Shows the overlay-permission onboarding when it is missing,
@@ -102,6 +105,7 @@ class MainActivity : ComponentActivity() {
     private val settingsRepository by lazy { SettingsRepository(applicationContext) }
     private val keyProvider by lazy { KeystoreKeyProvider(applicationContext) }
     private val groqKeyProvider by lazy { GroqKeyProvider(applicationContext) }
+    private val sensitiveClipboard by lazy { SystemSensitiveClipboard(applicationContext) }
     private val historyRepository by lazy {
         EncryptedHistoryRepository(
             keystore = AndroidKeystoreKeyStore(EncryptedHistoryRepository.DEFAULT_KEY_ALIAS),
@@ -117,13 +121,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val darkMode by settingsRepository.darkMode.collectAsState(initial = false)
+            val darkMode by settingsRepository.darkMode
+                .collectAsStateWithLifecycle(initialValue = false)
             WhisperTypeTheme(darkTheme = darkMode) {
                 // Re-evaluate the overlay gate on every resume so returning from
                 // the overlay settings screen immediately updates the checklist
                 // (0.4.2). Onboarding stays until the user explicitly continues.
                 var overlayGranted by remember { mutableStateOf(canDrawOverlays()) }
-                val onboardingDone by settingsRepository.onboardingCompleted.collectAsState(initial = false)
+                val onboardingDone by settingsRepository.onboardingCompleted
+                    .collectAsStateWithLifecycle(initialValue = false)
                 val lifecycleOwner = LocalLifecycleOwner.current
                 DisposableEffect(lifecycleOwner) {
                     val observer = LifecycleEventObserver { _, event ->
@@ -254,9 +260,22 @@ class MainActivity : ComponentActivity() {
         var selectedTab by remember { mutableStateOf(0) }
         var settingsScrollToGemini by remember { mutableStateOf(false) }
         var neededPermissions by remember { mutableStateOf(runtimePermissionsNeeded()) }
-        val historyEntries by historyRepository.events().collectAsState(initial = emptyList())
-        val historyEnabled by settings.historyEnabled.collectAsState(initial = false)
-        val appEnabled by settings.appEnabled.collectAsState(initial = true)
+        // Created once per HomeScreen instance; each collection re-reads the
+        // (now IO-dispatched) cold flow instead of rebuilding it per
+        // recomposition.
+        val historyEvents = remember(historyRepository) { historyRepository.events() }
+        val historyEntries by historyEvents.collectAsStateWithLifecycle(initialValue = emptyList())
+        val historyEnabled by settings.historyEnabled
+            .collectAsStateWithLifecycle(initialValue = false)
+        val appEnabled by settings.appEnabled.collectAsStateWithLifecycle(initialValue = true)
+        // API-key presence is a blob stat read; probe it off Main once when Home
+        // appears and again whenever the user returns to this tab (e.g. after
+        // saving a key in Settings) — never on every recomposition.
+        val hasGeminiKey by produceState(initialValue = false, selectedTab) {
+            if (selectedTab == 0) {
+                value = withContext(Dispatchers.IO) { keyProvider.hasKey() }
+            }
+        }
         // 0.5.2: live eligibility mirror so the "why is the bubble hidden" card
         // stays current while the user sits on Home (the runtime updates it via
         // IPC from the accessibility process).
@@ -323,6 +342,7 @@ class MainActivity : ComponentActivity() {
                     1 -> HistoryScreen(
                         historyRepository = historyRepository,
                         settings = settings,
+                        sensitiveClipboard = sensitiveClipboard,
                         onBack = { selectedTab = 0 },
                         onCopied = { msg -> Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show() },
                     )
@@ -395,7 +415,7 @@ class MainActivity : ComponentActivity() {
                                         )
                                         StatusTile(
                                             label = stringResource(R.string.home_status_key),
-                                            on = keyProvider.hasKey(),
+                                            on = hasGeminiKey,
                                             onFix = {
                                                 settingsScrollToGemini = true
                                                 selectedTab = 3
