@@ -91,7 +91,9 @@ fun RealTimeWaveform(
         val w = this.size.width
         val h = this.size.height
         val baselineY = h * 0.94f
-        val fade = Color(0xFF4A5A57)
+        // Baseline derives from the stroke color so bars and origin line always
+        // belong to the same palette family.
+        val fade = lineColor.copy(alpha = 0.25f)
 
         // Faint baseline so the bar skyline has an origin.
         drawLine(

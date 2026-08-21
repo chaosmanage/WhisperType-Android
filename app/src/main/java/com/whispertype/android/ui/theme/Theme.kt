@@ -1,10 +1,14 @@
 package com.whispertype.android.ui.theme
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 
 /** 0.4.2 brand identity: emerald-teal accent replacing the Material default
  *  purple. The launcher logo is monochrome (black/white), so the brand color is
@@ -16,10 +20,12 @@ object BrandColors {
 }
 
 /** Colors used directly by the dark persistent overlay (independent of the
- *  light/dark app-screen scheme). */
+ *  light/dark app-screen scheme). Tonal values sit in the same emerald-teal
+ *  family as [BrandColors] so overlay chrome and in-app accents read as one
+ *  product. */
 object WhisperTypeColors {
-    val Surface = Color(0xFF141414)
-    val SurfaceRaised = Color(0xFF1E1E1E)
+    val Surface = Color(0xFF131715)
+    val SurfaceRaised = Color(0xFF1D2422)
     val OnSurface = Color(0xFFF5F3F0)
     val RecordingAccent = Color(0xFFE8593C)
     val IdleAccent = Color(0xFFF5F3F0)
@@ -27,7 +33,19 @@ object WhisperTypeColors {
     val SuccessAccent = Color(0xFF5BE39A)
 }
 
-/** Light emerald-teal scheme (default). */
+/** Fixed accent hues for the home stats grid (data-viz roles). Deliberately
+ *  not scheme-derived so each metric stays visually distinct under both the
+ *  brand and the dynamic palettes. */
+object StatAccents {
+    val Teal = BrandColors.Teal
+    val Blue = Color(0xFF3B82F6)
+    val Amber = Color(0xFFF59E0B)
+    val Violet = Color(0xFF8B5CF6)
+    val Rose = Color(0xFFF43F5E)
+    val Green = Color(0xFF22C55E)
+}
+
+/** Light emerald-teal scheme (non-dynamic fallback). */
 private val WhisperTypeColorScheme = lightColorScheme(
     primary = BrandColors.Teal,
     onPrimary = Color(0xFFFFFFFF),
@@ -45,7 +63,7 @@ private val WhisperTypeColorScheme = lightColorScheme(
     error = Color(0xFFBA1A1A),
 )
 
-/** 0.4.2 dark emerald-teal scheme. */
+/** Dark emerald-teal scheme (non-dynamic fallback). */
 private val WhisperTypeDarkColorScheme = darkColorScheme(
     primary = Color(0xFF5EE0C4),
     onPrimary = Color(0xFF003731),
@@ -63,13 +81,30 @@ private val WhisperTypeDarkColorScheme = darkColorScheme(
     error = Color(0xFFFFB4AB),
 )
 
+/**
+ * App theme: Material You dynamic color by default (every supported device is
+ * Android 12+; minSdk 33), with the emerald-teal brand schemes as the
+ * non-dynamic fallback via [dynamicColor] = false. [darkTheme] defaults to the
+ * system setting; call sites may override it (the app passes the user's
+ * in-app dark-mode toggle).
+ */
 @Composable
 fun WhisperTypeTheme(
-    darkTheme: Boolean = false,
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
+    val context = LocalContext.current
+    val colorScheme = when {
+        dynamicColor ->
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        darkTheme -> WhisperTypeDarkColorScheme
+        else -> WhisperTypeColorScheme
+    }
     MaterialTheme(
-        colorScheme = if (darkTheme) WhisperTypeDarkColorScheme else WhisperTypeColorScheme,
+        colorScheme = colorScheme,
+        typography = AppTypography,
+        shapes = AppShapes,
         content = content,
     )
 }

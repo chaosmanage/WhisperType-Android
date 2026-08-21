@@ -1,5 +1,6 @@
 package com.whispertype.android.ui.onboarding
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -13,7 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -35,7 +36,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -100,7 +100,7 @@ fun OnboardingScreen(
                 contentDescription = null,
                 modifier = Modifier
                     .size(88.dp)
-                    .clip(RoundedCornerShape(22.dp)),
+                    .clip(MaterialTheme.shapes.extraLarge),
                 contentScale = ContentScale.Crop,
             )
             Spacer(Modifier.height(16.dp))
@@ -183,7 +183,9 @@ fun OnboardingScreen(
                     )
                     if (!keySet) {
                         Column(
-                            modifier = Modifier.padding(start = 4.dp),
+                            modifier = Modifier
+                                .padding(start = 4.dp)
+                                .animateContentSize(),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             OutlinedTextField(
@@ -251,7 +253,7 @@ fun OnboardingScreen(
 private fun HowStep(number: Int, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Surface(
-            shape = RoundedCornerShape(50),
+            shape = CircleShape,
             color = MaterialTheme.colorScheme.primaryContainer,
         ) {
             Text(
@@ -280,7 +282,7 @@ private fun PermissionRow(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = MaterialTheme.shapes.medium,
         color = if (granted) {
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
         } else {
@@ -304,7 +306,7 @@ private fun PermissionRow(
                 Icon(
                     imageVector = Icons.Filled.Check,
                     contentDescription = stringResource(R.string.onboarding_done),
-                    tint = Color(0xFF22C55E),
+                    tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(24.dp),
                 )
             } else if (actionLabel != null) {

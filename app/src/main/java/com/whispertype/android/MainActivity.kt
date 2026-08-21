@@ -12,6 +12,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,7 +33,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Book
@@ -35,6 +40,10 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Book
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -85,6 +94,7 @@ import com.whispertype.android.ui.dictionary.DictionaryScreen
 import com.whispertype.android.ui.history.HistoryScreen
 import com.whispertype.android.ui.onboarding.OnboardingScreen
 import com.whispertype.android.ui.settings.SettingsScreen
+import com.whispertype.android.ui.theme.StatAccents
 import com.whispertype.android.ui.theme.WhisperTypeTheme
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
@@ -313,32 +323,61 @@ class MainActivity : ComponentActivity() {
                     NavigationBarItem(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
-                        icon = { Icon(Icons.Filled.Home, contentDescription = null) },
+                        icon = {
+                            Icon(
+                                if (selectedTab == 0) Icons.Filled.Home else Icons.Outlined.Home,
+                                contentDescription = null,
+                            )
+                        },
                         label = { Text(stringResource(R.string.nav_home)) },
                     )
                     NavigationBarItem(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
-                        icon = { Icon(Icons.Filled.History, contentDescription = null) },
+                        icon = {
+                            Icon(
+                                if (selectedTab == 1) Icons.Filled.History else Icons.Outlined.History,
+                                contentDescription = null,
+                            )
+                        },
                         label = { Text(stringResource(R.string.nav_history)) },
                     )
                     NavigationBarItem(
                         selected = selectedTab == 2,
                         onClick = { selectedTab = 2 },
-                        icon = { Icon(Icons.Filled.Book, contentDescription = null) },
+                        icon = {
+                            Icon(
+                                if (selectedTab == 2) Icons.Filled.Book else Icons.Outlined.Book,
+                                contentDescription = null,
+                            )
+                        },
                         label = { Text(stringResource(R.string.nav_dictionary)) },
                     )
                     NavigationBarItem(
                         selected = selectedTab == 3,
                         onClick = { selectedTab = 3 },
-                        icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                        icon = {
+                            Icon(
+                                if (selectedTab == 3) Icons.Filled.Settings else Icons.Outlined.Settings,
+                                contentDescription = null,
+                            )
+                        },
                         label = { Text(stringResource(R.string.nav_settings)) },
                     )
                 }
             },
         ) { padding ->
             Box(Modifier.padding(padding)) {
-                when (selectedTab) {
+                AnimatedContent(
+                    targetState = selectedTab,
+                    transitionSpec = {
+                        val forward = targetState > initialState
+                        (slideInHorizontally { if (forward) it / 6 else -it / 6 } + fadeIn()) togetherWith
+                            (slideOutHorizontally { if (forward) -it / 6 else it / 6 } + fadeOut())
+                    },
+                    label = "homeDestination",
+                ) { tab ->
+                    when (tab) {
                     1 -> HistoryScreen(
                         historyRepository = historyRepository,
                         settings = settings,
@@ -381,7 +420,13 @@ class MainActivity : ComponentActivity() {
                                 entries = historyEntries,
                             )
                             Spacer(Modifier.height(24.dp))
-                            Card(modifier = Modifier.fillMaxWidth()) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = MaterialTheme.shapes.large,
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                ),
+                            ) {
                                 Column(modifier = Modifier.padding(8.dp)) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
@@ -479,6 +524,7 @@ class MainActivity : ComponentActivity() {
                             Spacer(Modifier.height(16.dp))
                         }
                     }
+                    }
                 }
             }
         }
@@ -496,7 +542,7 @@ class MainActivity : ComponentActivity() {
                 contentDescription = null,
                 modifier = Modifier
                     .size(64.dp)
-                    .clip(RoundedCornerShape(16.dp)),
+                    .clip(MaterialTheme.shapes.medium),
                 contentScale = ContentScale.Crop,
             )
             Column {
@@ -528,9 +574,9 @@ class MainActivity : ComponentActivity() {
             modifier = modifier
                 .height(60.dp)
                 .then(if (fixable) Modifier.clickable { onFix() } else Modifier),
-            shape = RoundedCornerShape(12.dp),
+            shape = MaterialTheme.shapes.small,
             color = when {
-                on -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                on -> MaterialTheme.colorScheme.surfaceContainerHigh
                 else -> MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
             },
         ) {
@@ -648,7 +694,13 @@ class MainActivity : ComponentActivity() {
         historyEnabled: Boolean,
         entries: List<com.whispertype.android.data.history.HistoryRepository.HistoryEntry>,
     ) {
-        Card(modifier = Modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.large,
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            ),
+        ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
                     text = stringResource(R.string.home_stats_title),
@@ -667,32 +719,32 @@ class MainActivity : ComponentActivity() {
                         StatTileData(
                             value = HistoryStats.sessions(entries).toString(),
                             label = stringResource(R.string.home_stats_sessions),
-                            color = Color(0xFF0E9B8A),
+                            color = StatAccents.Teal,
                         ),
                         StatTileData(
                             value = HistoryStats.totalWords(entries).toString(),
                             label = stringResource(R.string.home_stats_words),
-                            color = Color(0xFF3B82F6),
+                            color = StatAccents.Blue,
                         ),
                         StatTileData(
                             value = HistoryStats.todayWords(entries, now).toString(),
                             label = stringResource(R.string.home_stats_today),
-                            color = Color(0xFFF59E0B),
+                            color = StatAccents.Amber,
                         ),
                         StatTileData(
                             value = HistoryStats.weekWords(entries, now).toString(),
                             label = stringResource(R.string.home_stats_week),
-                            color = Color(0xFF8B5CF6),
+                            color = StatAccents.Violet,
                         ),
                         StatTileData(
                             value = HistoryStats.wordsPerMinute(entries)?.roundToInt()?.toString() ?: "—",
                             label = stringResource(R.string.home_stats_wpm),
-                            color = Color(0xFFF43F5E),
+                            color = StatAccents.Rose,
                         ),
                         StatTileData(
                             value = HistoryStats.wordsPerSession(entries).toString(),
                             label = stringResource(R.string.home_stats_per_session),
-                            color = Color(0xFF22C55E),
+                            color = StatAccents.Green,
                         ),
                     )
                     stats.chunked(2).forEach { row ->
@@ -723,7 +775,7 @@ class MainActivity : ComponentActivity() {
     private fun StatTile(data: StatTileData, modifier: Modifier = Modifier) {
         Surface(
             modifier = modifier.height(72.dp),
-            shape = RoundedCornerShape(12.dp),
+            shape = MaterialTheme.shapes.small,
             color = data.color.copy(alpha = 0.12f),
         ) {
             Box(

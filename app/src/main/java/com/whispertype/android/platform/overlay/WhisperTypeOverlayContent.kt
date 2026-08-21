@@ -205,7 +205,7 @@ private val SquircleShape = RoundedCornerShape(percent = 28)
 private fun PanelSurface(content: @Composable () -> Unit) {
     Surface(
         modifier = Modifier.testTag(stringResource(R.string.test_tag_panel)),
-        shape = RoundedCornerShape(16.dp),
+        shape = MaterialTheme.shapes.large,
         color = WhisperTypeColors.SurfaceRaised,
         tonalElevation = 4.dp,
     ) {
@@ -243,6 +243,7 @@ private fun ListeningCapsule(
             RealTimeWaveform(
                 amplitude = amplitude,
                 modifier = Modifier.size(width = 72.dp, height = 52.dp),
+                lineColor = WhisperTypeColors.OnSurface.copy(alpha = 0.9f),
                 isListening = true,
             )
             PillAction(
@@ -279,6 +280,7 @@ private fun StartingCapsule(onIntent: (OverlayIntent) -> Unit) {
             RealTimeWaveform(
                 amplitude = 0f,
                 modifier = Modifier.size(width = 72.dp, height = 52.dp),
+                lineColor = WhisperTypeColors.OnSurface.copy(alpha = 0.9f),
                 isListening = false,
             )
         }
