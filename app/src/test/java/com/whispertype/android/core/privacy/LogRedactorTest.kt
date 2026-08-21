@@ -53,6 +53,23 @@ class LogRedactorTest {
         assertTrue(out.contains(LogRedactor.REDACTED_PLACEHOLDER))
     }
 
+    @Test
+    fun `bare Groq gsk_ key is redacted`() {
+        // The underscore stops the generic high-entropy rule from matching, so
+        // only the dedicated gsk_ shape rule can catch it.
+        val key = "gsk_9f8e7d6c5b4a3928172635647382910ab"
+        val out = redactor.sanitize("groq key $key end")
+        assertFalse(out.contains(key))
+        assertEquals("groq key [REDACTED] end", out)
+    }
+
+    @Test
+    fun `short bearer token of eight chars is redacted`() {
+        assertEquals("Bearer [REDACTED]", redactor.sanitize("Bearer abc12345"))
+        // Still below the threshold: preserved.
+        assertEquals("Bearer abc123", redactor.sanitize("Bearer abc123"))
+    }
+
     // ------------------------------------------------------------------
     // Authenticated URLs
     // ------------------------------------------------------------------
@@ -96,6 +113,15 @@ class LogRedactorTest {
         val line = "https://ws.example.com/socket?token=rt-9f8e7d6c&channel=a"
         val out = redactor.sanitize(line)
         assertEquals("https://ws.example.com/socket?token=[REDACTED]&channel=a", out)
+    }
+
+    @Test
+    fun `percent-encoded api_key query name is redacted`() {
+        // %5F is an encoded underscore: the name must be decoded before the
+        // sensitive-name match, or the secret slips through.
+        val line = "https://api.example.com/v1?api%5Fkey=supersecret123&x=1"
+        val out = redactor.sanitize(line)
+        assertEquals("https://api.example.com/v1?api%5Fkey=[REDACTED]&x=1", out)
     }
 
     // ------------------------------------------------------------------
@@ -187,6 +213,14 @@ class LogRedactorTest {
     fun `hyphenated uuid is preserved (not mistaken for a secret)`() {
         val uuid = "550e8400-e29b-41d4-a716-446655440000"
         val line = "correlation $uuid"
+        assertEquals(line, redactor.sanitize(line))
+    }
+
+    @Test
+    fun `benign assignment whose name merely contains a secret word is preserved`() {
+        // "monkey" ends in "key"; the word boundary must stop the assignment
+        // rule from redacting it.
+        val line = "monkey=12345678"
         assertEquals(line, redactor.sanitize(line))
     }
 

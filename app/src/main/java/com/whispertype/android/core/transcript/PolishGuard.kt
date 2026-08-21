@@ -70,8 +70,11 @@ object PolishGuard {
         // delimiters, which splits "मैं" into fragments and breaks every length
         // and retention ratio in Hinglish mode.
         val crossScript = isCrossScript(raw, language)
+        // Fillers are filtered from BOTH sides: a faithful reply may keep the
+        // speaker's own "um", and counting it only against the polished side
+        // would fail the length/invention budgets at strict styles.
         val rawWords = scriptWords(raw).filterNot { it in FILLERS }
-        val polishedWords = scriptWords(polished)
+        val polishedWords = scriptWords(polished).filterNot { it in FILLERS }
         if (rawWords.isEmpty()) return Verdict.Accept
 
         val lengthRatio = polishedWords.size.toDouble() / rawWords.size

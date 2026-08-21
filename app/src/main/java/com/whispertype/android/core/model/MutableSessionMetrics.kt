@@ -16,7 +16,11 @@ import java.util.concurrent.atomic.AtomicReferenceArray
  *
  * Legacy mutable properties remain available for source compatibility. Concurrent
  * producers must use the atomic `increment*` / `record*` methods rather than a
- * read-modify-write expression such as `capturedFrames++`.
+ * read-modify-write expression such as `capturedFrames++`. The legacy `*At`
+ * setters are deprecated (warning level): direct assignment overwrites the
+ * timestamp array unconditionally and can clobber [markIfFirst] CAS semantics,
+ * so producers should use [markIfFirst] / [mark] instead. Reading them stays
+ * supported.
  */
 class MutableSessionMetrics(
     val sessionId: SessionId,
@@ -74,147 +78,350 @@ class MutableSessionMetrics(
 
     var tapAt: Long?
         get() = timestamp(Event.Tap)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.Tap, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.Tap, value)
     var keyLoadStartedAt: Long?
         get() = timestamp(Event.KeyLoadStarted)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.KeyLoadStarted, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.KeyLoadStarted, value)
     var keyLoadedAt: Long?
         get() = timestamp(Event.KeyLoaded)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.KeyLoaded, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.KeyLoaded, value)
     var settingsReadyAt: Long?
         get() = timestamp(Event.SettingsReady)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.SettingsReady, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.SettingsReady, value)
     var socketCreatedAt: Long?
         get() = timestamp(Event.SocketCreated)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.SocketCreated, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.SocketCreated, value)
     var socketOpenAt: Long?
         get() = timestamp(Event.SocketOpen)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.SocketOpen, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.SocketOpen, value)
     var setupCompleteAt: Long?
         get() = timestamp(Event.SetupComplete)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.SetupComplete, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.SetupComplete, value)
     var captureStartRequestedAt: Long?
         get() = timestamp(Event.CaptureStartRequested)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.CaptureStartRequested, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.CaptureStartRequested, value)
     var captureStartedAt: Long?
         get() = timestamp(Event.CaptureStarted)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.CaptureStarted, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.CaptureStarted, value)
     var activityStartQueuedAt: Long?
         get() = timestamp(Event.ActivityStartQueued)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.ActivityStartQueued, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.ActivityStartQueued, value)
     var firstAudioQueuedAt: Long?
         get() = timestamp(Event.FirstAudioQueued)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.FirstAudioQueued, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.FirstAudioQueued, value)
     var firstInputTranscriptAt: Long?
         get() = timestamp(Event.FirstInputTranscript)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.FirstInputTranscript, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.FirstInputTranscript, value)
     var lastInputTranscriptAt: Long?
         get() = timestamp(Event.LastInputTranscript)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.LastInputTranscript, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.LastInputTranscript, value)
     var stopAt: Long?
         get() = timestamp(Event.Stop)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.Stop, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.Stop, value)
     var captureQuiescedAt: Long?
         get() = timestamp(Event.CaptureQuiesced)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.CaptureQuiesced, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.CaptureQuiesced, value)
     var lastAudioQueuedAt: Long?
         get() = timestamp(Event.LastAudioQueued)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.LastAudioQueued, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.LastAudioQueued, value)
     var activityEndQueuedAt: Long?
         get() = timestamp(Event.ActivityEndQueued)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.ActivityEndQueued, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.ActivityEndQueued, value)
     var turnCompleteAt: Long?
         get() = timestamp(Event.TurnComplete)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.TurnComplete, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.TurnComplete, value)
     var transcriptSettledAt: Long?
         get() = timestamp(Event.TranscriptSettled)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.TranscriptSettled, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.TranscriptSettled, value)
     var insertionRequestedAt: Long?
         get() = timestamp(Event.InsertionRequested)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.InsertionRequested, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.InsertionRequested, value)
     var insertionResultAt: Long?
         get() = timestamp(Event.InsertionResult)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.InsertionResult, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.InsertionResult, value)
     var copiedToClipboardAt: Long?
         get() = timestamp(Event.CopiedToClipboard)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.CopiedToClipboard, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.CopiedToClipboard, value)
     var warmSessionResolvedAt: Long?
         get() = timestamp(Event.WarmSessionResolved)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.WarmSessionResolved, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.WarmSessionResolved, value)
     var firstEchoAt: Long?
         get() = timestamp(Event.FirstEcho)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.FirstEcho, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.FirstEcho, value)
     var lastEchoAt: Long?
         get() = timestamp(Event.LastEcho)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.LastEcho, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.LastEcho, value)
     var generationCompleteAt: Long?
         get() = timestamp(Event.GenerationComplete)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.GenerationComplete, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.GenerationComplete, value)
     var repairStartedAt: Long?
         get() = timestamp(Event.RepairStarted)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.RepairStarted, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.RepairStarted, value)
     var repairCompletedAt: Long?
         get() = timestamp(Event.RepairCompleted)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.RepairCompleted, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.RepairCompleted, value)
     var targetReservationStartedAt: Long?
         get() = timestamp(Event.TargetReservationStarted)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.TargetReservationStarted, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.TargetReservationStarted, value)
     var targetReservationCompletedAt: Long?
         get() = timestamp(Event.TargetReservationCompleted)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.TargetReservationCompleted, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.TargetReservationCompleted, value)
     var insertionIpcReceivedAt: Long?
         get() = timestamp(Event.InsertionIpcReceived)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.InsertionIpcReceived, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.InsertionIpcReceived, value)
     var insertionCommitStartedAt: Long?
         get() = timestamp(Event.InsertionCommitStarted)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.InsertionCommitStarted, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.InsertionCommitStarted, value)
     var insertionCommitCompletedAt: Long?
         get() = timestamp(Event.InsertionCommitCompleted)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.InsertionCommitCompleted, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.InsertionCommitCompleted, value)
     var insertionReplySentAt: Long?
         get() = timestamp(Event.InsertionReplySent)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.InsertionReplySent, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.InsertionReplySent, value)
     var insertionReplyReceivedAt: Long?
         get() = timestamp(Event.InsertionReplyReceived)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.InsertionReplyReceived, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.InsertionReplyReceived, value)
     var quietBarrierSatisfiedAt: Long?
         get() = timestamp(Event.QuietBarrierSatisfied)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.QuietBarrierSatisfied, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.QuietBarrierSatisfied, value)
     var terminalAt: Long?
         get() = timestamp(Event.Terminal)
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.Terminal, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
         set(value) = setTimestamp(Event.Terminal, value)
 
     /** Explicit revision/phase aliases retained alongside legacy names. */
     var firstInputRevisionAt: Long?
         get() = firstInputTranscriptAt
-        set(value) {
-            firstInputTranscriptAt = value
-        }
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.FirstInputTranscript, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
+        set(value) = setTimestamp(Event.FirstInputTranscript, value)
     var lastInputRevisionAt: Long?
         get() = lastInputTranscriptAt
-        set(value) {
-            lastInputTranscriptAt = value
-        }
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.LastInputTranscript, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
+        set(value) = setTimestamp(Event.LastInputTranscript, value)
     var firstEchoRevisionAt: Long?
         get() = firstEchoAt
-        set(value) {
-            firstEchoAt = value
-        }
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.FirstEcho, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
+        set(value) = setTimestamp(Event.FirstEcho, value)
     var lastEchoRevisionAt: Long?
         get() = lastEchoAt
-        set(value) {
-            lastEchoAt = value
-        }
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.LastEcho, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
+        set(value) = setTimestamp(Event.LastEcho, value)
     var warmClaimResolvedAt: Long?
         get() = warmSessionResolvedAt
-        set(value) {
-            warmSessionResolvedAt = value
-        }
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.WarmSessionResolved, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
+        set(value) = setTimestamp(Event.WarmSessionResolved, value)
     var repairEndedAt: Long?
         get() = repairCompletedAt
-        set(value) {
-            repairCompletedAt = value
-        }
+        @Deprecated(
+            "Legacy direct assignment bypasses first-mark CAS semantics; " +
+                "use markIfFirst(Event.RepairCompleted, atNanos) instead.",
+            level = DeprecationLevel.WARNING,
+        )
+        set(value) = setTimestamp(Event.RepairCompleted, value)
 
     private val capturedFramesValue = AtomicLong()
     private val acceptedFramesValue = AtomicLong()
@@ -571,6 +778,18 @@ class MutableSessionMetrics(
         if (!terminalOutcomeValue.compareAndSet(null, outcome)) return false
         markIfFirst(Event.Terminal, atNanos)
         return true
+    }
+
+    /**
+     * Replaces an already-recorded terminal outcome. Only for user-driven
+     * resolutions that supersede an earlier typed failure — e.g. Copy chosen
+     * on the ambiguous-insertion panel, mirroring the automatic clipboard
+     * fallback which records COPIED_TO_CLIPBOARD for the same situation.
+     * Regular outcomes stay first-wins via [recordTerminalOutcome].
+     */
+    fun overrideTerminalOutcome(outcome: TerminalOutcome) {
+        terminalOutcomeValue.set(outcome)
+        markIfFirst(Event.Terminal, nowNanos())
     }
 
     /** Compatibility entry point; [size] is bytes despite the legacy name. */

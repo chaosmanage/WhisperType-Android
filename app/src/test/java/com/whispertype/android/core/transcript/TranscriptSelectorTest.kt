@@ -357,6 +357,20 @@ class TranscriptSelectorTest {
     }
 
     @Test
+    fun `diagnose returns EXPANDED when only the expansion guard rejects`() {
+        // The cleaned text is valid on its own; only the implausible-expansion
+        // guard blocks it, and diagnose must still be able to say so.
+        val expanded = candidate(
+            raw = "go",
+            cleaned = "please go to the store and buy some milk and some bread and some eggs and more",
+        )
+        assertTrue(selector.select(listOf(expanded)) is TranscriptSelection.Raw)
+        val result = selector.diagnose(listOf(expanded))
+        assertEquals(RejectionRule.EXPANDED, result?.rule)
+        assertEquals("go", selector.select(listOf(expanded)).text)
+    }
+
+    @Test
     fun `diagnose follows the same cleaned then raw order as select`() {
         // Cleaned fails but raw is usable: select returns Raw, diagnose null.
         val cleanedInvalid = candidate(raw = "hello world", cleaned = "!!!")

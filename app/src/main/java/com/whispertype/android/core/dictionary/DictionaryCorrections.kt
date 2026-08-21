@@ -51,7 +51,16 @@ object DictionaryCorrections {
     private fun hasBoundaryAfter(text: String, index: Int): Boolean =
         index == text.length || !text[index].isLetterOrDigit()
 
-    /** Capitalizes the first letter of [replacement] when [firstChar] is uppercase. */
+    /**
+     * Capitalizes the first letter of [replacement] when [firstChar] is
+     * uppercase — but only for all-lowercase replacements. Mixed-case
+     * replacements ("iphone" -> "iPhone") carry their own canonical casing and
+     * are left untouched.
+     */
     private fun preserveCase(firstChar: Char, replacement: String): String =
-        if (firstChar.isUpperCase()) replacement.replaceFirstChar { it.titlecase() } else replacement
+        if (firstChar.isUpperCase() && replacement.none { it.isUpperCase() }) {
+            replacement.replaceFirstChar { it.titlecase() }
+        } else {
+            replacement
+        }
 }

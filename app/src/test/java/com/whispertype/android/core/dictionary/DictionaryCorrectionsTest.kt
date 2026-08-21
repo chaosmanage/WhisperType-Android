@@ -21,6 +21,15 @@ class DictionaryCorrectionsTest {
     }
 
     @Test
+    fun `mixed-case replacements keep their canonical casing`() {
+        // Sentence-initial "IPhone" must not double-capitalize a replacement
+        // that already carries its own casing.
+        val entries = listOf(DictionaryEntry("iphone", "iPhone"))
+        assertEquals("iPhone is great", DictionaryCorrections.apply("IPhone is great", entries))
+        assertEquals("an iPhone", DictionaryCorrections.apply("an iphone", entries))
+    }
+
+    @Test
     fun `matches only on word boundaries`() {
         assertEquals("the dog sat", DictionaryCorrections.apply("the cat sat", catToDog))
         assertEquals("dog!", DictionaryCorrections.apply("cat!", catToDog))

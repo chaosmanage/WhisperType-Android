@@ -67,27 +67,42 @@ class TranscriptSelector {
      * Returns the first rejection rule that would make [select] return
      * [TranscriptSelection.None], or null when [select] would succeed. Mirrors
      * [select]'s two-pass order (cleaned then raw): the first rejection
-     * encountered in that order wins. For logging only; never includes
+     * encountered in that order wins. An implausible-expansion skip of the
+     * cleaned tier is reported even when the raw fallback succeeds — it
+     * explains why select fell back to Raw. For logging only; never includes
      * transcript text.
      */
     fun diagnose(candidates: List<ResultCandidate>): RejectionDiagnosis? {
-        var firstFailure: RejectionDiagnosis? = null
+        var ruleFailure: RejectionDiagnosis? = null
+        var expandedFailure: RejectionDiagnosis? = null
         // Pass 1 (cleaned tier) — same order as [select].
         for (c in candidates) {
             val cleaned = c.cleaned
             if (cleaned != null) {
                 val failure = reject(cleaned, c.language)
-                if (failure == null && !isImplausiblyExpanded(c)) return null
-                if (firstFailure == null) firstFailure = failure
+                if (failure == null) {
+                    if (!isImplausiblyExpanded(c)) return null
+                    if (expandedFailure == null) {
+                        expandedFailure = RejectionDiagnosis(
+                            rule = RejectionRule.EXPANDED,
+                            wordCount = TranscriptCompleteness.contentWords(cleaned).size,
+                            charCount = cleaned.length,
+                            hasDevanagari = containsDevanagari(cleaned),
+                        )
+                    }
+                } else if (ruleFailure == null) {
+                    ruleFailure = failure
+                }
             }
         }
-        // Pass 2 (raw tier) — same order as [select].
+        // Pass 2 (raw tier) — same order as [select]. A usable raw resolves
+        // the selection as Raw; only an expansion-skip explanation survives.
         for (c in candidates) {
             val failure = reject(c.raw, c.language)
-            if (failure == null) return null
-            if (firstFailure == null) firstFailure = failure
+            if (failure == null) return expandedFailure
+            if (ruleFailure == null && expandedFailure == null) ruleFailure = failure
         }
-        return firstFailure
+        return ruleFailure ?: expandedFailure
     }
 
     /**
@@ -210,8 +225,10 @@ sealed interface TranscriptSelection {
 /**
  * Which rejection rule invalidated a transcript candidate. Used by
  * [TranscriptSelector.diagnose] to log WHY a session produced no selection.
+ * [EXPANDED] is diagnosed only in the cleaned tier, when the text itself was
+ * valid but the implausible-expansion guard rejected it.
  */
-enum class RejectionRule { BLANK, PUNCTUATION_ONLY, GARBLED, DEVANAGARI }
+enum class RejectionRule { BLANK, PUNCTUATION_ONLY, GARBLED, DEVANAGARI, EXPANDED }
 
 /**
  * Diagnostics for a rejected candidate: the first [RejectionRule] that fired

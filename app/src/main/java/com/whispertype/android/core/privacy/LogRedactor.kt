@@ -15,12 +15,14 @@ package com.whispertype.android.core.privacy
  *
  * ## What is auto-redacted
  *  1. Bearer tokens and `Authorization` / `x-api-key` header values.
- *  2. Authenticated URLs: `scheme://user:pass@host/...` -> `scheme://[REDACTED]@host/...`
+ *  2. Bare Groq API keys (`gsk_...`).
+ *  3. Authenticated URLs: `scheme://user:pass@host/...` -> `scheme://[REDACTED]@host/...`
  *     and sensitive query params (`?key=`, `?api_key=`, `?token=`,
- *     `?access_token=`, `?X-Goog-Api-Key=`, ...) -> `?name=[REDACTED]`.
- *  3. High-entropy secret-looking tokens (mixed-case alphanumeric runs of at
+ *     `?access_token=`, `?X-Goog-Api-Key=`, and their percent-encoded name
+ *     variants such as `?api%5Fkey=`) -> `?name=[REDACTED]`.
+ *  4. High-entropy secret-looking tokens (mixed-case alphanumeric runs of at
  *     least [HIGH_ENTROPY_MIN_LENGTH] chars) -> `[REDACTED]`.
- *  4. Raw-audio markers: `pcm16=<hex>` blobs and very long base64 byte blobs
+ *  5. Raw-audio markers: `pcm16=<hex>` blobs and very long base64 byte blobs
  *     (at least [LONG_BASE64_MIN_LENGTH] chars) representing raw audio.
  *
  * ## Transcript / editor / AccessibilityNode / clipboard content
@@ -65,7 +67,8 @@ object LogRedactor {
     )
 
     /**
-     * Sensitive query-parameter names, case-insensitive. Covers `?key=`,
+     * Sensitive query-parameter names, case-insensitive, matched against the
+     * *decoded* candidate name (see [decodeQueryParamName]). Covers `?key=`,
      * `?api_key=`, `?apikey=`, `?x-api-key=`, `?X-Goog-Api-Key=`, `?token=`,
      * `?access_token=`, `?client_secret=`, etc.
      */
@@ -73,14 +76,23 @@ object LogRedactor {
         """api[_-]?key|apikey|x-api-key|x-goog-api-key|access[_-]?token|auth[_-]?token|""" +
             """client[_-]?secret|token|key|secret|password|passwd|sig|signature"""
 
+    private val QUERY_PARAM_NAME_REGEX = Regex(QUERY_PARAM_NAMES, RegexOption.IGNORE_CASE)
+
     /**
-     * Sensitive query parameter `?name=value` (also `&name=` mid-URL). Only the
-     * value is replaced; the param name and the rest of the URL are preserved.
+     * Any `name=value` query parameter (`?` or `&` prefixed). Only values whose
+     * decoded name matches [QUERY_PARAM_NAME_REGEX] are replaced; the param
+     * name and the rest of the URL are preserved.
      */
-    private val QUERY_PARAM_SECRET_REGEX = Regex(
-        """([?&])($QUERY_PARAM_NAMES)=([^&\s"']*)""",
-        RegexOption.IGNORE_CASE,
+    private val QUERY_PARAM_REGEX = Regex(
+        """([?&])([A-Za-z0-9_.%-]+)=([^&\s"']*)""",
     )
+
+    /**
+     * Percent-encoded characters that URL encoders substitute inside *names* to
+     * dodge sensitive-name matching: `%5F` -> `_`, `%2D` -> `-`, `%2E` -> `.`.
+     * Only names are decoded — never values (full URL decoding would over-decode).
+     */
+    private val PERCENT_ENCODED_CHAR_REGEX = Regex("""%[0-9A-Fa-f]{2}""")
 
     /**
      * Generic `name=value` / `name: value` secret assignment in free text
@@ -88,7 +100,7 @@ object LogRedactor {
      * alphabet) is replaced, keeping the key name for readability.
      */
     private val SECRET_ASSIGNMENT_REGEX = Regex(
-        """(?i)(api[_-]?key|apikey|x-api-key|access[_-]?token|auth[_-]?token|""" +
+        """(?i)\b(api[_-]?key|apikey|x-api-key|access[_-]?token|auth[_-]?token|""" +
             """client[_-]?secret|secret|password|passwd|token|key)\s*[:=]\s*""" +
             """["']?[A-Za-z0-9._~+/=\-]{8,}["']?""",
     )
@@ -98,8 +110,15 @@ object LogRedactor {
      * is a broad token alphabet (may include `.`, `_`, `-`, `+`, `/`, `=`).
      */
     private val BEARER_TOKEN_REGEX = Regex(
-        """(?i)(\bBearer\s+)([A-Za-z0-9._~+/=-]{12,})""",
+        """(?i)(\bBearer\s+)([A-Za-z0-9._~+/=-]{8,})""",
     )
+
+    /**
+     * Bare Groq API keys (`gsk_...`). The generic high-entropy rule cannot see
+     * them: `_` is a word character, so `\b[A-Za-z0-9]{32,}\b` never matches
+     * inside a `gsk_` run — hence this dedicated shape rule.
+     */
+    private val GROQ_KEY_REGEX = Regex("""(?i)\bgsk_[A-Za-z0-9_-]{16,}""")
 
     /**
      * Raw-audio `pcm16=<hex>` marker. Redacts only the hex value while keeping
@@ -129,8 +148,8 @@ object LogRedactor {
     /**
      * Redacts a raw [line] into a safe-to-log string by applying every rule:
      * authenticated-URL credentials, sensitive URL query params, bearer /
-     * header secrets, raw-audio markers, long base64 blobs, secret assignments,
-     * and high-entropy token runs. Benign content is preserved.
+     * header secrets, Groq keys, raw-audio markers, long base64 blobs, secret
+     * assignments, and high-entropy token runs. Benign content is preserved.
      */
     fun sanitize(line: String): String {
         // Apply rules in a stable order so the result is deterministic.
@@ -138,6 +157,7 @@ object LogRedactor {
             .redactAuthenticatedUrls()
             .redactSensitiveQueryParams()
             .redactBearerTokens()
+            .redactGroqKeys()
             .redactPcm16Markers()
             .redactLongRawAudioBase64()
             .redactSecretAssignments()
@@ -180,10 +200,30 @@ object LogRedactor {
             m.groupValues[1] + REDACTED_PLACEHOLDER + "@"
         }
 
-    /** `?name=secret` -> `?name=[REDACTED]` (keeps name and URL). */
+    /**
+     * `?name=secret` -> `?name=[REDACTED]` (keeps name and URL). The candidate
+     * name is percent-decoded before the sensitive-name match so encoded
+     * spellings such as `?api%5Fkey=` cannot bypass it.
+     */
     private fun String.redactSensitiveQueryParams(): String =
-        QUERY_PARAM_SECRET_REGEX.replace(this) { m ->
-            m.groupValues[1] + m.groupValues[2] + "=" + REDACTED_PLACEHOLDER
+        QUERY_PARAM_REGEX.replace(this) { m ->
+            val decodedName = decodeQueryParamName(m.groupValues[2])
+            if (QUERY_PARAM_NAME_REGEX.matches(decodedName)) {
+                m.groupValues[1] + m.groupValues[2] + "=" + REDACTED_PLACEHOLDER
+            } else {
+                m.value
+            }
+        }
+
+    /** Targeted percent-decoding of parameter *names* only (see [PERCENT_ENCODED_CHAR_REGEX]). */
+    private fun decodeQueryParamName(name: String): String =
+        PERCENT_ENCODED_CHAR_REGEX.replace(name) { m ->
+            when (m.value.uppercase()) {
+                "%5F" -> "_"
+                "%2D" -> "-"
+                "%2E" -> "."
+                else -> m.value
+            }
         }
 
     /** `Bearer token` / `Authorization: Bearer token` -> `Bearer [REDACTED]`. */
@@ -191,6 +231,10 @@ object LogRedactor {
         BEARER_TOKEN_REGEX.replace(this) { m ->
             m.groupValues[1] + REDACTED_PLACEHOLDER
         }
+
+    /** Bare Groq `gsk_...` keys -> [REDACTED]. */
+    private fun String.redactGroqKeys(): String =
+        GROQ_KEY_REGEX.replace(this, REDACTED_PLACEHOLDER)
 
     /** `pcm16=<hex>` -> `pcm16=[REDACTED]`. */
     private fun String.redactPcm16Markers(): String =

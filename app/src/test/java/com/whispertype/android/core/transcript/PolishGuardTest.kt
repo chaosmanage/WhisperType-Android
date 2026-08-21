@@ -132,6 +132,15 @@ class PolishGuardTest {
         assertIs<PolishGuard.Verdict.Accept>(verdict(raw, polished, TranscriptionStyle.LOW))
     }
 
+    @Test
+    fun `a faithful reply keeping the speaker's filler passes strict styles`() {
+        // The polished text keeps the raw's own "um"; fillers are ignored on
+        // both sides so the reply is neither too long nor invented.
+        val raw = "um what time is it"
+        val polished = "Um, what time is it?"
+        assertIs<PolishGuard.Verdict.Accept>(verdict(raw, polished, TranscriptionStyle.NONE))
+    }
+
     // ------------------------------------------------------------------
     // Hinglish (cross-script)
     // ------------------------------------------------------------------
