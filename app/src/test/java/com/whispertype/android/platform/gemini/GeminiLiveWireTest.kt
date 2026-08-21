@@ -133,6 +133,17 @@ class GeminiLiveWireTest {
     }
 
     @Test
+    fun `buildAudioChunk emits the exact compact wire bytes`() {
+        // The hot-path builder assembles this string by hand; it must stay
+        // byte-identical to the kotlinx.serialization form (compact, insertion
+        // order: data then mimeType).
+        assertEquals(
+            """{"realtimeInput":{"audio":{"data":"AQIDBA==","mimeType":"audio/pcm;rate=16000"}}}""",
+            GeminiLiveWire.buildAudioChunk("AQIDBA==", 16_000),
+        )
+    }
+
+    @Test
     fun `buildRealtimeText uses realtimeInput text and no clientContent`() {
         val root = Json.parseToJsonElement(GeminiLiveWire.buildRealtimeText("ongoing text")).jsonObject
         assertEquals("ongoing text", root["realtimeInput"]!!.jsonObject["text"]!!.jsonPrimitive.content)

@@ -139,6 +139,76 @@ class GroqTextPolisherTest {
     }
 
     @Test
+    fun `every Devanagari block keeps Hinglish instructions in Hinglish mode`() = runBlocking {
+        // Devanagari, Devanagari Extended, and Vedic Extensions — one char each.
+        listOf(
+            '\u0905', // अ — Devanagari (U+0900-U+097F)
+            '\uA8E2', // Devanagari Extended (U+A8E0-U+A8FF)
+            '\u1CD3', // Vedic Extensions (U+1CD0-U+1CFF)
+        ).forEach { devanagari ->
+            server.enqueue(
+                MockResponse.Builder()
+                    .code(200)
+                    .addHeader("Content-Type", "application/json")
+                    .body("""{"choices":[{"message":{"content":"Main abhi office ja raha hoon."}}]}""")
+                    .build(),
+            )
+            val polish = polisher(this, language = LanguageMode.HINGLISH)
+
+            val (outcome, _) = drive(this, polish, text = "main $devanagari bol raha hoon")
+
+            assertEquals(PolishOutcome.SUCCESS, outcome)
+            val body = server.takeRequest().body!!.utf8()
+            assertTrue(
+                body.contains("Output Latin script only"),
+                "U+%04X must keep Hinglish romanization instructions".format(devanagari.code),
+            )
+        }
+    }
+
+    @Test
+    fun `quoted reply is unwrapped only after a preamble line`() = runBlocking {
+        // The preamble proves the model packaged the answer; the surrounding
+        // quotes are part of that packaging and are stripped with it.
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("""{"choices":[{"message":{"content":"Here is the polished text:\n\"hello world\""}}]}""")
+                .build(),
+        )
+        val polish = polisher(this)
+        var delivered: String? = null
+        polish.onTranscript = { delivered = it }
+
+        val (outcome, _) = drive(this, polish)
+
+        assertEquals(PolishOutcome.SUCCESS, outcome)
+        assertEquals("hello world", delivered)
+    }
+
+    @Test
+    fun `bare quoted reply without a preamble survives as spoken content`() = runBlocking {
+        // No preamble means no proven packaging: the quotes could be exactly
+        // what the speaker dictated, so the text is left untouched.
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("""{"choices":[{"message":{"content":"\"hello world\""}}]}""")
+                .build(),
+        )
+        val polish = polisher(this)
+        var delivered: String? = null
+        polish.onTranscript = { delivered = it }
+
+        val (outcome, _) = drive(this, polish)
+
+        assertEquals(PolishOutcome.SUCCESS, outcome)
+        assertEquals("\"hello world\"", delivered)
+    }
+
+    @Test
     fun `rate limit is rescued once on the fallback model`() = runBlocking {
         // Free-tier tokens-per-minute is per model (measured: 6,000 TPM on the
         // 8B model), so a 429 is retried once on the fallback model's own budget.

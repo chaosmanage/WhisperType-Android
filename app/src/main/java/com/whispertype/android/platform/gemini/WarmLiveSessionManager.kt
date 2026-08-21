@@ -139,6 +139,12 @@ class WarmLiveSessionManager private constructor(
     data class Config(
         val warmIdleTimeoutMs: Long = 30_000L,
         val backoffStepsMs: List<Long> = listOf(1_000L, 2_000L, 5_000L, 10_000L),
+        /**
+         * Minimum healthy session lifetime that resets the retry backoff. A
+         * flapping endpoint that completes setup and immediately dies must not
+         * pin the pool at the fastest retry forever.
+         */
+        val readyLifetimeFloorMs: Long = 10_000L,
     )
 
     /**
@@ -385,10 +391,13 @@ class WarmLiveSessionManager private constructor(
         try {
             while (isCurrentRun(runId, profile)) {
                 if (!markConnecting(runId, profile)) return
-                val reachedReady = runOneAttempt(runId, profile)
+                val readyLifetimeMs = runOneAttempt(runId, profile)
                 if (!isCurrentRun(runId, profile)) return
 
-                if (reachedReady) backoffIndex = 0
+                // Only a session that stayed healthy for a meaningful lifetime
+                // proves the endpoint recovered; a ready-then-immediate-death
+                // flap keeps climbing the ladder instead of looping at 1 s.
+                if (readyLifetimeMs >= config.readyLifetimeFloorMs) backoffIndex = 0
                 val retryMs = backoffStepsMs[backoffIndex]
                 if (backoffIndex < backoffStepsMs.lastIndex) backoffIndex++
                 if (!markBackoff(runId, profile, retryMs)) return
@@ -406,13 +415,17 @@ class WarmLiveSessionManager private constructor(
         }
     }
 
+    /**
+     * Runs one prewarm attempt. Returns the session's ready lifetime in ms at
+     * attempt end, or -1L when setup never completed.
+     */
     private suspend fun runOneAttempt(
         runId: Long,
         profile: WarmSessionProfile?,
-    ): Boolean {
+    ): Long {
         var rawSession: GeminiLiveSession? = null
         var slot: PoolSlot? = null
-        var reachedReady = false
+        var becameReadyAtMs = -1L
         try {
             val created = sessionCreator.create(profile)
             rawSession = created
@@ -426,7 +439,7 @@ class WarmLiveSessionManager private constructor(
                 rawSession = created,
             )
             slot = candidate
-            if (!installConnectingSlot(candidate)) return false
+            if (!installConnectingSlot(candidate)) return -1L
 
             created.awaitReady()
             currentCoroutineContext().let { context ->
@@ -438,8 +451,8 @@ class WarmLiveSessionManager private constructor(
                 scope = scope,
                 onIdleTerminal = { onIdleTerminal(candidate) },
             )
-            if (!publishReady(candidate, monitored)) return false
-            reachedReady = true
+            if (!publishReady(candidate, monitored)) return -1L
+            becameReadyAtMs = monotonicTimeMs()
             monitored.startMonitoring()
 
             withTimeout(config.warmIdleTimeoutMs) {
@@ -461,7 +474,7 @@ class WarmLiveSessionManager private constructor(
                 }
             }
         }
-        return reachedReady
+        return if (becameReadyAtMs < 0L) -1L else monotonicTimeMs() - becameReadyAtMs
     }
 
     private fun installConnectingSlot(slot: PoolSlot): Boolean = synchronized(lock) {

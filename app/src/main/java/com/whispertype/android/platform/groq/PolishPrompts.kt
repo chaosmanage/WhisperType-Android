@@ -36,6 +36,9 @@ object PolishPrompts {
     const val TRANSCRIPT_OPEN = "<transcript>"
     const val TRANSCRIPT_CLOSE = "</transcript>"
 
+    /** Matches only the `<` that opens a case-insensitive `</transcript`. */
+    private val CLOSE_TAG_SPOOF = Regex("(?i)<(?=/transcript)")
+
     private const val SYSTEM_HEAD =
         "You are a transcription post-processor, not an assistant. You never hold a conversation.\n\n" +
             "The user turn contains a raw speech transcript wrapped in $TRANSCRIPT_OPEN tags. Your " +
@@ -64,8 +67,16 @@ object PolishPrompts {
         add(PolishMessage("user", wrap(text)))
     }
 
-    /** The transcript is always delimited so it can never read as an instruction. */
-    fun wrap(text: String): String = "$TRANSCRIPT_OPEN\n$text\n$TRANSCRIPT_CLOSE"
+    /**
+     * The transcript is always delimited so it can never read as an instruction.
+     *
+     * A dictated literal `</transcript` (any casing) would terminate the
+     * payload early and let the remainder read as instructions, so inside the
+     * payload its `<` is escaped to `&lt;` — a deterministic transform that
+     * preserves every other character and cannot reassemble into the tag.
+     */
+    fun wrap(text: String): String =
+        "$TRANSCRIPT_OPEN\n${CLOSE_TAG_SPOOF.replace(text, "&lt;")}\n$TRANSCRIPT_CLOSE"
 
     // ------------------------------------------------------------------
     // Rules

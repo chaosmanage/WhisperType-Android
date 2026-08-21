@@ -23,6 +23,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 /**
  * 0.7.0: [TextPolishContract] backed by the Groq chat-completions REST
@@ -63,6 +64,15 @@ class GroqTextPolisher(
     override var onTranscript: ((String) -> Unit)? = null
     override var onUsage: ((Long, Long) -> Unit)? = null
 
+    /**
+     * The shared WebSocket-oriented client has no total-call timeout (the Live
+     * socket must stay open indefinitely). A REST polish call must be bounded
+     * end-to-end, so derive a client with a hard [CALL_TIMEOUT_MS] ceiling;
+     * connection pools and dispatchers are shared with the parent client.
+     */
+    private val boundedClient: OkHttpClient =
+        okHttpClient.newBuilder().callTimeout(CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS).build()
+
     private var attemptJob: Job? = null
     private var inFlight: Call? = null
     private var onOutcome: ((PolishOutcome, Long) -> Unit)? = null
@@ -98,7 +108,7 @@ class GroqTextPolisher(
         modelId: String,
         onRequestStarted: () -> Unit,
     ): PolishOutcome {
-        val call = okHttpClient.newCall(buildRequest(text, modelId))
+        val call = boundedClient.newCall(buildRequest(text, modelId))
         inFlight = call
         onRequestStarted()
         val outcome = awaitOutcome(call)
@@ -142,44 +152,55 @@ class GroqTextPolisher(
     }
 
     private fun effectivePromptLanguage(text: String): LanguageMode =
-        if (languageMode == LanguageMode.HINGLISH && text.none { it in DEVANAGARI_RANGE }) {
+        if (languageMode == LanguageMode.HINGLISH && text.none(::isDevanagari)) {
             LanguageMode.ENGLISH
         } else {
             languageMode
         }
 
+    /** Any Devanagari block the rest of the pipeline recognizes (see core). */
+    private fun isDevanagari(c: Char): Boolean =
+        c in DEVANAGARI_RANGE ||
+            c in DEVANAGARI_EXTENDED_RANGE ||
+            c in VEDIC_EXTENSIONS_RANGE
+
     private suspend fun awaitOutcome(call: Call): PolishOutcome {
-        val response = try {
-            withContext(Dispatchers.IO) { call.execute() }
-        } catch (e: IOException) {
-            return PolishOutcome.NETWORK_ERROR
-        }
-        val bodyText = runCatching { response.body.string() }.getOrNull()
-        response.close()
-        if (!response.isSuccessful) {
-            return when (response.code) {
-                429 -> PolishOutcome.RATE_LIMITED
-                in 500..599 -> PolishOutcome.SERVER_ERROR
-                else -> PolishOutcome.OTHER
+        // Body read, JSON parse, and reply unwrap are blocking CPU/IO work:
+        // they must never run on the caller's (main) dispatcher.
+        val outcome = withContext(Dispatchers.IO) {
+            val response = try {
+                call.execute()
+            } catch (e: IOException) {
+                return@withContext PolishOutcome.NETWORK_ERROR
+            }
+            val bodyText = runCatching { response.body.string() }.getOrNull()
+            response.close()
+            if (!response.isSuccessful) {
+                return@withContext when (response.code) {
+                    429 -> PolishOutcome.RATE_LIMITED
+                    in 500..599 -> PolishOutcome.SERVER_ERROR
+                    else -> PolishOutcome.OTHER
+                }
+            }
+            val parsed = runCatching { Json.parseToJsonElement(bodyText.orEmpty()).jsonObject }.getOrNull()
+            val content = parsed?.get("choices")?.jsonArray
+                ?.firstOrNull()?.jsonObject?.get("message")?.jsonObject
+                ?.get("content")?.jsonPrimitive?.content
+            val usage = parsed?.get("usage")?.jsonObject
+            val promptTokens = usage?.get("prompt_tokens")?.jsonPrimitive?.long
+            val totalTokens = usage?.get("total_tokens")?.jsonPrimitive?.long
+            if (promptTokens != null || totalTokens != null) {
+                onUsage?.invoke(promptTokens ?: 0L, totalTokens ?: 0L)
+            }
+            val cleaned = content?.let(::unwrapModelReply)
+            if (cleaned?.isNotBlank() == true) {
+                onTranscript?.invoke(cleaned)
+                PolishOutcome.SUCCESS
+            } else {
+                PolishOutcome.EMPTY_RESPONSE
             }
         }
-        val parsed = runCatching { Json.parseToJsonElement(bodyText.orEmpty()).jsonObject }.getOrNull()
-        val content = parsed?.get("choices")?.jsonArray
-            ?.firstOrNull()?.jsonObject?.get("message")?.jsonObject
-            ?.get("content")?.jsonPrimitive?.content
-        val usage = parsed?.get("usage")?.jsonObject
-        val promptTokens = usage?.get("prompt_tokens")?.jsonPrimitive?.long
-        val totalTokens = usage?.get("total_tokens")?.jsonPrimitive?.long
-        if (promptTokens != null || totalTokens != null) {
-            onUsage?.invoke(promptTokens ?: 0L, totalTokens ?: 0L)
-        }
-        val cleaned = content?.let(::unwrapModelReply)
-        return if (cleaned?.isNotBlank() == true) {
-            onTranscript?.invoke(cleaned)
-            PolishOutcome.SUCCESS
-        } else {
-            PolishOutcome.EMPTY_RESPONSE
-        }
+        return outcome
     }
 
     /**
@@ -187,20 +208,29 @@ class GroqTextPolisher(
      * "Here is …:" line, or surrounding quotes. This unwraps the *model's*
      * packaging; it never edits the transcript itself (that is the model's job
      * per [PolishPrompts], and over-editing is caught by `PolishGuard`).
+     *
+     * Quotes are stripped only when the preamble line was actually unwrapped —
+     * i.e. the model demonstrably packaged the answer. Spoken quotes in a
+     * bare reply (the speaker dictated `"hello world"`) are legitimate
+     * transcript content and must survive.
      */
     private fun unwrapModelReply(reply: String): String {
         var text = reply.trim()
+        var preambleUnwrapped = false
         val firstBreak = text.indexOf('\n')
         if (firstBreak > 0) {
             val head = text.take(firstBreak).trim()
             if (head.endsWith(":") && head.length <= PREAMBLE_MAX_LENGTH) {
                 text = text.drop(firstBreak + 1).trim()
+                preambleUnwrapped = true
             }
         }
-        val quoted = (text.startsWith("\"") && text.endsWith("\"")) ||
-            (text.startsWith("'") && text.endsWith("'"))
-        if (quoted && text.length >= 2) {
-            text = text.substring(1, text.length - 1).trim()
+        if (preambleUnwrapped) {
+            val quoted = (text.startsWith("\"") && text.endsWith("\"")) ||
+                (text.startsWith("'") && text.endsWith("'"))
+            if (quoted && text.length >= 2) {
+                text = text.substring(1, text.length - 1).trim()
+            }
         }
         return text
     }
@@ -247,7 +277,16 @@ class GroqTextPolisher(
     private companion object {
         const val NANOS_PER_MILLISECOND = 1_000_000L
         const val PREAMBLE_MAX_LENGTH = 60
+
+        /** Hard end-to-end ceiling for one REST polish dial (see [boundedClient]). */
+        const val CALL_TIMEOUT_MS = 10_000L
+
+        // Devanagari (U+0900-U+097F), Devanagari Extended (U+A8E0-U+A8FF), and
+        // Vedic Extensions (U+1CD0-U+1CFF) — the same blocks the rest of the
+        // pipeline treats as Devanagari.
         val DEVANAGARI_RANGE = '\u0900'..'\u097F'
+        val DEVANAGARI_EXTENDED_RANGE = '\uA8E0'..'\uA8FF'
+        val VEDIC_EXTENSIONS_RANGE = '\u1CD0'..'\u1CFF'
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
 }

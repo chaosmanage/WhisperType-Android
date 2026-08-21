@@ -6,7 +6,6 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -34,6 +33,11 @@ object GeminiLiveWire {
         ignoreUnknownKeys = true
         isLenient = false
     }
+
+    // Fixed segments of the audio-chunk frame; see [buildAudioChunk].
+    private const val AUDIO_CHUNK_HEAD = "{\"realtimeInput\":{\"audio\":{\"data\":\""
+    private const val AUDIO_CHUNK_MIME_TAIL = "\",\"mimeType\":\"audio/pcm;rate="
+    private const val AUDIO_CHUNK_CLOSE = "\"}}}"
 
     // ------------------------------------------------------------------
     // Client -> server
@@ -90,22 +94,23 @@ object GeminiLiveWire {
         return buildJsonObject { put("setup", setup) }.toString()
     }
 
-    /** One realtime audio chunk. [dataBase64] is base64 of raw PCM16 bytes. */
+    /**
+     * One realtime audio chunk. [dataBase64] is base64 of raw PCM16 bytes.
+     *
+     * Hot path (one frame per ~20 ms at 50 fps): the byte-identical JSON string
+     * is assembled directly instead of through [buildJsonObject]. This is safe
+     * without an escaper — the base64 alphabet (`A-Z a-z 0-9 + / =`) contains no
+     * characters that need JSON escaping, and the mime type is a fixed
+     * template around an integer.
+     */
     fun buildAudioChunk(dataBase64: String, sampleRateHz: Int): String =
-        buildJsonObject {
-            put(
-                "realtimeInput",
-                buildJsonObject {
-                    put(
-                        "audio",
-                        buildJsonObject {
-                            put("data", dataBase64)
-                            put("mimeType", "audio/pcm;rate=$sampleRateHz")
-                        },
-                    )
-                },
-            )
-        }.toString()
+        StringBuilder(AUDIO_CHUNK_HEAD.length + dataBase64.length + 32)
+            .append(AUDIO_CHUNK_HEAD)
+            .append(dataBase64)
+            .append(AUDIO_CHUNK_MIME_TAIL)
+            .append(sampleRateHz)
+            .append(AUDIO_CHUNK_CLOSE)
+            .toString()
 
     /**
      * Sends ongoing text through the Gemini 3.1 realtime-input channel. With

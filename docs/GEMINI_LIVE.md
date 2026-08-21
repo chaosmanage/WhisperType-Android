@@ -420,7 +420,7 @@ punctuation, and code-switching survive because only the four rules above fire.
   backend the session is stripped (no echo, no `systemInstruction`, see
   §10.4) and settlement adopts the raw input on the 250 ms debounce; the polish
   stage then dials the backend and upgrades the inserted text when it commits
-  (`SettlePath.GROQ_POLISHED`). `polishDialTimeoutMs = 12_000`; a failure,
+  (`SettlePath.GROQ_POLISHED`). `polishDialTimeoutMs = 4_000`; a failure,
   timeout, or empty reply inserts the raw text with a typed `polish=` code.
 - **Echo is the primary source.** Settlement prefers the echo; only when it is
   empty does it fall back to the raw input — except in Hinglish, which settles

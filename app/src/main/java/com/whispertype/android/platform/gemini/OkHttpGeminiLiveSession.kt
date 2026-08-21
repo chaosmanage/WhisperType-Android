@@ -1,5 +1,6 @@
 package com.whispertype.android.platform.gemini
 
+import android.util.Log
 import com.whispertype.android.core.contracts.GeminiLiveSession
 import com.whispertype.android.core.model.AudioChunk
 import com.whispertype.android.core.model.DictationFailure
@@ -8,7 +9,6 @@ import com.whispertype.android.core.model.MutableSessionMetrics
 import com.whispertype.android.core.model.ResultCandidate
 import com.whispertype.android.core.model.SendResult
 import com.whispertype.android.core.privacy.LogRedactor
-import com.whispertype.android.core.transcript.TranscriptAccumulator
 import java.util.Base64
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -17,11 +17,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -31,6 +29,9 @@ import okio.ByteString
 
 /** Transport-level failure carrying a typed, non-sensitive [DictationFailure]. */
 class GeminiLiveException(val failure: DictationFailure) : Exception(failure.message)
+
+/** Ceiling for waiting out [OkHttpGeminiLiveSession.awaitReady]; tests override it. */
+private const val DEFAULT_READY_TIMEOUT_MS = 15_000L
 
 /**
  * [GeminiLiveSession] over an OkHttp [WebSocket] to the Gemini Live
@@ -65,6 +66,7 @@ class OkHttpGeminiLiveSession(
     private val sendTextFrame: (WebSocket, String) -> Boolean = { webSocket, text ->
         webSocket.send(text)
     },
+    private val readyTimeoutMs: Long = DEFAULT_READY_TIMEOUT_MS,
 ) : GeminiLiveSession {
 
     private enum class State { Connecting, Ready, ActivityStarted, ActivityEnded, Closed }
@@ -82,15 +84,25 @@ class OkHttpGeminiLiveSession(
 
     override suspend fun awaitReady() {
         try {
-            withTimeout(READY_TIMEOUT_MS) { ready.await() }
-        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-            throw GeminiLiveException(
-                failure(
-                    FAIL_SETUP,
-                    "Timed out waiting for the Gemini session to start.",
-                    recoverable = true,
-                ),
+            withTimeout(readyTimeoutMs) { ready.await() }
+        } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+            val failure = failure(
+                FAIL_SETUP,
+                "Timed out waiting for the Gemini session to start.",
+                recoverable = true,
             )
+            // The session must self-clean on a setup timeout: take the terminal
+            // state, emit the failure once, and tear the socket down instead of
+            // leaving the transport open for the caller to reap.
+            synchronized(outboundLock) {
+                val transitioned = state.getAndSet(State.Closed) != State.Closed
+                ready.completeExceptionally(GeminiLiveException(failure))
+                if (transitioned && !closed.get()) {
+                    _events.trySend(GeminiEvent.Failed(failure))
+                }
+                socket?.cancel()
+            }
+            throw GeminiLiveException(failure)
         }
     }
 
@@ -330,11 +342,14 @@ class OkHttpGeminiLiveSession(
 
     private fun onServerContent(message: GeminiLiveWire.ServerMessage.ServerContent) {
         // Aggregate debug-only counters and flags; never log transcript content,
-        // audio, or full server frames (Release A1/A2, D8).
-        GeminiLog.i(
-            TAG,
-            "serverContent: inputTx=${message.inputTranscription?.length ?: 0} outputTx=${message.outputTranscription?.length ?: 0} textParts=${message.textParts.size} generationComplete=${message.generationComplete} interrupted=${message.interrupted} turnComplete=${message.turnComplete}",
-        )
+        // audio, or full server frames (Release A1/A2, D8). The string is only
+        // assembled when frame logging is enabled — this runs per server frame.
+        if (FRAME_LOGS_ENABLED) {
+            GeminiLog.i(
+                TAG,
+                "serverContent: inputTx=${message.inputTranscription?.length ?: 0} outputTx=${message.outputTranscription?.length ?: 0} textParts=${message.textParts.size} generationComplete=${message.generationComplete} interrupted=${message.interrupted} turnComplete=${message.turnComplete}",
+            )
+        }
         // 0.4.1 echo architecture: the dictation source is outputTranscription —
         // the model's spoken reply, which the systemInstruction turns into a
         // verbatim, polished, Latin-script echo of the user's speech. The raw
@@ -407,7 +422,19 @@ class OkHttpGeminiLiveSession(
 
     private companion object {
         const val TAG = "OkHttpGeminiLiveSession"
-        const val READY_TIMEOUT_MS = 15_000L
+
+        /**
+         * Resolved once per process: per-frame aggregate logs are debug-only, so
+         * release/host builds never even build their strings. Enabled when the
+         * platform has `log.tag.OkHttpGeminiLiveSession` at DEBUG; defaults to
+         * false (and stays false on the host JVM, where `android.util.Log` is
+         * a stub).
+         */
+        private val FRAME_LOGS_ENABLED: Boolean = try {
+            Log.isLoggable(TAG, Log.DEBUG)
+        } catch (_: Throwable) {
+            false
+        }
         const val NORMAL_CLOSE_CODE = 1000
         const val REASON_NOT_READY = "session_not_ready"
         const val REASON_CLOSED = "socket_closed"

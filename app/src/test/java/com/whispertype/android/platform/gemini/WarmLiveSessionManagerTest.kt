@@ -202,6 +202,94 @@ class WarmLiveSessionManagerTest {
     }
 
     @Test
+    fun `flapping ready-then-death endpoint escalates backoff instead of looping fastest`() = runTest {
+        val h = Harness()
+        val manager = h.managerFor(
+            scope = backgroundScope,
+            nowMs = { testScheduler.currentTime },
+            config = WarmLiveSessionManager.Config(
+                warmIdleTimeoutMs = 1_000L,
+                backoffStepsMs = listOf(10L, 20L, 40L),
+            ),
+        )
+
+        manager.onEligibilityChanged(isEligible = true, profile = profile())
+        runCurrent()
+        assertIs<WarmSessionState.Ready>(manager.state.value)
+
+        // Flap 1: first attempt still retries at the fastest step...
+        h.sessions[0].emit(GeminiEvent.SessionEnd)
+        runCurrent()
+        assertEquals(WarmSessionState.Backoff(10L), manager.state.value)
+
+        advanceTimeBy(10L)
+        runCurrent()
+        assertIs<WarmSessionState.Ready>(manager.state.value)
+
+        // Flap 2: ...but a second ready-then-immediate-death must climb the
+        // ladder instead of resetting to the fastest step forever.
+        h.sessions[1].emit(GeminiEvent.SessionEnd)
+        runCurrent()
+        assertEquals(WarmSessionState.Backoff(20L), manager.state.value)
+
+        advanceTimeBy(20L)
+        runCurrent()
+        assertIs<WarmSessionState.Ready>(manager.state.value)
+
+        h.sessions[2].emit(GeminiEvent.SessionEnd)
+        runCurrent()
+        assertEquals(WarmSessionState.Backoff(40L), manager.state.value)
+
+        manager.shutdown()
+        runCurrent()
+    }
+
+    @Test
+    fun `healthy session lifetime resets the backoff ladder`() = runTest {
+        val h = Harness()
+        val manager = h.managerFor(
+            scope = backgroundScope,
+            nowMs = { testScheduler.currentTime },
+            config = WarmLiveSessionManager.Config(
+                warmIdleTimeoutMs = 1_000L,
+                backoffStepsMs = listOf(10L, 500L),
+                readyLifetimeFloorMs = 50L,
+            ),
+        )
+
+        manager.onEligibilityChanged(isEligible = true, profile = profile())
+        runCurrent()
+        assertIs<WarmSessionState.Ready>(manager.state.value)
+
+        // Flap: ready then immediate death escalates the ladder.
+        h.sessions[0].emit(GeminiEvent.SessionEnd)
+        runCurrent()
+        assertEquals(WarmSessionState.Backoff(10L), manager.state.value)
+
+        advanceTimeBy(10L)
+        runCurrent()
+        assertIs<WarmSessionState.Ready>(manager.state.value)
+
+        h.sessions[1].emit(GeminiEvent.SessionEnd)
+        runCurrent()
+        assertEquals(WarmSessionState.Backoff(500L), manager.state.value)
+
+        advanceTimeBy(500L)
+        runCurrent()
+        assertIs<WarmSessionState.Ready>(manager.state.value)
+
+        // A session that stays healthy past the floor before dying proves the
+        // endpoint recovered: the ladder resets to the fastest step.
+        advanceTimeBy(60L)
+        h.sessions[2].emit(GeminiEvent.SessionEnd)
+        runCurrent()
+        assertEquals(WarmSessionState.Backoff(10L), manager.state.value)
+
+        manager.shutdown()
+        runCurrent()
+    }
+
+    @Test
     fun `idle expiry closes then rewarms while eligibility remains true`() = runTest {
         val h = Harness()
         val manager = h.managerFor(

@@ -6,9 +6,7 @@ import com.whispertype.android.core.model.GeminiEvent
 import com.whispertype.android.core.model.SendResult
 import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -529,6 +527,45 @@ class OkHttpGeminiLiveSessionTest {
             activeClient?.dispatcher?.cancelAll()
             activeClient?.connectionPool?.evictAll()
             closing.close()
+        }
+    }
+
+    @Test
+    fun `awaitReady timeout cancels the socket and takes the session terminal`() = runBlocking {
+        // A server that upgrades but never sends setupComplete.
+        val silent = MockWebServer()
+        silent.enqueue(
+            MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {}).build(),
+        )
+        silent.start()
+        try {
+            val client = OkHttpClient()
+            activeClient = client
+            val session = OkHttpGeminiLiveSession(
+                client = client,
+                wsUrl = silent.url("/live").toString(),
+                config = GeminiSessionConfig(model = "test-model"),
+                readyTimeoutMs = 250L,
+            )
+            val events = bufferEvents(session)
+
+            val error = assertFailsWith<GeminiLiveException> { session.awaitReady() }
+            assertEquals("gemini_setup", error.failure.code)
+            assertEquals("Timed out waiting for the Gemini session to start.", error.failure.message)
+
+            // The session self-cleans: the failure is terminal and emitted once,
+            // and later calls are rejected as closed instead of hanging.
+            val failed = assertIs<GeminiEvent.Failed>(receiveWithTimeout(events))
+            assertEquals("gemini_setup", failed.failure.code)
+            assertNull(events.tryReceive().getOrNull(), "the timeout failure must be emitted once")
+            assertEquals(SendResult.Rejected("socket_closed"), session.startActivity())
+            assertEquals(SendResult.Rejected("socket_closed"), session.endActivity())
+            session.close()
+        } finally {
+            activeClient?.dispatcher?.cancelAll()
+            activeClient?.connectionPool?.evictAll()
+            activeClient?.dispatcher?.executorService?.shutdown()
+            silent.close()
         }
     }
 
