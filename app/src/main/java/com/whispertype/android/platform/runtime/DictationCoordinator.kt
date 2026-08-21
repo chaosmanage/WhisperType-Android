@@ -1105,6 +1105,31 @@ class DictationCoordinator(
         }
     }
 
+    /**
+     * Overlay COPY intent (the Ambiguous-insertion error panel's Copy button):
+     * copies the CURRENT session's settled transcript through the host's
+     * clipboard mechanism and publishes [DictationState.CopiedToClipboard].
+     * Safe no-op without an active session or a settled candidate. A failed
+     * copy leaves the current state untouched so the panel stays actionable.
+     */
+    fun copySettledToClipboard() {
+        val holder = active ?: return
+        val transcript = holder.settledText ?: return
+        if (transcript.isBlank()) return
+        scope.launch {
+            val copied = host.copyToClipboard(holder.sessionId, transcript)
+            if (active !== holder) return@launch
+            if (!copied) return@launch
+            holder.metrics.mark(MutableSessionMetrics.Event.CopiedToClipboard)
+            // The user's Copy supersedes the earlier ambiguous/failed outcome,
+            // exactly like the automatic clipboard fallback records it.
+            holder.metrics.overrideTerminalOutcome(TerminalOutcome.COPIED_TO_CLIPBOARD)
+            publish(DictationState.CopiedToClipboard(holder.sessionId))
+            delay(config.returnToIdleMs)
+            resetToIdle(holder)
+        }
+    }
+
     /** Cancels session resources; does NOT clear [active] (that happens on reset). */
     private fun teardown(holder: ActiveLiveSession) {
         holder.sessionJob?.cancel()

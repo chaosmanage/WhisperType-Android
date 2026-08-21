@@ -1257,6 +1257,67 @@ class DictationCoordinatorTest {
         assertTrue(states(host).none { it is DictationState.CopiedToClipboard })
     }
 
+    @Test
+    fun `copy after ambiguous insertion publishes CopiedToClipboard`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        sendTranscript(host, "hello world")
+        advanceUntilIdle()
+
+        // Ambiguous commit: the error panel offers Copy while the session is
+        // still active (the retryable=false reset timer has not fired yet).
+        coordinator.onInsertionResult(sessionId, InsertionResult.Ambiguous)
+        runCurrent()
+        val error = states(host).last() as DictationState.Error
+        assertEquals("insert_ambiguous", error.failure.code)
+
+        coordinator.copySettledToClipboard()
+        runCurrent()
+
+        assertEquals(listOf(sessionId to "hello world"), host.clipboardCopies)
+        assertEquals(TerminalOutcome.COPIED_TO_CLIPBOARD, coordinator.activeMetrics()!!.terminalOutcome)
+        assertIs<DictationState.CopiedToClipboard>(states(host).last())
+
+        advanceUntilIdle()
+        assertEquals(DictationState.Idle, states(host).last())
+    }
+
+    @Test
+    fun `copy with nothing settled is a safe no-op`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+
+        // No active session at all.
+        coordinator.copySettledToClipboard()
+        runCurrent()
+        assertTrue(host.clipboardCopies.isEmpty())
+        assertTrue(states(host).none { it is DictationState.CopiedToClipboard })
+
+        // Active session that never settled a transcript.
+        coordinator.start()
+        advanceUntilIdle()
+        assertIs<DictationState.Listening>(states(host).last())
+        coordinator.copySettledToClipboard()
+        runCurrent()
+        assertTrue(host.clipboardCopies.isEmpty())
+        assertIs<DictationState.Listening>(states(host).last())
+
+        // Terminal state without a settled candidate (failed settlement).
+        coordinator.stop()
+        advanceUntilIdle()
+        coordinator.dismiss()
+        advanceUntilIdle()
+        assertEquals(DictationState.Idle, states(host).last())
+        coordinator.copySettledToClipboard()
+        runCurrent()
+        assertTrue(host.clipboardCopies.isEmpty())
+        assertTrue(states(host).none { it is DictationState.CopiedToClipboard })
+    }
+
     // ------------------------------------------------------------------
     // 0.7.0: GROQ polish backend settlement
     // ------------------------------------------------------------------

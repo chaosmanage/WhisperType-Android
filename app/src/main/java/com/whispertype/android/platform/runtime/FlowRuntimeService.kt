@@ -113,6 +113,16 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     /** Reply messenger registered by the accessibility process. */
     private var a11yReply: Messenger? = null
 
+    /** Death linkage for the current [a11yReply]: the binder it was linked on
+     *  plus its recipient. Cleared together so stale recipients never pile up
+     *  when the accessibility process re-registers. */
+    private var a11yDeathLink: A11yDeathLink? = null
+
+    private class A11yDeathLink(
+        val binder: IBinder,
+        val recipient: IBinder.DeathRecipient,
+    )
+
     // Context-dependent; lazy so they initialize on first use (in onCreate),
     // never during the Service constructor when the base Context is unattached.
     private val keyProvider: KeyProvider by lazy { KeystoreKeyProvider(this) }
@@ -203,11 +213,23 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     @Volatile
     private var killSwitchFired: Boolean = false
 
+    /** Cached API-key presence for warm-eligibility checks. null = not read
+     *  yet; the first [apiKeyPresent] call performs the one disk read and every
+     *  later eligibility message reuses it. The key lifecycle lives outside
+     *  this service (Settings/Onboarding screens store and delete directly), so
+     *  the cache is refreshed from the authoritative provideKey() result on
+     *  each session resolution instead of on store/delete events. */
+    @Volatile
+    private var cachedApiKeyPresent: Boolean? = null
+
+    private fun apiKeyPresent(): Boolean =
+        cachedApiKeyPresent ?: keyProvider.hasKey().also { cachedApiKeyPresent = it }
+
     private val incomingHandler = object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(msg: Message) {
             when (msg.what) {
                 RuntimeIpc.MSG_REGISTER_REPLY -> {
-                    a11yReply = msg.replyTo
+                    setA11yReplyMessenger(msg.replyTo)
                     Log.i(TAG, "Accessibility process registered its reply messenger")
                 }
                 RuntimeIpc.MSG_ELIGIBILITY -> {
@@ -220,7 +242,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                         // watchdog only nags after a real drop, not on fresh install.
                         currentEligibility = e
                         if (e.serviceConnected) {
-                            scope.launch { settings.setA11yHasConnectedOnce(true) }
+                            markA11yConnectedOnce()
                         }
                         refreshWarmEligibility()
                     }
@@ -241,6 +263,24 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     private val incomingMessenger = Messenger(incomingHandler)
 
     override fun onBind(intent: Intent?): IBinder = incomingMessenger.binder
+
+    /**
+     * The QS tile starts this service with startForegroundService
+     * ([OverlayQuickSettingsTileService]); a delivery racing a dying or still-
+     * alive instance must promote to foreground within the per-start obligation
+     * window or the system raises ForegroundServiceDidNotStartInTimeException.
+     * onCreate alone does not cover redelivery to an existing instance. Reuses
+     * the exact onCreate plumbing (id/notification/types).
+     *
+     * Restart semantics: returns START_NOT_STICKY. Nothing here relied on the
+     * implicit sticky default — both start paths (activity and QS tile) start
+     * the service explicitly on demand, and a sticky auto-recreate would only
+     * resurrect an idle overlay runtime nobody asked for.
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForeground(NOTIFICATION_ID, buildNotification(), overlayFgsTypes())
+        return START_NOT_STICKY
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -314,7 +354,10 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             OverlayIntent.CANCEL -> coordinator.cancel()
             OverlayIntent.RETRY -> coordinator.retry()
             OverlayIntent.DISMISS -> coordinator.dismiss()
-            OverlayIntent.COPY -> Unit
+            // The Ambiguous-insertion error panel's Copy button: copy the
+            // settled transcript of the current session via the coordinator's
+            // existing clipboard fallback mechanism.
+            OverlayIntent.COPY -> coordinator.copySettledToClipboard()
         }
     }
 
@@ -385,6 +428,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         // reused (0.6.0).
         when (val claim = warmManager.claim(profile)) {
             is WarmSessionClaim.Hit -> {
+                cachedApiKeyPresent = true // a warm session exists only if a key did
                 metrics.mark(MutableSessionMetrics.Event.KeyLoaded)
                 metrics.mark(MutableSessionMetrics.Event.SettingsReady)
                 metrics.mark(MutableSessionMetrics.Event.SocketCreated)
@@ -401,6 +445,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             is WarmSessionClaim.Miss -> Unit // cold connect below
         }
         val key = withContext(Dispatchers.IO) { keyProvider.provideKey() }
+        cachedApiKeyPresent = !key.isNullOrEmpty()
         metrics.mark(MutableSessionMetrics.Event.KeyLoaded)
         if (key.isNullOrEmpty()) {
             return SessionResolve.Failed(
@@ -473,13 +518,16 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
      *  (GROQ/NONE) session is never reused for a LIVE_ECHO dictation. */
     private suspend fun createColdSession(profile: WarmSessionProfile): com.whispertype.android.core.contracts.GeminiLiveSession {
         val key = withContext(Dispatchers.IO) { keyProvider.provideKey() }
-            ?: throw GeminiLiveException(
+        cachedApiKeyPresent = !key.isNullOrEmpty()
+        if (key == null) {
+            throw GeminiLiveException(
                 DictationFailure(
                     code = "runtime_no_api_key",
                     message = "Add your Gemini API key in Settings first.",
                     recoverable = true,
                 ),
             )
+        }
         return GeminiSessionFactory.create(
             apiKey = key,
             config = GeminiSessionConfig(
@@ -508,16 +556,15 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         )
     }
 
-    /** Release F2: prewarm only while every eligibility condition holds.
-     *  [keyProvider.hasKey] reads the key blob from disk, so it runs last and
-     *  only when the in-memory conditions already pass — and never during an
-     *  active dictation, when prewarm is impossible anyway. */
+    /** Release F2: prewarm only while every eligibility condition holds. The
+     *  key-presence check is cached ([apiKeyPresent]); it used to read the key
+     *  blob from disk synchronously on every eligibility message. */
     private fun computeWarmEligibility(): Boolean {
         val e = _eligibility.value
         return e.serviceConnected && e.editorFocused && !e.editorSecure && !e.editorUncertain &&
             e.microphoneGranted && cachedAppEnabled &&
             !coordinator.isActive &&
-            keyProvider.hasKey()
+            apiKeyPresent()
     }
 
     private fun refreshWarmEligibility() {
@@ -639,6 +686,37 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         coordinator.onInsertionResult(sessionId, result)
     }
 
+    /**
+     * Registers the accessibility reply messenger and links its binder to a
+     * DeathRecipient that clears the stale reference when that process dies
+     * without unregistering. Re-registration unlinks the previous recipient so
+     * they never pile up; an already-dead binder fails [IBinder.linkToDeath]
+     * with [RemoteException], which is guarded (the cleared reply stays null).
+     */
+    private fun setA11yReplyMessenger(reply: Messenger?) {
+        clearA11yDeathLink()
+        a11yReply = reply
+        val binder = reply?.binder ?: return
+        val recipient = IBinder.DeathRecipient {
+            a11yReply = null
+            a11yDeathLink = null
+            Log.w(TAG, "IPC_A11Y_REPLY_BINDER_DIED")
+        }
+        try {
+            binder.linkToDeath(recipient, 0)
+            a11yDeathLink = A11yDeathLink(binder, recipient)
+        } catch (_: RemoteException) {
+            Log.w(TAG, "IPC_A11Y_DEATH_LINK_FAILED")
+        }
+    }
+
+    /** Unlinks the current death recipient from its binder, if any. */
+    private fun clearA11yDeathLink() {
+        val link = a11yDeathLink ?: return
+        a11yDeathLink = null
+        link.binder.unlinkToDeath(link.recipient, 0)
+    }
+
     // ------------------------------------------------------------------
     // OverlayOwners (lifecycle / saved-state / view-model store)
     // ------------------------------------------------------------------
@@ -655,8 +733,11 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
 
     override fun onDestroy() {
         isRunning = false
-        overlayHost?.detach()
+        // dispose() cancels the host scope, clears pending handler callbacks and
+        // synchronously detaches the window; it is idempotent after detach().
+        overlayHost?.dispose()
         overlayHost = null
+        clearA11yDeathLink()
         scope.cancel()
         super.onDestroy()
     }
@@ -687,6 +768,25 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     // ------------------------------------------------------------------
     // Accessibility watchdog (0.5.2)
     // ------------------------------------------------------------------
+
+    /**
+     * Write-once latch for the "has ever connected" preference: the eligibility
+     * message fires on every report, so the persisted read happens once and the
+     * DataStore write only when the value flips false -> true (previously every
+     * connected report rewrote the same true).
+     */
+    @Volatile
+    private var a11yConnectedOnceLatch: Boolean = false
+
+    private fun markA11yConnectedOnce() {
+        if (a11yConnectedOnceLatch) return
+        a11yConnectedOnceLatch = true
+        scope.launch {
+            if (!settings.a11yHasConnectedOnce.first()) {
+                settings.setA11yHasConnectedOnce(true)
+            }
+        }
+    }
 
     /**
      * 0.5.2: Android silently clears an app's accessibility service when the app
