@@ -38,7 +38,11 @@ data class FocusedEditor(
  * [AccessibilityNodeInfo]), but all classification / eligibility / insertion
  * decisions are delegated to pure, host-testable objects.
  */
-class EditorTracker {
+class EditorTracker(
+    /** Re-resolves the active window root when a focus event carries no
+     *  readable source node; defaults to never resolving. */
+    private val rootProvider: () -> AccessibilityNodeInfo? = { null },
+) {
 
     private val _eligibility = MutableStateFlow(TargetEligibility.Ineligible)
     val eligibility: StateFlow<TargetEligibility> = _eligibility.asStateFlow()
@@ -114,20 +118,29 @@ class EditorTracker {
     // ------------------------------------------------------------------
 
     /**
-     * Processes a TYPE_VIEW_FOCUSED event. Every real focus event bumps the
-     * generation, so two fields in the same package/window with missing
-     * resource IDs are distinct (FR-8).
+     * Processes a TYPE_VIEW_FOCUSED event. The generation bumps only when the
+     * focused editor's identity actually changed, so duplicate focus events for
+     * the same field never invalidate in-flight insertions (FR-8); two fields
+     * in the same package/window with missing resource IDs are still distinct.
      */
     fun onViewFocused(event: AccessibilityEvent) {
         val source = event.source
         val editor = source?.let { toEditor(it, event.windowId) }
         if (editor == null) {
-            clearCurrentFocus()
+            // Null / unreadable source: re-resolve from the active window root
+            // instead of blindly clearing focus (eligibility flicker fix). Only
+            // a failed resolution actually clears.
+            refreshFromRoot(rootProvider())
             return
         }
         synchronized(this) {
-            generation += 1
-            currentFocus = editor.copy(generation = generation)
+            val prev = currentFocus
+            if (isSameEditor(prev, editor)) {
+                currentFocus = editor.copy(generation = prev?.generation ?: generation)
+            } else {
+                generation += 1
+                currentFocus = editor.copy(generation = generation)
+            }
         }
         recompute()
     }
@@ -151,16 +164,8 @@ class EditorTracker {
         }
         synchronized(this) {
             val prev = currentFocus
-            if (prev != null &&
-                prev.packageName == editor.packageName &&
-                prev.windowId == editor.windowId &&
-                prev.displayId == editor.displayId &&
-                prev.editorIdentity == editor.editorIdentity &&
-                prev.inputType == editor.inputType &&
-                prev.isPassword == editor.isPassword &&
-                prev.contentInvalid == editor.contentInvalid
-            ) {
-                currentFocus = editor.copy(generation = prev.generation)
+            if (isSameEditor(prev, editor)) {
+                currentFocus = editor.copy(generation = prev?.generation ?: generation)
             } else {
                 generation += 1
                 currentFocus = editor.copy(generation = generation)
@@ -168,6 +173,21 @@ class EditorTracker {
         }
         recompute()
     }
+
+    /**
+     * True when [prev] and [editor] describe the same focused field (package,
+     * window, display, editor id, input type, password and readability), i.e.
+     * the focus did not actually move and the generation must not bump.
+     */
+    private fun isSameEditor(prev: FocusedEditor?, editor: FocusedEditor): Boolean =
+        prev != null &&
+            prev.packageName == editor.packageName &&
+            prev.windowId == editor.windowId &&
+            prev.displayId == editor.displayId &&
+            prev.editorIdentity == editor.editorIdentity &&
+            prev.inputType == editor.inputType &&
+            prev.isPassword == editor.isPassword &&
+            prev.contentInvalid == editor.contentInvalid
 
     private fun clearCurrentFocus() {
         synchronized(this) {

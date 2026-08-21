@@ -16,7 +16,10 @@ import com.whispertype.android.core.model.TargetEligibility
  *
  * Messages flow over a [android.os.Messenger] bound between the two processes;
  * every payload is packed / unpacked through the helpers below so the wire format
- * is a single source of truth.
+ * is a single source of truth. The only insertion path is the legacy
+ * [MSG_INSERT] request / [MSG_INSERT_RESULT] reply; the target is re-validated
+ * in the accessibility process at insert time (there is no tap-time
+ * reservation / commit / release protocol).
  */
 object RuntimeIpc {
 
@@ -32,29 +35,11 @@ object RuntimeIpc {
     /** 0.6.0: physical-keyboard hotkey press (start or complete dictation). */
     const val MSG_HOTKEY_TOGGLE = 5
 
-    /** Main -> accessibility: pin the safe target that exists at tap time. */
-    const val MSG_RESERVE_TARGET = 6
-
-    /** Accessibility -> main: typed acknowledgement of [MSG_RESERVE_TARGET]. */
-    const val MSG_RESERVE_TARGET_RESULT = 7
-
-    /** Main -> accessibility: commit text once to the target pinned for this session. */
-    const val MSG_COMMIT_RESERVED_TARGET = 8
-
-    /** Main -> accessibility: discard a reservation after cancellation or failure. */
-    const val MSG_RELEASE_RESERVED_TARGET = 9
-
-    // Bundle keys. Insert text is sensitive dictated output; existing editor
+    // Bundle keys. Insert text is the sensitive dictated output; existing editor
     // content and target-snapshot identity fields are never transported.
     const val KEY_REPLY_MESSENGER = "reply_messenger"
     const val KEY_SESSION_ID = "session_id"
     const val KEY_INSERT_TEXT = "insert_text"
-    const val KEY_RESERVATION_STATUS = "reservation_status"
-    const val KEY_REQUESTED_AT_NANOS = "requested_at_nanos"
-    const val KEY_RECEIVED_AT_NANOS = "received_at_nanos"
-    const val KEY_COMMIT_STARTED_AT_NANOS = "commit_started_at_nanos"
-    const val KEY_COMMIT_COMPLETED_AT_NANOS = "commit_completed_at_nanos"
-    const val KEY_REPLIED_AT_NANOS = "replied_at_nanos"
 
     const val KEY_SERVICE_CONNECTED = "service_connected"
     const val KEY_EDITOR_FOCUSED = "editor_focused"
@@ -73,60 +58,11 @@ object RuntimeIpc {
     const val KEY_FAILURE_RECOVERABLE = "failure_recoverable"
     const val KEY_FAILURE_RETRY_ALLOWED = "failure_retry_allowed"
 
-    /**
-     * Content-free result of a target-reservation request. No package, window,
-     * display, editor identity, selection, or other snapshot field crosses IPC.
-     */
-    enum class ReservationStatus(val wireValue: String) {
-        RESERVED("reserved"),
-        INELIGIBLE("ineligible"),
-        CAPACITY_EXCEEDED("capacity_exceeded"),
-        TARGET_CHANGED("target_changed"),
-        SESSION_TERMINAL("session_terminal"),
-        ;
-
-        companion object {
-            fun fromWireValue(value: String?): ReservationStatus? =
-                entries.firstOrNull { it.wireValue == value }
-        }
-    }
-
-    data class ReserveTargetRequest(
-        val sessionId: SessionId,
-        val requestedAtNanos: Long? = null,
-    )
-
-    data class ReserveTargetResult(
-        val sessionId: SessionId,
-        val status: ReservationStatus,
-        val requestedAtNanos: Long?,
-        val receivedAtNanos: Long?,
-        val repliedAtNanos: Long?,
-    ) {
-        val reserved: Boolean
-            get() = status == ReservationStatus.RESERVED
-    }
-
-    data class CommitReservedTargetRequest(
+    /** Runtime -> accessibility: settled dictation text for the focused editor. */
+    data class InsertRequest(
         val sessionId: SessionId,
         /** Settled dictation text only; never existing editor content. */
         val text: String,
-        val requestedAtNanos: Long? = null,
-    )
-
-    data class CommitReservedTargetResult(
-        val sessionId: SessionId,
-        val result: InsertionResult,
-        val requestedAtNanos: Long?,
-        val receivedAtNanos: Long?,
-        val commitStartedAtNanos: Long?,
-        val commitCompletedAtNanos: Long?,
-        val repliedAtNanos: Long?,
-    )
-
-    data class ReleaseReservedTargetRequest(
-        val sessionId: SessionId,
-        val requestedAtNanos: Long? = null,
     )
 
     /** Packs an eligibility snapshot into a Bundle (see [unpackEligibility]). */
@@ -156,65 +92,18 @@ object RuntimeIpc {
         displayId = b.getInt(KEY_DISPLAY_ID, TargetEligibility.DEFAULT_DISPLAY_ID),
     )
 
-    fun packReserveTargetRequest(request: ReserveTargetRequest): Bundle = Bundle().apply {
-        putString(KEY_SESSION_ID, request.sessionId.value)
-        putOptionalLong(KEY_REQUESTED_AT_NANOS, request.requestedAtNanos)
-    }
-
-    fun unpackReserveTargetRequest(b: Bundle): ReserveTargetRequest? {
-        val sessionId = b.sessionIdOrNull() ?: return null
-        return ReserveTargetRequest(
-            sessionId = sessionId,
-            requestedAtNanos = b.optionalLong(KEY_REQUESTED_AT_NANOS),
-        )
-    }
-
-    fun packReserveTargetResult(result: ReserveTargetResult): Bundle = Bundle().apply {
-        putString(KEY_SESSION_ID, result.sessionId.value)
-        putString(KEY_RESERVATION_STATUS, result.status.wireValue)
-        putOptionalLong(KEY_REQUESTED_AT_NANOS, result.requestedAtNanos)
-        putOptionalLong(KEY_RECEIVED_AT_NANOS, result.receivedAtNanos)
-        putOptionalLong(KEY_REPLIED_AT_NANOS, result.repliedAtNanos)
-    }
-
-    fun unpackReserveTargetResult(b: Bundle): ReserveTargetResult? {
-        val sessionId = b.sessionIdOrNull() ?: return null
-        val status = ReservationStatus.fromWireValue(b.getString(KEY_RESERVATION_STATUS)) ?: return null
-        return ReserveTargetResult(
-            sessionId = sessionId,
-            status = status,
-            requestedAtNanos = b.optionalLong(KEY_REQUESTED_AT_NANOS),
-            receivedAtNanos = b.optionalLong(KEY_RECEIVED_AT_NANOS),
-            repliedAtNanos = b.optionalLong(KEY_REPLIED_AT_NANOS),
-        )
-    }
-
-    fun packCommitReservedTargetRequest(request: CommitReservedTargetRequest): Bundle = Bundle().apply {
+    /** Packs an insert request into a Bundle (see [unpackInsertRequest]). */
+    fun packInsertRequest(request: InsertRequest): Bundle = Bundle().apply {
         putString(KEY_SESSION_ID, request.sessionId.value)
         putString(KEY_INSERT_TEXT, request.text)
-        putOptionalLong(KEY_REQUESTED_AT_NANOS, request.requestedAtNanos)
     }
 
-    fun unpackCommitReservedTargetRequest(b: Bundle): CommitReservedTargetRequest? {
+    fun unpackInsertRequest(b: Bundle): InsertRequest? {
         val sessionId = b.sessionIdOrNull() ?: return null
         val text = b.getString(KEY_INSERT_TEXT) ?: return null
-        return CommitReservedTargetRequest(
+        return InsertRequest(
             sessionId = sessionId,
             text = text,
-            requestedAtNanos = b.optionalLong(KEY_REQUESTED_AT_NANOS),
-        )
-    }
-
-    fun packReleaseReservedTargetRequest(request: ReleaseReservedTargetRequest): Bundle = Bundle().apply {
-        putString(KEY_SESSION_ID, request.sessionId.value)
-        putOptionalLong(KEY_REQUESTED_AT_NANOS, request.requestedAtNanos)
-    }
-
-    fun unpackReleaseReservedTargetRequest(b: Bundle): ReleaseReservedTargetRequest? {
-        val sessionId = b.sessionIdOrNull() ?: return null
-        return ReleaseReservedTargetRequest(
-            sessionId = sessionId,
-            requestedAtNanos = b.optionalLong(KEY_REQUESTED_AT_NANOS),
         )
     }
 
@@ -253,43 +142,8 @@ object RuntimeIpc {
         }
     }
 
-    /**
-     * Packs a reserved-target terminal response onto the legacy insert-result
-     * message code. This keeps the migration backwards-compatible while adding
-     * content-free monotonic timing metadata.
-     */
-    fun packCommitReservedTargetResult(result: CommitReservedTargetResult): Bundle {
-        val b = packInsertionResult(result.result, sessionId = result.sessionId.value)
-        b.putOptionalLong(KEY_REQUESTED_AT_NANOS, result.requestedAtNanos)
-        b.putOptionalLong(KEY_RECEIVED_AT_NANOS, result.receivedAtNanos)
-        b.putOptionalLong(KEY_COMMIT_STARTED_AT_NANOS, result.commitStartedAtNanos)
-        b.putOptionalLong(KEY_COMMIT_COMPLETED_AT_NANOS, result.commitCompletedAtNanos)
-        b.putOptionalLong(KEY_REPLIED_AT_NANOS, result.repliedAtNanos)
-        return b
-    }
-
-    fun unpackCommitReservedTargetResult(b: Bundle): CommitReservedTargetResult? {
-        val sessionId = b.sessionIdOrNull() ?: return null
-        return CommitReservedTargetResult(
-            sessionId = sessionId,
-            result = unpackInsertionResult(b),
-            requestedAtNanos = b.optionalLong(KEY_REQUESTED_AT_NANOS),
-            receivedAtNanos = b.optionalLong(KEY_RECEIVED_AT_NANOS),
-            commitStartedAtNanos = b.optionalLong(KEY_COMMIT_STARTED_AT_NANOS),
-            commitCompletedAtNanos = b.optionalLong(KEY_COMMIT_COMPLETED_AT_NANOS),
-            repliedAtNanos = b.optionalLong(KEY_REPLIED_AT_NANOS),
-        )
-    }
-
     private fun Bundle.sessionIdOrNull(): SessionId? =
         getString(KEY_SESSION_ID)
             ?.takeIf { it.isNotBlank() }
             ?.let(::SessionId)
-
-    private fun Bundle.optionalLong(key: String): Long? =
-        if (containsKey(key)) getLong(key) else null
-
-    private fun Bundle.putOptionalLong(key: String, value: Long?) {
-        if (value != null) putLong(key, value)
-    }
 }

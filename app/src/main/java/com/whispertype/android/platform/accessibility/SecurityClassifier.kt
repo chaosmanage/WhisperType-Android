@@ -1,11 +1,14 @@
 package com.whispertype.android.platform.accessibility
 
+import android.text.InputType
+
 /**
  * Fail-closed classifier that decides whether the currently focused editor is
- * safe to insert dictation text into (PRD FR-2 Eligibility, §16.4). Pure Kotlin
- * and fully unit-testable on a JVM host: it carries no Android runtime
- * dependency and publishes named constants for the relevant
- * `android.text.InputType` bit masks.
+ * safe to insert dictation text into (PRD FR-2 Eligibility, §16.4). The
+ * relevant `android.text.InputType` constants are referenced directly from the
+ * platform class (their `static final int` values are compile-time inlined, so
+ * this stays host-testable; see [SecurityClassifierTest] which pins the literal
+ * hex values so drift cannot recur).
  *
  * [SAFE] is returned only for clearly ordinary editable text. Password / PIN /
  * payment / secure fields and any unknown flag combination fail closed to
@@ -29,51 +32,34 @@ enum class Classification {
  */
 object SecurityClassifier {
 
-    // ------------------------------------------------------------------
-    // Named InputType bit masks (values match android.text.InputType).
-    // ------------------------------------------------------------------
-    const val TYPE_MASK_CLASS: Int = 0x0000_000f
-    const val TYPE_MASK_VARIATION: Int = 0x0000_00f0
-
-    const val TYPE_CLASS_TEXT: Int = 0x0000_0001
-    const val TYPE_CLASS_NUMBER: Int = 0x0000_0002
-    const val TYPE_CLASS_PHONE: Int = 0x0000_0003
-    const val TYPE_CLASS_DATETIME: Int = 0x0000_0004
-
-    const val TYPE_TEXT_VARIATION_NORMAL: Int = 0x0000_0000
-    const val TYPE_NUMBER_VARIATION_NORMAL: Int = 0x0000_0000
-
-    // Ordinary-text variations must remain eligible (Phase 3 fix, §2.3): email,
-    // URI, person-name, postal-address, phonetic and short-message fields are
-    // normal editable text, not secrets.
-    const val TYPE_TEXT_VARIATION_EMAIL_ADDRESS: Int = 0x0000_0020
-    const val TYPE_TEXT_VARIATION_URI: Int = 0x0000_0030
-    const val TYPE_TEXT_VARIATION_PERSON_NAME: Int = 0x0000_0060
-    const val TYPE_TEXT_VARIATION_POSTAL_ADDRESS: Int = 0x0000_0070
-    const val TYPE_TEXT_VARIATION_PHONETIC: Int = 0x0000_00c0
-    const val TYPE_TEXT_VARIATION_SHORT_MESSAGE: Int = 0x0000_0040
-
-    const val TYPE_TEXT_VARIATION_PASSWORD: Int = 0x0000_0080
-    const val TYPE_TEXT_VARIATION_VISIBLE_PASSWORD: Int = 0x0000_0090
-    const val TYPE_TEXT_VARIATION_WEB_PASSWORD: Int = 0x0000_00e0
-    const val TYPE_NUMBER_VARIATION_PASSWORD: Int = 0x0000_0010
-
-    /** Flag set that includes the secure (never-eligible) variations. */
-    private val SECURE_VARIATIONS = setOf(
-        TYPE_TEXT_VARIATION_PASSWORD,
-        TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
-        TYPE_TEXT_VARIATION_WEB_PASSWORD,
+    /**
+     * Text variations that are secrets (never eligible). Number PIN fields are
+     * handled separately via [InputType.TYPE_NUMBER_VARIATION_PASSWORD].
+     */
+    private val SECURE_TEXT_VARIATIONS = setOf(
+        InputType.TYPE_TEXT_VARIATION_PASSWORD,
+        InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+        InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
     )
 
-    /** Ordinary text variations that are eligible. */
+    /**
+     * Ordinary text variations that are eligible: plain, email (incl. web),
+     * subject, short/long message, person name, postal address, phonetic name,
+     * list filter, web edit text, and URI (browser address bars).
+     */
     private val SAFE_TEXT_VARIATIONS = setOf(
-        TYPE_TEXT_VARIATION_NORMAL,
-        TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
-        TYPE_TEXT_VARIATION_URI,
-        TYPE_TEXT_VARIATION_PERSON_NAME,
-        TYPE_TEXT_VARIATION_POSTAL_ADDRESS,
-        TYPE_TEXT_VARIATION_PHONETIC,
-        TYPE_TEXT_VARIATION_SHORT_MESSAGE,
+        InputType.TYPE_TEXT_VARIATION_NORMAL,
+        InputType.TYPE_TEXT_VARIATION_URI,
+        InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+        InputType.TYPE_TEXT_VARIATION_EMAIL_SUBJECT,
+        InputType.TYPE_TEXT_VARIATION_SHORT_MESSAGE,
+        InputType.TYPE_TEXT_VARIATION_LONG_MESSAGE,
+        InputType.TYPE_TEXT_VARIATION_PERSON_NAME,
+        InputType.TYPE_TEXT_VARIATION_POSTAL_ADDRESS,
+        InputType.TYPE_TEXT_VARIATION_WEB_EDIT_TEXT,
+        InputType.TYPE_TEXT_VARIATION_FILTER,
+        InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
+        InputType.TYPE_TEXT_VARIATION_PHONETIC,
     )
 
     /**
@@ -91,24 +77,24 @@ object SecurityClassifier {
         // If we could not confidently read the type, never guess.
         if (contentInvalid) return Classification.UNCERTAIN
 
-        val cls = inputType and TYPE_MASK_CLASS
-        val variation = inputType and TYPE_MASK_VARIATION
+        val cls = inputType and InputType.TYPE_MASK_CLASS
+        val variation = inputType and InputType.TYPE_MASK_VARIATION
 
-        if (variation in SECURE_VARIATIONS) return Classification.SECURE
+        if (variation in SECURE_TEXT_VARIATIONS) return Classification.SECURE
         // PIN / payment / autofill number fields carry a password variation.
-        if (cls == TYPE_CLASS_NUMBER && variation == TYPE_NUMBER_VARIATION_PASSWORD) {
+        if (cls == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD) {
             return Classification.SECURE
         }
 
         // Ordinary text classes and their safe variations are eligible.
-        if (cls == TYPE_CLASS_TEXT && variation in SAFE_TEXT_VARIATIONS) {
+        if (cls == InputType.TYPE_CLASS_TEXT && variation in SAFE_TEXT_VARIATIONS) {
             return Classification.SAFE
         }
-        if (cls == TYPE_CLASS_NUMBER && variation != TYPE_NUMBER_VARIATION_PASSWORD) {
+        if (cls == InputType.TYPE_CLASS_NUMBER && variation != InputType.TYPE_NUMBER_VARIATION_PASSWORD) {
             return Classification.SAFE
         }
         // Phone / datetime classes are ordinary, non-secret input.
-        if (cls == TYPE_CLASS_PHONE || cls == TYPE_CLASS_DATETIME) {
+        if (cls == InputType.TYPE_CLASS_PHONE || cls == InputType.TYPE_CLASS_DATETIME) {
             return Classification.SAFE
         }
         // inputType == 0 (unknown) on a confirmed editable node: treat as ordinary

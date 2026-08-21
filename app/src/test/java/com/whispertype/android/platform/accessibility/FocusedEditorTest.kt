@@ -30,9 +30,7 @@ class FocusedEditorTest {
 
     @Test
     fun `plain editor is neither secure nor uncertain`() {
-        val e = editor(
-            inputType = SecurityClassifier.TYPE_CLASS_TEXT or SecurityClassifier.TYPE_TEXT_VARIATION_NORMAL,
-        )
+        val e = editor(inputType = 0x0000_0001) // TYPE_CLASS_TEXT | normal variation
         assertFalse(e.isSecure)
         assertFalse(e.isUncertain)
     }
@@ -40,7 +38,7 @@ class FocusedEditorTest {
     @Test
     fun `password editor with missing resource id is secure and distinct generation`() {
         val e = editor(
-            inputType = SecurityClassifier.TYPE_CLASS_TEXT or SecurityClassifier.TYPE_TEXT_VARIATION_NORMAL,
+            inputType = 0x0000_0001, // TYPE_CLASS_TEXT | normal variation
             password = true,
         )
         assertTrue(e.isSecure)

@@ -49,9 +49,12 @@ the physical-keyboard hotkey relaxation.
 
 The two processes communicate over a bound `Messenger` (`platform/ipc/RuntimeIpc.kt`).
 The accessibility process registers its reply messenger and pushes eligibility;
-the runtime replies with insert requests and receives typed insertion results.
-Every payload is packed/unpacked through `RuntimeIpc` helpers, so the wire format
-is a single source of truth. No editor content is ever transported over IPC.
+the runtime sends insert requests and receives typed insertion results. Insertion
+is a single request/reply (`MSG_INSERT` / `MSG_INSERT_RESULT`): the accessibility
+process re-validates the focused target at insert time. There is no tap-time
+reservation / commit / release protocol. Every payload is packed/unpacked through
+`RuntimeIpc` helpers, so the wire format is a single source of truth. No editor
+content is ever transported over IPC.
 
 ## Module map
 
@@ -64,7 +67,7 @@ All paths are under `app/src/main/java/com/whispertype/android/`.
 | `platform/overlay/` | `PersistentOverlayHost.kt`, `WhisperTypeOverlayContent.kt`, `OverlayAppearance.kt`, `OverlayVisibility.kt`, `OverlayHostStateMachine.kt`, `OverlayOwners.kt`, `OverlayComposeContainer.kt` | The one persistent `TYPE_APPLICATION_OVERLAY` window and its Compose content: the draggable mic bubble (the app logo, round) that auto-minimizes to a mini-dot, the recording pill (`[Cancel ✕][wave][Done ✓]`) anchored so Done lands where the bubble was tapped, status capsules re-centered on the bubble, and a pure attach/detach state machine. The window follows the display hosting the focused editor (via a `createWindowContext` WindowManager), so it renders on a Samsung DeX secondary display rather than the phone screen. |
 | `platform/accessibility/` | `WhisperTypeAccessibilityService.kt`, `EditorTracker.kt`, `SecurityClassifier.kt`, `EligibilityMapper.kt`, `EligibilityExplanation.kt`, `AccessibilityTargetGateway.kt`, `InsertionDecision.kt`, `InsertionVerifier.kt` | The `:accessibility` process: focus/keyboard tracking, secure-field classification, typed eligibility, target capture, and validated insertion. |
 | `platform/ipc/` | `RuntimeIpc.kt` | Typed cross-process message contract (see above). |
-| `core/` | `core/state/`, `core/model/`, `core/transcript/`, `core/audio/`, `core/privacy/`, `core/dictionary/`, `core/overlay/`, `core/contracts/` | Pure, framework-free logic: the dictation reducer, typed domain models, the transcript accumulator/completeness/selector, PCM16 audio framing, log redaction, dictionary correction rules, and the contracts (`DictationBridge`, `GeminiLiveSession`, `TargetGateway`, `OverlayController`) that adapters implement. |
+| `core/` | `core/model/`, `core/transcript/`, `core/audio/`, `core/privacy/`, `core/dictionary/`, `core/overlay/`, `core/contracts/` | Pure, framework-free logic: typed domain models, the transcript accumulator/completeness/selector, PCM16 audio framing, log redaction, dictionary correction rules, and the contracts (`DictationBridge`, `GeminiLiveSession`, `TargetGateway`, `OverlayController`) that adapters implement. |
 | `data/` | `data/settings/SettingsRepository.kt`, `data/secrets/`, `data/history/EncryptedHistoryRepository.kt` | DataStore-backed settings (language, polish level, auto-stop, dictionary, bubble position, history), Keystore+AES-GCM secrets, and the encrypted, viewable history store. |
 | `audio/` | `audio/AudioCapture.kt`, `audio/AudioPipeline.kt`, `audio/BoundedAudioQueue.kt`, `audio/Chunker.kt`, `audio/PreReadyAudioBuffer.kt` | Device microphone capture and the bounded realtime pipeline feeding the Gemini session. |
 | `ui/` | `ui/theme/`, `ui/settings/SettingsScreen.kt`, `ui/history/HistoryScreen.kt`, `ui/dictionary/DictionaryScreen.kt`, `ui/waveform/RealTimeWaveform.kt` | Compose theme (emerald-teal, light + dark), the Settings screen, the History screen (list + history settings), the Dictionary screen, and the real-time waveform used by the recording pill. |
