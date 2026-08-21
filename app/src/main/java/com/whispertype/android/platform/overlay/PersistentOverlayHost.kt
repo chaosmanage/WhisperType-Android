@@ -27,6 +27,7 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -155,6 +156,15 @@ class PersistentOverlayHost(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    /** Single named retry runnable so [performDetach] and display-move failures
+     *  can cancel it by identity — a detached window must never be re-added. */
+    private val attachRetryRunnable = Runnable { performAttach() }
+
+    /** True between a requested [detach] and its execution; queued attaches and
+     *  retries are dropped once teardown was requested. */
+    @Volatile
+    private var teardownRequested = false
+
     init {
         scope.launch {
             combine(sessionState, eligibility, appEnabled) { state, target, enabled ->
@@ -189,7 +199,9 @@ class PersistentOverlayHost(
         scope.launch {
             combine(bubbleSizeDp, bubbleOpacityPercent, miniDotEnabled, miniDotDelaySeconds) { size, opacity, dot, delay ->
                 OverlayAppearance(
-                    bubbleSizeDp = size.coerceIn(24, 72),
+                    // Coerced at the host boundary so anchoring math, the
+                    // window size and the Compose >=48dp touch floor agree.
+                    bubbleSizeDp = size.coerceIn(MIN_BUBBLE_SIZE_DP, MAX_BUBBLE_SIZE_DP),
                     opacityPercent = opacity.coerceIn(10, 100),
                     miniDotEnabled = dot,
                     miniDotAutoMinimizeMs = delay.coerceIn(1, 15) * 1000L,
@@ -245,10 +257,14 @@ class PersistentOverlayHost(
 
     /** Adds the single persistent overlay window; idempotent, main-thread only. */
     override fun attach() {
+        teardownRequested = false
         handler.post { performAttach() }
     }
 
     private fun performAttach() {
+        // A requested detach supersedes any queued attach/retry: the window
+        // must not be re-added once teardown started.
+        if (teardownRequested) return
         if (!machine.attachRequested()) {
             _status.value = machine.status
             return
@@ -291,7 +307,13 @@ class PersistentOverlayHost(
                 WhisperTypeOverlayContent(
                     uiState = current,
                     appearance = currentAppearance,
-                    onIntent = { _intents.tryEmit(it) },
+                    onIntent = { intent ->
+                        // Buffered capacity is tiny: a lost tap must stay
+                        // observable (typed enum only, no user content).
+                        if (!_intents.tryEmit(intent)) {
+                            Log.w(TAG, "Overlay intent dropped (buffer full): $intent")
+                        }
+                    },
                     onDragStart = { beginDrag() },
                     onDragBubble = { dx, dy -> moveBy(dx, dy) },
                     onDragEnd = { finishDrag() },
@@ -333,9 +355,16 @@ class PersistentOverlayHost(
             scheduleCurrentAnchor()
         } catch (t: Throwable) {
             Log.w(TAG, "Overlay re-attach on display $displayId failed", t)
+            // The window is gone without a detach: leave Attached so the
+            // eligibility-edge recovery can re-attach, and make sure no stale
+            // retry outlives the lost window.
+            handler.removeCallbacks(attachRetryRunnable)
+            machine.windowLost()
+            _lastFailure.value = t::class.simpleName ?: "DisplayMoveFailure"
             view = null
             windowManager = null
             activeContext = serviceContext
+            _status.value = machine.status
         }
     }
 
@@ -364,10 +393,14 @@ class PersistentOverlayHost(
         if (retryCount >= maxRetries) return
         retryCount += 1
         Log.i(TAG, "Scheduling bounded overlay attach retry $retryCount/$maxRetries")
-        handler.postDelayed({ performAttach() }, ATTACH_RETRY_DELAY_MS)
+        handler.removeCallbacks(attachRetryRunnable)
+        handler.postDelayed(attachRetryRunnable, ATTACH_RETRY_DELAY_MS)
     }
 
     private fun performDetach() {
+        // Cancel a pending retry before anything else: a retry firing after
+        // teardown would re-add the window post-destroy (permanently leaked).
+        handler.removeCallbacks(attachRetryRunnable)
         abortDrag()
         cancelPendingAnchor()
         hideDropTarget()
@@ -395,8 +428,6 @@ class PersistentOverlayHost(
 
     private fun density(): Float = activeContext.resources.displayMetrics.density
 
-    private fun bubblePx(): Int = (placement.bubbleDp * density()).roundToInt()
-
     private fun displaySizePx(): Pair<Int, Int> {
         val wm = windowManager ?: serviceContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val bounds = wm.maximumWindowMetrics.bounds
@@ -410,7 +441,10 @@ class PersistentOverlayHost(
         return BubblePlacement.clamp(dw - sizePx - marginPx, (dh - sizePx) / 2, sizePx, sizePx, dw, dh)
     }
 
-    private fun overlayFlags(): Int = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+    // FLAG_HARDWARE_ACCELERATED: windows added from a service context are
+    // software-rendered unless the flag is set explicitly.
+    private fun overlayFlags(): Int = WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
         WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
 
@@ -418,7 +452,7 @@ class PersistentOverlayHost(
         context: Context,
         placement: OverlayPlacement,
     ): WindowManager.LayoutParams {
-        val sizePx = bubblePx()
+        val sizePx = bubbleSizePx()
         val saved = bubblePositionDp?.let {
             Pair((it.first * density()).roundToInt(), (it.second * density()).roundToInt())
         }
@@ -468,8 +502,8 @@ class PersistentOverlayHost(
         val currentView = view ?: return
         val wm = windowManager ?: return
         val base = currentPixel ?: return
-        val w = currentView.width.takeIf { it > 0 } ?: bubblePx()
-        val h = currentView.height.takeIf { it > 0 } ?: bubblePx()
+        val w = currentView.width.takeIf { it > 0 } ?: bubbleSizePx()
+        val h = currentView.height.takeIf { it > 0 } ?: bubbleSizePx()
         val (dw, dh) = displaySizePx()
         val target = BubblePlacement.clamp(
             (base.first + delta.x).roundToInt(),
@@ -703,13 +737,38 @@ class PersistentOverlayHost(
 
     /** Removes the persistent overlay window; idempotent, main-thread only. */
     override fun detach() {
+        teardownRequested = true
         handler.post { performDetach() }
+    }
+
+    /**
+     * Final host teardown for service onDestroy: cancels the init collectors,
+     * clears every pending callback (including attach retries) and
+     * synchronously removes the window if still attached. Idempotent — safe to
+     * call after [detach], and sufficient on its own.
+     */
+    fun dispose() {
+        scope.cancel()
+        handler.removeCallbacksAndMessages(null)
+        performDetach()
+        // performDetach is a no-op unless Attached (e.g. the last attach failed),
+        // but owners started by that failed attach must still be released.
+        if (ownersStarted) {
+            owners.stopOwners()
+            ownersStarted = false
+        }
     }
 
     private companion object {
         const val TAG = "PersistentOverlayHost"
         const val MAX_ATTACH_RETRIES = 3
         const val ATTACH_RETRY_DELAY_MS = 2000L
+
+        /** Settings range for the bubble size; the 48dp floor matches the
+         *  Compose touch target so visuals and anchoring math agree. */
+        const val MIN_BUBBLE_SIZE_DP = 48
+        const val MAX_BUBBLE_SIZE_DP = 72
+
         const val DROP_TARGET_DP = 56f
         const val DROP_TARGET_MARGIN_DP = 24f
     }

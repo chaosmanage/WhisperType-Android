@@ -120,7 +120,11 @@ private fun IdleBubble(
     val pressed by interaction.collectIsPressedAsState()
     val startLabel = stringResource(R.string.dictation_start)
     // 0.4.2 mini-dot: minimize after a quiet idle interval; a new Idle resets.
-    LaunchedEffect(Unit) {
+    // Keyed on the settings so changes apply while the bubble stays idle.
+    LaunchedEffect(
+        appearance.miniDotEnabled,
+        appearance.miniDotAutoMinimizeMs,
+    ) {
         minimized = false
         if (appearance.miniDotEnabled) {
             delay(appearance.miniDotAutoMinimizeMs)

@@ -25,6 +25,9 @@ sealed interface OverlayHostStatus {
  *    which is called strictly after `addView()` returns without throwing.
  *  - [detachRequested] is idempotent and safe during [AttachPending] (the view
  *    has not been added yet, so it merely cancels the pending attach).
+ *  - [windowLost] models a window vanishing without a detach (failed display
+ *    move): Attached collapses back to AttachFailed so a later attach is
+ *    permitted and eligibility-edge recovery applies again.
  */
 class OverlayHostStateMachine {
     var status: OverlayHostStatus = OverlayHostStatus.Detached
@@ -50,6 +53,13 @@ class OverlayHostStateMachine {
     /** Records that `addView()` threw; the host surfaces the typed diagnostic. */
     fun attachFailed() {
         if (status == OverlayHostStatus.AttachPending) status = OverlayHostStatus.AttachFailed
+    }
+
+    /** Records that an attached window was lost without a detach (e.g. a failed
+     *  display move removed the view); transitions out of [Attached] so a later
+     *  [attachRequested] is permitted. No-op in any other state. */
+    fun windowLost() {
+        if (status == OverlayHostStatus.Attached) status = OverlayHostStatus.AttachFailed
     }
 
     /** Enters [OverlayHostStatus.Recovering]; no-op when already detached. */

@@ -117,4 +117,48 @@ class OverlayHostStateMachineTest {
         assertTrue(m.detachRequested())
         assertEquals(OverlayHostStatus.Detached, m.status)
     }
+
+    @Test
+    fun `window lost from attached falls back to attach failed`() {
+        val m = OverlayHostStateMachine()
+        m.attachRequested()
+        m.attachSucceeded()
+        m.windowLost()
+        assertEquals(OverlayHostStatus.AttachFailed, m.status)
+    }
+
+    @Test
+    fun `attach permitted again after window lost`() {
+        val m = OverlayHostStateMachine()
+        m.attachRequested()
+        m.attachSucceeded()
+        m.windowLost()
+        assertTrue(m.attachRequested())
+        assertEquals(OverlayHostStatus.AttachPending, m.status)
+    }
+
+    @Test
+    fun `window lost outside attached is a no-op`() {
+        val m = OverlayHostStateMachine()
+        m.windowLost()
+        assertEquals(OverlayHostStatus.Detached, m.status)
+
+        m.attachRequested()
+        m.windowLost()
+        assertEquals(OverlayHostStatus.AttachPending, m.status)
+
+        m.attachFailed()
+        m.windowLost()
+        assertEquals(OverlayHostStatus.AttachFailed, m.status)
+    }
+
+    @Test
+    fun `detach after window lost stays an idempotent no-op`() {
+        val m = OverlayHostStateMachine()
+        m.attachRequested()
+        m.attachSucceeded()
+        m.windowLost()
+        assertFalse(m.detachRequested())
+        assertEquals(OverlayHostStatus.AttachFailed, m.status)
+    }
 }
