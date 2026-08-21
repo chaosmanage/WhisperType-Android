@@ -75,13 +75,15 @@ class ChunkerTest {
             nowNanos.also { nowNanos += FRAME_NANOS }
         }
 
+        // One push == one device read: every frame framed from those bytes
+        // carries that read's capture timestamp.
         val complete = chunker.push(ByteArray(FRAME_BYTES * 2 + 5))
         val flushed = requireNotNull(chunker.remaining())
         val chunks = complete + flushed
 
         assertEquals(listOf(0L, 1L, 2L), chunks.map { it.sequence })
         assertEquals(
-            listOf(1_000L, 1_000L + FRAME_NANOS, 1_000L + FRAME_NANOS * 2),
+            listOf(1_000L, 1_000L, 1_000L + FRAME_NANOS),
             chunks.map { it.capturedAtMonotonicNanos },
         )
     }

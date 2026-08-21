@@ -111,6 +111,9 @@ private class ScoCaptureSource(
 
     private var delegate: PcmSource? = null
 
+    /** Audio mode observed before entering communication mode; null when unknown. */
+    private var priorMode: Int? = null
+
     /** Activates SCO and returns [this] when the headset mic is ready, else null. */
     fun build(): PcmSource? {
         // Tap-to-recording fix (0.6.x): with no bluetooth audio device present
@@ -121,8 +124,14 @@ private class ScoCaptureSource(
             Log.i(TAG, "Bluetooth source: no bluetooth audio device present; using phone mic")
             return null
         }
+        // Remember the pre-existing mode so teardown restores it instead of
+        // stomping an ongoing call's communication-mode routing.
+        priorMode = runCatching { audioManager.mode }.getOrNull()
         val modeOk = runCatching { audioManager.mode = AudioManager.MODE_IN_COMMUNICATION }.isSuccess
-        if (!modeOk) return null
+        if (!modeOk) {
+            priorMode = null
+            return null
+        }
         val scoRequested = runCatching { audioManager.startBluetoothSco() }.isSuccess
         if (!scoRequested) {
             teardown()
@@ -169,7 +178,8 @@ private class ScoCaptureSource(
 
     private fun teardown() {
         runCatching { audioManager.stopBluetoothSco() }
-        runCatching { audioManager.mode = AudioManager.MODE_NORMAL }
+        runCatching { audioManager.mode = priorMode ?: AudioManager.MODE_NORMAL }
+        priorMode = null
     }
 
     private companion object {

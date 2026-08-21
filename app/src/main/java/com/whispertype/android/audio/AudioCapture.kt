@@ -21,6 +21,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -59,7 +60,7 @@ private object DefaultAudioCaptureScope : CoroutineScope {
 
 /**
  * [AudioPipeline] implementation: [PcmSource] -> [Chunker] -> bounded Channel,
- * with a ~20 Hz amplitude [StateFlow].
+ * with a ~16.7 Hz amplitude [StateFlow].
  *
  * Release C6: the producer owns the [Chunker] exclusively — no external caller
  * reads `remaining()`. [requestStop] unblocks the producer's blocking read and
@@ -105,7 +106,7 @@ class AudioCapture(
 
     private val _amplitude = MutableStateFlow(0f)
 
-    /** Smoothed input level in [0, 1], updated at ~20 Hz. */
+    /** Smoothed input level in [0, 1], updated at ~16.7 Hz. */
     override val amplitude: StateFlow<Float> = _amplitude.asStateFlow()
 
     private val _failures = MutableSharedFlow<DictationFailure>(replay = 1, extraBufferCapacity = 4)
@@ -219,6 +220,8 @@ class AudioCapture(
     private suspend fun producerLoop(source: PcmSource) {
         val buffer = ByteArray(readBufferBytes)
         var amplitudeTick = 0
+        var emptyReads = 0
+        var lastReadNanos = System.nanoTime()
         try {
             try {
                 while (!stopRequested.get()) {
@@ -227,21 +230,36 @@ class AudioCapture(
                         if (!stopRequested.get()) emitReadFailure()
                         break
                     }
-                    if (read > 0) {
-                        for (chunk in chunker.push(buffer, read)) {
-                            enqueue(chunk)
-                            // UI amplitude is sampled at ~16.7 Hz (every 3rd 20 ms frame);
-                            // capture and transmission stay at the full 50 Hz cadence.
-                            if (++amplitudeTick % AMPLITUDE_SAMPLE_EVERY == 0) {
-                                _amplitude.value =
-                                    smoothedAmplitude(chunk.pcm16Bytes, chunk.byteCount)
-                            }
+                    if (read == 0) {
+                        // A source that returns 0 without blocking (e.g. SCO with
+                        // no delegate) would otherwise spin this loop hot. Back
+                        // off, and treat a sustained silent run as a read failure.
+                        emptyReads++
+                        if (emptyReads * EMPTY_READ_BACKOFF_MS >= EMPTY_READ_GIVE_UP_MS) {
+                            if (!stopRequested.get()) emitReadFailure()
+                            break
+                        }
+                        delay(EMPTY_READ_BACKOFF_MS)
+                        continue
+                    }
+                    emptyReads = 0
+                    // Stamp capture time at read-return so frames held in the
+                    // partial-frame carry still report their true age.
+                    lastReadNanos = System.nanoTime()
+                    for (chunk in chunker.push(buffer, read, lastReadNanos)) {
+                        enqueue(chunk)
+                        // UI amplitude is sampled at ~16.7 Hz (every 3rd 20 ms frame);
+                        // capture and transmission stay at the full 50 Hz cadence.
+                        if (++amplitudeTick % AMPLITUDE_SAMPLE_EVERY == 0) {
+                            _amplitude.value =
+                                smoothedAmplitude(chunk.pcm16Bytes, chunk.byteCount)
                         }
                     }
                     // No artificial delay: AudioRecord's blocking read paces the stream
                     // at exactly real time. Any gap here would reach the Gemini Live
                     // ASR as choppy audio and break its voice-activity detection
-                    // (inputTranscription silently never fires).
+                    // (inputTranscription silently never fires). The empty-read
+                    // backoff above only fires for sources that return 0.
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -252,7 +270,7 @@ class AudioCapture(
             // Orderly shutdown: emit the zero-padded partial frame exactly once,
             // then close the channel so the ordered sender drains and stops.
             if (stopRequested.get() && !hardStopped.get()) {
-                chunker.remaining()?.let { enqueue(it) }
+                chunker.remaining(lastReadNanos)?.let { enqueue(it) }
             }
         } finally {
             queue.close()
@@ -265,8 +283,8 @@ class AudioCapture(
     }
 
     private suspend fun enqueue(chunk: AudioChunk) {
-        latestQueuedSequence.set(chunk.sequence)
         queue.send(chunk)
+        latestQueuedSequence.set(chunk.sequence)
     }
 
     private fun signalSourceStop(source: PcmSource) {
@@ -439,5 +457,9 @@ class AudioCapture(
         private const val MIC_INIT = "MIC_INIT"
         private const val MIC_READ = "MIC_READ"
         private const val NO_SEQUENCE = -1L
+        /** Backoff applied when a source returns 0 without blocking. */
+        private const val EMPTY_READ_BACKOFF_MS = 10L
+        /** Sustained silent-run give-up: ~2 s of consecutive empty reads fails the capture. */
+        private const val EMPTY_READ_GIVE_UP_MS = 2_000L
     }
 }

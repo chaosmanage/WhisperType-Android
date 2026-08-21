@@ -19,7 +19,7 @@ interface AudioPipeline {
     /** Bounded FIFO of 20 ms frames; closes after orderly shutdown or hard stop. */
     val chunks: ReceiveChannel<AudioChunk>
 
-    /** Smoothed input level in [0, 1] at ~20 Hz for the waveform. */
+    /** Smoothed input level in [0, 1] at ~16.7 Hz for the waveform. */
     val amplitude: StateFlow<Float>
 
     /** Typed terminal failures (mic init/read); the latest is replayed. */

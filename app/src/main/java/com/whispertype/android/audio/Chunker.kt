@@ -36,8 +36,11 @@ class Chunker(
     /**
      * Accumulates the first [byteCount] bytes of [pcm16]. This avoids copying a
      * short capture read into a right-sized temporary array before framing it.
+     * [capturedAtNanos] is the moment the bytes were read from the device (not
+     * the framing moment), so queue-age metrics stay honest for bytes held in
+     * the partial-frame carry; it defaults to now for direct/test callers.
      */
-    fun push(pcm16: ByteArray, byteCount: Int): List<AudioChunk> {
+    fun push(pcm16: ByteArray, byteCount: Int, capturedAtNanos: Long = nowNanos()): List<AudioChunk> {
         require(byteCount in 0..pcm16.size) {
             "byteCount must be in 0..${pcm16.size}, was $byteCount"
         }
@@ -57,7 +60,7 @@ class Chunker(
             val needed = bytesPerFrame - pendingSize
             pcm16.copyInto(pending, pendingSize, 0, needed)
             offset = needed
-            result.add(toChunk(pending))
+            result.add(toChunk(pending, capturedAtNanos))
             pending = ByteArray(bytesPerFrame)
             pendingSize = 0
         }
@@ -65,7 +68,7 @@ class Chunker(
         while (byteCount - offset >= bytesPerFrame) {
             val frame = ByteArray(bytesPerFrame)
             pcm16.copyInto(frame, 0, offset, offset + bytesPerFrame)
-            result.add(toChunk(frame))
+            result.add(toChunk(frame, capturedAtNanos))
             offset += bytesPerFrame
         }
 
@@ -81,18 +84,18 @@ class Chunker(
      * the trailing bytes. Returns null when there is nothing buffered. This is
      * how capture finalization avoids dropping a partial read.
      */
-    fun remaining(): AudioChunk? {
+    fun remaining(capturedAtNanos: Long = nowNanos()): AudioChunk? {
         if (pendingSize == 0) return null
         val frame = pending
         pending = ByteArray(bytesPerFrame)
         pendingSize = 0
-        return toChunk(frame)
+        return toChunk(frame, capturedAtNanos)
     }
 
-    private fun toChunk(frame: ByteArray): AudioChunk = AudioChunk(
+    private fun toChunk(frame: ByteArray, capturedAtNanos: Long): AudioChunk = AudioChunk(
         sequence = nextSequence++,
         pcm16Bytes = frame,
         sampleRateHz = sampleRateHz,
-        capturedAtMonotonicNanos = nowNanos(),
+        capturedAtMonotonicNanos = capturedAtNanos,
     )
 }
