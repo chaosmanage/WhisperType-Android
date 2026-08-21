@@ -105,7 +105,9 @@ object PolishPrompts {
             "academic diacritics like \"maiṁ kyā kar rahā hūṁ\".\n" +
             "- Keep English words in English, spelled normally.\n" +
             "- Never translate: Hindi words stay Hindi (in Latin letters) and English words stay " +
-            "English. If the whole sentence is English, return it in English."
+            "English. \"मैं अभी office जा रहा हूँ\" becomes \"Main abhi office ja raha hoon\", " +
+            "NOT \"I am going to the office right now\". If the whole sentence is English, " +
+            "return it in English."
 
     private const val VERBATIM_RULE =
         "TASK: return the transcript unchanged."

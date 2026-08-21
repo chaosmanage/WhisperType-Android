@@ -106,6 +106,19 @@ class PolishGuardTest {
     }
 
     @Test
+    fun `HIGH accepts a genuine editorial rewrite from a live model`() {
+        // 0.9.0 regression: a verified gpt-oss-20b HIGH reply scored retention
+        // ≈ 0.30 / invention ≈ 0.57 against this raw — the old floors (0.40 /
+        // 0.60) rejected it, silently degrading HIGH to raw ASR insertion.
+        val raw = "so basically i was thinking that we should probably you know redo the " +
+            "whole pricing model because like the current one is kind of confusing and " +
+            "um customers keep complaining about it"
+        val polished = "I propose we overhaul the entire pricing model, as the current " +
+            "structure is confusing and has led to frequent customer complaints."
+        assertIs<PolishGuard.Verdict.Accept>(verdict(raw, polished, TranscriptionStyle.HIGH))
+    }
+
+    @Test
     fun `blank output is always rejected`() {
         TranscriptionStyle.entries.forEach { style ->
             val v = verdict("some real words here", "   ", style)

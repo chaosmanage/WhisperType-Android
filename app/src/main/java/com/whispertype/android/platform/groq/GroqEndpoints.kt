@@ -14,15 +14,20 @@ object GroqEndpoints {
     const val CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
 
     /**
-     * Text-shaping model. `llama-3.1-8b-instant` is chosen for latency and for
-     * free-tier headroom: 30 RPM / 14,400 requests per day / 500K tokens per
-     * day, versus 1,000 requests per day for the 70B model.
+     * Text-shaping model. The llama-3.1/3.3 Groq deployments were decommissioned
+     * (verified live 2026-08-21: every llama chat model returns
+     * `model_not_found`), which silently degraded the whole text stage to raw
+     * ASR insertion. `openai/gpt-oss-120b` is the current free-tier pick: it
+     * follows the [PolishPrompts] level calibration including the Hinglish
+     * never-translate rule (verified live: it keeps Hindi words in Latin
+     * script, where gpt-oss-20b translated them to English).
      */
-    const val CHAT_MODEL = "llama-3.1-8b-instant"
+    const val CHAT_MODEL = "openai/gpt-oss-120b"
 
     /**
-     * Quality fallback for Hinglish romanization if the 8B model proves weak
-     * (free tier: 30 RPM / 1,000 RPD / 100K TPD).
+     * Speed fallback on the 429 retry path. A different deployment shares
+     * nothing with the primary's tokens-per-minute bucket, so a drained
+     * primary budget still rescues a dictation.
      */
-    const val CHAT_MODEL_FALLBACK = "llama-3.3-70b-versatile"
+    const val CHAT_MODEL_FALLBACK = "openai/gpt-oss-20b"
 }

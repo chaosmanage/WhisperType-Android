@@ -105,9 +105,19 @@ object TranscriptCompleteness {
         wordsPerSecond: Double = DEFAULT_WORDS_PER_SECOND,
     ): Double = durationMs / 1000.0 * wordsPerSecond
 
+    /**
+     * True when [text] contains any character from the Devanagari blocks the
+     * pipeline recognizes (U+0900–U+097F, U+A8E0–U+A8FF, U+1CD0–U+1CFF).
+     * Shared script gate: callers use it to decide whether word-identity
+     * comparisons are meaningful and whether a failed romanization leaves
+     * usable Latin text.
+     */
+    fun containsDevanagari(text: String): Boolean = text.any { ch ->
+        ch in '\u0900'..'\u097F' || ch in '\uA8E0'..'\uA8FF' || ch in '\u1CD0'..'\u1CFF'
+    }
+
     /** Lower-cased letter/digit runs, matching the selector's tokenization. */
-    fun contentWords(text: String): List<String> {
-        val result = ArrayList<String>()
+    fun contentWords(text: String): List<String> {        val result = ArrayList<String>()
         val current = StringBuilder()
         fun flush() {
             if (current.isNotEmpty()) {

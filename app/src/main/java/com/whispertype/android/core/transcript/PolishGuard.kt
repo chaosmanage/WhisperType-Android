@@ -154,7 +154,14 @@ object PolishGuard {
         TranscriptionStyle.NONE -> Limits(0.95, 0.9, 1.1, 0.10)
         TranscriptionStyle.LOW -> Limits(0.85, 0.8, 1.15, 0.15)
         TranscriptionStyle.MEDIUM -> Limits(0.70, 0.6, 1.4, 0.35)
-        TranscriptionStyle.HIGH -> Limits(0.40, 0.25, 2.0, 0.60)
+        // HIGH is a holistic rewrite: the model legitimately replaces most of
+        // the speaker's wording, so word-identity floors must be near-token
+        // (a verified live gpt-oss rewrite scores retention ≈ 0.30 and
+        // invention ≈ 0.57). The prompt's anti-answer calibration plus the
+        // question-shaped few-shots remain the answer defense at this level;
+        // the guard here only backstops wild hallucination (length blowup,
+        // blank/garbled replies).
+        TranscriptionStyle.HIGH -> Limits(0.15, 0.20, 2.2, 0.75)
     }
 
     /** A stray un-romanized word is tolerated; a mostly-Devanagari reply is not. */

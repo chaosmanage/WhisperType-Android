@@ -1058,6 +1058,37 @@ class DictationCoordinatorTest {
     }
 
     @Test
+    fun `Hinglish mode inserts Latin raw when the polish stage fails`() = runTest {
+        // 0.9.0: Hinglish speakers dictate whole turns in English. A dead or
+        // rate-limited polish stage must never surface the romanization error
+        // for a Latin-script transcript — the raw text is perfectly
+        // insertable (regression: English dictation in Hinglish mode errored
+        // with "Could not convert the Hindi text to Latin script").
+        val host = FakeHost()
+        val polish = FakePolish(this, outcome = PolishOutcome.NETWORK_ERROR, committedText = null)
+        host.resolveResult = SessionResolve.Ok(
+            SessionResolution(host.session, LanguageMode.HINGLISH, polish = polish),
+        )
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        coordinator.stop()
+        runCurrent()
+
+        sendTranscript(host, "can you tell me what the weather is like today")
+        advanceUntilIdle()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals("can you tell me what the weather is like today", host.insertions[0].second)
+        assertTrue(
+            states(host).none { it is DictationState.Error },
+            "a Latin raw must never fail as a romanization",
+        )
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
     fun `missing insertion result times out without retrying the commit`() = runTest {
         val host = FakeHost()
         val coordinator = DictationCoordinator(

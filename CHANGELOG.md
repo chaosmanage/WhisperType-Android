@@ -17,6 +17,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **The text stage works again — and HIGH finally rewrites.** Groq
+  decommissioned every llama chat model, so every polish call failed silently:
+  English dictation fell back to raw ASR (HIGH looked like it did nothing) and
+  Hinglish mode surfaced a bogus "could not convert the Hindi text" error even
+  for pure-English speech. The stage now runs on `openai/gpt-oss-120b` (with
+  `gpt-oss-20b` as the rate-limit fallback), verified live at all levels;
+  HIGH's guard budgets were relaxed to admit genuine editorial rewrites; and a
+  failed polish in Hinglish mode inserts Latin raw text instead of erroring —
+  the romanization failure is reserved for genuinely Devanagari transcripts.
+
 - **Browser address bars and phonetic name fields are dictatable again.** The
   secure-field classifier referenced wrong InputType constants, blocking URI
   fields and misclassifying phonetic-name fields as passwords.

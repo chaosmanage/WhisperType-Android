@@ -960,10 +960,15 @@ class DictationCoordinator(
                     holder.settledText = accepted
                     insertSettled(holder, accepted)
                 }
-                // Hinglish invariant (0.5.0, preserved): the raw ASR for Hindi is
-                // Devanagari, which is unusable as dictation output. A failed
-                // romanization is a retryable failure, never a Devanagari insert.
-                holder.language == LanguageMode.HINGLISH -> failRomanization(holder)
+                // Hinglish invariant (0.5.0, narrowed 0.9.0): a FAILED
+                // romanization is retryable only when the raw ASR is actually
+                // Devanagari (unusable as dictation output). When the speaker
+                // dictated in English/Latin script — common even in Hinglish
+                // mode — the raw text is perfectly insertable, so a dead or
+                // rate-limited polish stage must never surface a bogus
+                // "convert to Latin script" error.
+                holder.language == LanguageMode.HINGLISH &&
+                    TranscriptCompleteness.containsDevanagari(raw) -> failRomanization(holder)
                 else -> {
                     holder.settledText = raw
                     insertSettled(holder, raw)
