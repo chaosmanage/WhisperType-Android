@@ -23,6 +23,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,6 +61,10 @@ import kotlinx.coroutines.launch
  * with a subtle delete-all icon action and a confirmation dialog, and moves the
  * history-recording controls (enable + retention) here from Settings.
  */
+
+/** Retention slider bounds in days; [SettingsRepository.DEFAULT_RETENTION_DAYS] (= 30) sits at its center. */
+private val RETENTION_RANGE_DAYS_F: ClosedFloatingPointRange<Float> = 7f..90f
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(
@@ -78,6 +84,7 @@ fun HistoryScreen(
     var refreshKey by remember { mutableStateOf(0) }
     var entries by remember { mutableStateOf<List<HistoryRepository.HistoryEntry>>(emptyList()) }
     var showClearConfirm by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(refreshKey) { entries = historyRepository.events().first() }
 
     if (showClearConfirm) {
@@ -92,8 +99,10 @@ fun HistoryScreen(
                         scope.launch {
                             historyRepository.clear()
                             refreshKey++
+                            // Clear-all confirmation stays local to this screen's
+                            // SnackbarHost; only copy actions use [onCopied].
+                            snackbarHostState.showSnackbar(clearedLabel)
                         }
-                        onCopied(clearedLabel)
                     },
                 ) {
                     Text(stringResource(R.string.history_clear))
@@ -108,6 +117,7 @@ fun HistoryScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.history_title)) },
@@ -155,7 +165,7 @@ fun HistoryScreen(
                         modifier = Modifier
                             .padding(16.dp)
                             .animateContentSize(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -214,7 +224,7 @@ fun HistoryScreen(
             if (entries.isEmpty()) {
                 item {
                     Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                        modifier = Modifier.fillParentMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
@@ -249,8 +259,6 @@ fun HistoryScreen(
     }
 }
 
-private val RETENTION_RANGE_DAYS_F: ClosedFloatingPointRange<Float> = 7f..90f
-
 @Composable
 private fun HistoryEntryCard(
     entry: HistoryRepository.HistoryEntry,
@@ -272,8 +280,8 @@ private fun HistoryEntryCard(
         shape = MaterialTheme.shapes.large,
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(text = entry.text, style = MaterialTheme.typography.bodyLarge)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

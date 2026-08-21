@@ -24,7 +24,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -36,6 +38,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.whispertype.android.R
 import com.whispertype.android.core.dictionary.DictionaryEntry
 import com.whispertype.android.data.settings.SettingsRepository
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -52,6 +55,17 @@ fun DictionaryScreen(
     val dictionary by settings.dictionary.collectAsStateWithLifecycle(initialValue = emptyList())
     var dictionaryWord by remember { mutableStateOf("") }
     var dictionaryReplacement by remember { mutableStateOf("") }
+    var formFeedback by remember { mutableStateOf<DictionaryFeedback?>(null) }
+    var feedbackNonce by remember { mutableIntStateOf(0) }
+
+    // Inline form feedback auto-clears; the nonce re-arms the timer when the
+    // same message is shown again in quick succession.
+    LaunchedEffect(formFeedback, feedbackNonce) {
+        if (formFeedback != null) {
+            delay(FEEDBACK_CLEAR_DELAY_MS)
+            formFeedback = null
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -138,12 +152,26 @@ fun DictionaryScreen(
                 Button(
                     onClick = {
                         val word = dictionaryWord.trim()
-                        if (word.isNotEmpty()) {
+                        if (word.isEmpty()) {
+                            formFeedback = DictionaryFeedback(
+                                messageRes = R.string.settings_dictionary_blank_word,
+                                isError = true,
+                            )
+                            feedbackNonce++
+                        } else {
+                            val duplicate = dictionary.any { it.match == word }
                             scope.launch {
                                 settings.addDictionaryEntry(DictionaryEntry(word, dictionaryReplacement.trim()))
                             }
                             dictionaryWord = ""
                             dictionaryReplacement = ""
+                            if (duplicate) {
+                                formFeedback = DictionaryFeedback(
+                                    messageRes = R.string.settings_dictionary_duplicate,
+                                    isError = false,
+                                )
+                                feedbackNonce++
+                            }
                         }
                     },
                 ) {
@@ -155,6 +183,22 @@ fun DictionaryScreen(
                     Text(stringResource(R.string.settings_dictionary_clear))
                 }
             }
+            formFeedback?.let { feedback ->
+                Text(
+                    text = stringResource(feedback.messageRes),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (feedback.isError) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                )
+            }
         }
     }
 }
+
+/** Transient inline message shown under the add-word form. */
+private data class DictionaryFeedback(val messageRes: Int, val isError: Boolean)
+
+private const val FEEDBACK_CLEAR_DELAY_MS = 4_000L

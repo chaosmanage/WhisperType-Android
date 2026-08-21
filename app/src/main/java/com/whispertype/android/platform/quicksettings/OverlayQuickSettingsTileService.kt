@@ -2,6 +2,7 @@ package com.whispertype.android.platform.quicksettings
 
 import android.content.Intent
 import android.app.PendingIntent
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.provider.Settings
 import android.service.quicksettings.Tile
@@ -88,6 +89,20 @@ class OverlayQuickSettingsTileService : TileService() {
         qsTile?.apply {
             state = if (enabled) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
             label = getString(R.string.quick_settings_overlay_label)
+            // SystemUI tint-pipelines tile icons and needs a white-on-transparent
+            // monochrome glyph; the opaque launcher PNG fallback renders as a
+            // featureless square, so always set an explicit vector icon.
+            icon = Icon.createWithResource(
+                this@OverlayQuickSettingsTileService,
+                R.drawable.ic_tile_whispertype,
+            )
+            subtitle = getString(
+                if (enabled) {
+                    R.string.quick_settings_subtitle_on
+                } else {
+                    R.string.quick_settings_subtitle_off
+                },
+            )
             contentDescription = getString(
                 if (enabled) {
                     R.string.quick_settings_overlay_on

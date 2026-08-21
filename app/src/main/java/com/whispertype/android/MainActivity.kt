@@ -18,8 +18,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,6 +49,7 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -54,6 +57,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -69,6 +73,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -261,6 +267,7 @@ class MainActivity : ComponentActivity() {
     // Screens
     // ------------------------------------------------------------------
 
+    @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
     @Composable
     private fun HomeScreen(
         settings: SettingsRepository,
@@ -275,8 +282,11 @@ class MainActivity : ComponentActivity() {
         // recomposition.
         val historyEvents = remember(historyRepository) { historyRepository.events() }
         val historyEntries by historyEvents.collectAsStateWithLifecycle(initialValue = emptyList())
+        // Seeded from the repository default (the historyEnabled flow maps a
+        // missing key to true) so the first frame matches persisted state
+        // instead of flashing the disabled hint.
         val historyEnabled by settings.historyEnabled
-            .collectAsStateWithLifecycle(initialValue = false)
+            .collectAsStateWithLifecycle(initialValue = true)
         val appEnabled by settings.appEnabled.collectAsStateWithLifecycle(initialValue = true)
         // API-key presence is a blob stat read; probe it off Main once when Home
         // appears and again whenever the user returns to this tab (e.g. after
@@ -400,20 +410,41 @@ class MainActivity : ComponentActivity() {
                         onGeminiScrollDone = { settingsScrollToGemini = false },
                     )
 
-                    else -> Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.background,
-                    ) {
+                    else -> Scaffold(
+                        topBar = {
+                            // Chrome parity with the other three tabs; the brand
+                            // mark takes the slot the back arrow occupies there.
+                            TopAppBar(
+                                title = { Text(stringResource(R.string.home_title)) },
+                                navigationIcon = {
+                                    Image(
+                                        painter = painterResource(R.drawable.ic_bubble_logo),
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .padding(start = 16.dp)
+                                            .size(28.dp)
+                                            .clip(MaterialTheme.shapes.small),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                },
+                            )
+                        },
+                        containerColor = MaterialTheme.colorScheme.background,
+                    ) { innerPadding ->
                         Column(
                             modifier = Modifier
+                                .padding(innerPadding)
                                 .fillMaxSize()
                                 .verticalScroll(rememberScrollState())
                                 .padding(24.dp)
                                 .widthIn(max = 420.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                            Spacer(Modifier.height(8.dp))
-                            HomeHeader()
+                            Text(
+                                text = stringResource(R.string.home_subtitle),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                             Spacer(Modifier.height(24.dp))
                             StatsSection(
                                 historyEnabled = historyEnabled,
@@ -427,7 +458,7 @@ class MainActivity : ComponentActivity() {
                                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                                 ),
                             ) {
-                                Column(modifier = Modifier.padding(8.dp)) {
+                                Column(modifier = Modifier.padding(16.dp)) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -511,51 +542,41 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             Spacer(Modifier.height(24.dp))
-                            Text(
-                                text = stringResource(
+                            var showCommit by remember { mutableStateOf(false) }
+                            val versionText = if (showCommit) {
+                                stringResource(
                                     R.string.home_version,
                                     BuildConfig.VERSION_NAME,
                                     BuildConfig.VERSION_CODE,
                                     BuildConfig.GIT_COMMIT,
-                                ),
+                                )
+                            } else {
+                                // Same format string; an empty commit arg plus a
+                                // separator trim yields plain "Version x (y)".
+                                stringResource(
+                                    R.string.home_version,
+                                    BuildConfig.VERSION_NAME,
+                                    BuildConfig.VERSION_CODE,
+                                    "",
+                                ).substringBefore("·").trim()
+                            }
+                            Text(
+                                text = versionText,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .combinedClickable(
+                                        onClick = {},
+                                        onLongClick = { showCommit = true },
+                                    )
+                                    .semantics { contentDescription = versionText },
                             )
                             Spacer(Modifier.height(16.dp))
                         }
                     }
                     }
                 }
-            }
-        }
-    }
-
-    /** 0.4.2 friendly home header: the app logo, title, and a one-line invite. */
-    @Composable
-    private fun HomeHeader() {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Image(
-                painter = painterResource(R.drawable.ic_bubble_logo),
-                contentDescription = null,
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(MaterialTheme.shapes.medium),
-                contentScale = ContentScale.Crop,
-            )
-            Column {
-                Text(
-                    text = stringResource(R.string.home_title),
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = MaterialTheme.colorScheme.onBackground,
-                )
-                Text(
-                    text = stringResource(R.string.home_subtitle),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
     }
@@ -614,7 +635,7 @@ class MainActivity : ComponentActivity() {
                     Icon(
                         Icons.Filled.ChevronRight,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -708,11 +729,21 @@ class MainActivity : ComponentActivity() {
                 )
                 Spacer(Modifier.height(12.dp))
                 if (!historyEnabled) {
-                    Text(
-                        text = stringResource(R.string.home_stats_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    // Navigation hint: neutral tone plus chevron, never alarm-red.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.home_stats_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(
+                            Icons.Filled.ChevronRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                 } else {
                     val now = System.currentTimeMillis()
                     val stats = listOf(

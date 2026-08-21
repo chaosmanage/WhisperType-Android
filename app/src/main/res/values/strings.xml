@@ -105,7 +105,7 @@
     <string name="home_stats_week">Words this week</string>
     <string name="home_stats_wpm">Words / min</string>
     <string name="home_stats_per_session">Words / session</string>
-    <string name="home_stats_hint">Enable History in Settings to see your dictation stats.</string>
+    <string name="home_stats_hint">Turn on “Save dictation history” in the History tab to see your dictation stats.</string>
     <string name="status_on">On</string>
     <string name="status_off">Off</string>
     <string name="status_fix">Fix</string>
@@ -222,4 +222,9 @@
     <string name="history_clear">Clear</string>
     <string name="history_cancel">Cancel</string>
     <string name="history_back_desc">Back</string>
+    <string name="quick_settings_subtitle_on">Bubble on</string>
+    <string name="quick_settings_subtitle_off">Bubble off</string>
+    <string name="settings_polish_needs_groq">Polish levels run on your Groq key. Without it, raw speech is inserted.</string>
+    <string name="settings_dictionary_duplicate">That word already has a replacement — updated.</string>
+    <string name="settings_dictionary_blank_word">Type the word as you say it first.</string>
 </resources>

@@ -15,6 +15,7 @@ import android.view.WindowManager
 import android.widget.TextView
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import com.whispertype.android.core.contracts.OverlayController
@@ -23,6 +24,7 @@ import com.whispertype.android.core.model.OverlayIntent
 import com.whispertype.android.core.model.OverlayUiState
 import com.whispertype.android.core.model.TargetEligibility
 import com.whispertype.android.core.overlay.BubblePlacement
+import com.whispertype.android.ui.theme.WhisperTypeColors
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -678,12 +680,12 @@ class PersistentOverlayHost(
         val y = dh - size - margin
         val tv = TextView(serviceContext).apply {
             text = "\u2715"
-            setTextColor(0xFFFFFFFF.toInt())
+            setTextColor(WhisperTypeColors.OnSurface.toArgb())
             textSize = 24f
             gravity = Gravity.CENTER
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(0xCCE8593C.toInt())
+                setColor(WhisperTypeColors.RecordingAccent.copy(alpha = 0.8f).toArgb())
             }
         }
         val params = WindowManager.LayoutParams(

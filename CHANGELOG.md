@@ -4,6 +4,27 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-08-21
+
+### Fixed
+
+- **Quick Settings tile shows the WhisperType glyph** instead of a blank
+  square: the tile now uses a dedicated monochrome vector and carries an
+  on/off subtitle.
+- **Settings rows no longer crush their titles** ("Recordi ng source"):
+  wide controls (dropdowns, Reset-position) now render below the label in
+  a full-width footer; one consistent row pattern across all sections.
+- **Notifications use proper white glyphs** and the dictation notification
+  opens the app and offers Stop.
+
+### Changed
+
+- Home gains a top app bar for chrome parity across tabs; status-card
+  chevrons are neutral affordances; commit hash hides behind long-press.
+- Dictionary add form gives blank/duplicate feedback; clear-history
+  confirms via snackbar; retention range single-sourced.
+- Branded splash background; drop-target colors token-sourced.
+
 ## [0.9.0] - 2026-08-21
 
 ### Added

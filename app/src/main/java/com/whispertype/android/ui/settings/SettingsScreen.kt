@@ -3,6 +3,7 @@ package com.whispertype.android.ui.settings
 import android.media.AudioManager
 import android.view.KeyEvent
 import androidx.annotation.StringRes
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,12 +26,12 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -64,6 +65,7 @@ import com.whispertype.android.core.groq.GroqKeyValidation
 import com.whispertype.android.data.secrets.KeyProvider
 import com.whispertype.android.data.settings.SettingsRepository
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -130,6 +132,21 @@ fun SettingsScreen(
     val groqSaveFailedMessage = stringResource(R.string.settings_groq_save_failed)
     val groqClearedMessage = stringResource(R.string.settings_groq_cleared)
     val groqInvalidMessage = stringResource(R.string.settings_groq_invalid)
+
+    // Save/clear confirmations self-dismiss after ~5 s so stale feedback never
+    // lingers next to a later action; re-keying restarts the timer per message.
+    LaunchedEffect(keyFeedback) {
+        if (keyFeedback != null) {
+            delay(FEEDBACK_CLEAR_DELAY_MS)
+            keyFeedback = null
+        }
+    }
+    LaunchedEffect(groqKeyFeedback) {
+        if (groqKeyFeedback != null) {
+            delay(FEEDBACK_CLEAR_DELAY_MS)
+            groqKeyFeedback = null
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -200,10 +217,14 @@ fun SettingsScreen(
                 SettingRow(
                     title = stringResource(R.string.settings_auto_stop),
                     description = stringResource(R.string.settings_auto_stop_desc),
+                    wideControl = true,
                 ) {
                     var menuOpen by remember { mutableStateOf(false) }
-                    Box {
-                        OutlinedButton(onClick = { menuOpen = true }) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { menuOpen = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
                             Text(stringResource(autoStopSecondsLabelRes(autoStopSeconds)))
                         }
                         DropdownMenu(
@@ -236,10 +257,14 @@ fun SettingsScreen(
                 SettingRow(
                     title = stringResource(R.string.settings_polish),
                     description = stringResource(R.string.settings_polish_desc),
+                    wideControl = true,
                 ) {
                     var menuOpen by remember { mutableStateOf(false) }
-                    Box {
-                        OutlinedButton(onClick = { menuOpen = true }) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { menuOpen = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
                             Text(stringResource(polishLevelLabelRes(polishLevel)))
                         }
                         DropdownMenu(
@@ -258,16 +283,29 @@ fun SettingsScreen(
                         }
                     }
                 }
+                // 0.7.x surface the polish↔Groq coupling: any non-NONE polish
+                // level dials Groq, so flag it loudly while no key is stored.
+                if (polishLevel != TranscriptionStyle.NONE && !hasGroqKey) {
+                    Text(
+                        text = stringResource(R.string.settings_polish_needs_groq),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
 
                 // 0.6.0: recording input device. Phone mic by default; the
                 // connected bluetooth headset only when explicitly selected.
                 SettingRow(
                     title = stringResource(R.string.settings_audio_source),
                     description = stringResource(R.string.settings_audio_source_desc),
+                    wideControl = true,
                 ) {
                     var menuOpen by remember { mutableStateOf(false) }
-                    Box {
-                        OutlinedButton(onClick = { menuOpen = true }) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { menuOpen = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
                             Text(stringResource(audioSourceLabelRes(audioSourcePreference)))
                         }
                         DropdownMenu(
@@ -310,59 +348,73 @@ fun SettingsScreen(
                 // 0.6.0: physical-keyboard hotkey to start/complete dictation.
                 // Press-to-set capture: tapping the button grabs keyboard focus;
                 // the next key (optionally with a Ctrl/Alt/Shift/Meta combo) is
-                // recorded. Esc cancels.
+                // recorded. Esc cancels. While capturing, the affordance moves
+                // out of the trailing slot into a full-width bordered footer.
+                var capturing by remember { mutableStateOf(false) }
+                val focusRequester = remember { FocusRequester() }
+                LaunchedEffect(capturing) {
+                    if (capturing) focusRequester.requestFocus()
+                }
                 SettingRow(
                     title = stringResource(R.string.settings_hotkey),
                     description = stringResource(R.string.settings_hotkey_desc),
                 ) {
-                    var capturing by remember { mutableStateOf(false) }
-                    val focusRequester = remember { FocusRequester() }
-                    LaunchedEffect(capturing) {
-                        if (capturing) focusRequester.requestFocus()
-                    }
-                    Box(
-                        modifier = Modifier
-                            .focusRequester(focusRequester)
-                            .focusable()
-                            .onKeyEvent { event ->
-                                if (!capturing) return@onKeyEvent false
-                                val native = event.nativeKeyEvent
-                                when (native.action) {
-                                    KeyEvent.ACTION_DOWN -> {
-                                        when (native.keyCode) {
-                                            KeyEvent.KEYCODE_ESCAPE -> {
-                                                capturing = false
-                                                true
-                                            }
-                                            in HOTKEY_MODIFIER_KEYS -> true // keep waiting
-                                            else -> {
-                                                scope.launch {
-                                                    settings.setHotkeyKeycode(native.keyCode)
-                                                    settings.setHotkeyModifiers(
-                                                        native.metaState and HotkeyShortcut.MODIFIER_MASK,
-                                                    )
-                                                }
-                                                capturing = false
-                                                true
-                                            }
-                                        }
-                                    }
-                                    KeyEvent.ACTION_UP -> false
-                                    else -> false
-                                }
-                            },
-                    ) {
-                        if (capturing) {
-                            Text(stringResource(R.string.settings_hotkey_capture))
-                        } else {
-                            OutlinedButton(onClick = { capturing = true }) {
-                                Text(hotkeyLabel(hotkeyKeycode, hotkeyModifiers))
-                            }
+                    if (!capturing) {
+                        OutlinedButton(onClick = { capturing = true }) {
+                            Text(hotkeyLabel(hotkeyKeycode, hotkeyModifiers))
                         }
                     }
-                    if (capturing) {
-                        TextButton(onClick = { capturing = false }) {
-                            Text(stringResource(R.string.settings_hotkey_cancel))
+                }
+                if (capturing) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.medium,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(focusRequester)
+                                .focusable()
+                                .onKeyEvent { event ->
+                                    if (!capturing) return@onKeyEvent false
+                                    val native = event.nativeKeyEvent
+                                    when (native.action) {
+                                        KeyEvent.ACTION_DOWN -> {
+                                            when (native.keyCode) {
+                                                KeyEvent.KEYCODE_ESCAPE -> {
+                                                    capturing = false
+                                                    true
+                                                }
+                                                in HOTKEY_MODIFIER_KEYS -> true // keep waiting
+                                                else -> {
+                                                    scope.launch {
+                                                        settings.setHotkeyKeycode(native.keyCode)
+                                                        settings.setHotkeyModifiers(
+                                                            native.metaState and HotkeyShortcut.MODIFIER_MASK,
+                                                        )
+                                                    }
+                                                    capturing = false
+                                                    true
+                                                }
+                                            }
+                                        }
+                                        KeyEvent.ACTION_UP -> false
+                                        else -> false
+                                    }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.settings_hotkey_capture),
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = { capturing = false }) {
+                                Text(stringResource(R.string.settings_hotkey_cancel))
+                            }
                         }
                     }
                 }
@@ -409,9 +461,11 @@ fun SettingsScreen(
                 SettingRow(
                     title = stringResource(R.string.settings_bubble_reset),
                     description = stringResource(R.string.settings_bubble_reset_desc),
+                    wideControl = true,
                 ) {
                     TextButton(
                         onClick = { scope.launch { settings.resetBubblePosition() } },
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(stringResource(R.string.settings_bubble_reset))
                     }
@@ -552,6 +606,9 @@ fun SettingsScreen(
     }
 }
 
+/** Delay before save/clear feedback lines clear themselves. */
+private const val FEEDBACK_CLEAR_DELAY_MS = 5_000L
+
 /** 0.4.2 card-wrapped settings section: a titled card grouping related
  *  controls, matching the home screen's card style. */
 @Composable
@@ -627,23 +684,53 @@ private fun SettingSlider(
     }
 }
 
+/**
+ * Canonical setting row: a full-width text block (title + supporting
+ * description) with a compact trailing control beside it. Replaces the
+ * previous Material3 [ListItem] version, whose trailing slot is measured
+ * FIRST — wide controls starved headline/supporting text into slivers.
+ *
+ * When [wideControl] is true the [trailing] slot is not used beside the text;
+ * instead its content renders as a full-width footer BELOW the text block
+ * (Google Settings pattern: control under label). Call sites pass their wide
+ * controls (dropdown triggers, reset actions) with `Modifier.fillMaxWidth()`.
+ */
 @Composable
 private fun SettingRow(
     title: String,
     description: String,
+    wideControl: Boolean = false,
     trailing: @Composable () -> Unit,
 ) {
-    ListItem(
-        headlineContent = { Text(text = title) },
-        supportingContent = {
+    if (wideControl) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(text = title, style = MaterialTheme.typography.titleMedium)
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        },
-        trailingContent = trailing,
-    )
+            Box(modifier = Modifier.fillMaxWidth()) {
+                trailing()
+            }
+        }
+    } else {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = title, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            trailing()
+        }
+    }
 }
 
 private val BUBBLE_SIZE_RANGE_DP_F: ClosedFloatingPointRange<Float> =

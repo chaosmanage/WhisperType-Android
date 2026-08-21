@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.drawable.Icon
 import android.media.AudioManager
 import android.os.Binder
 import android.os.Build
@@ -25,6 +26,7 @@ import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.ViewModelStore
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
+import com.whispertype.android.MainActivity
 import com.whispertype.android.R
 import com.whispertype.android.audio.AudioCapture
 import com.whispertype.android.audio.AudioPipeline
@@ -278,6 +280,14 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
      * resurrect an idle overlay runtime nobody asked for.
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Notification Stop action ([ACTION_STOP] via PendingIntent.getService):
+        // delivered through startService, so no foreground-promotion obligation
+        // applies; reuse the existing idempotent kill-switch shutdown path,
+        // which aborts dictation, tears down the overlay and ends in stopSelf().
+        if (intent?.action == ACTION_STOP) {
+            shutdownForKillSwitch()
+            return START_NOT_STICKY
+        }
         startForeground(NOTIFICATION_ID, buildNotification(), overlayFgsTypes())
         return START_NOT_STICKY
     }
@@ -757,10 +767,31 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     }
 
     private fun buildNotification(): Notification {
+        val contentIntent = PendingIntent.getActivity(
+            this,
+            CONTENT_REQUEST_CODE,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val stopIntent = Intent(this, FlowRuntimeService::class.java).setAction(ACTION_STOP)
+        val stopPending = PendingIntent.getService(
+            this,
+            STOP_REQUEST_CODE,
+            stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         return Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setContentTitle(getString(R.string.mic_notification_title))
             .setContentText(getString(R.string.mic_notification_text))
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_whispertype)
+            .setContentIntent(contentIntent)
+            .addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(this, R.drawable.ic_stat_whispertype),
+                    getString(R.string.notification_action_stop),
+                    stopPending,
+                ).build(),
+            )
             .setOngoing(true)
             .build()
     }
@@ -832,7 +863,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         val notification = Notification.Builder(this, A11Y_WATCHDOG_CHANNEL_ID)
             .setContentTitle(getString(R.string.a11y_watchdog_title))
             .setContentText(getString(R.string.a11y_watchdog_text))
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_whispertype)
             .setContentIntent(contentIntent)
             .setAutoCancel(true)
             .build()
@@ -849,6 +880,15 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         const val TAG = "FlowRuntimeService"
         const val NOTIFICATION_ID = 1001
         const val NOTIFICATION_CHANNEL_ID = "whispertype_runtime"
+
+        /**
+         * Foreground-notification Stop action ([PendingIntent.getService] with
+         * this action on an explicit intent to this service); handled first in
+         * [onStartCommand].
+         */
+        const val ACTION_STOP = "com.whispertype.android.action.STOP"
+        private const val CONTENT_REQUEST_CODE = 1
+        private const val STOP_REQUEST_CODE = 2
 
         /** 0.5.2: low-importance channel/id for the accessibility-drop watchdog. */
         const val A11Y_WATCHDOG_CHANNEL_ID = "whispertype_a11y_watchdog"

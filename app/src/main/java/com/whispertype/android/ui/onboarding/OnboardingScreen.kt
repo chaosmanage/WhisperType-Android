@@ -3,6 +3,7 @@ package com.whispertype.android.ui.onboarding
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -137,14 +138,13 @@ fun OnboardingScreen(
             // Permissions
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
-                    modifier = Modifier.padding(12.dp),
+                    modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
                         text = stringResource(R.string.onboarding_setup_title),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(start = 4.dp),
                     )
                     PermissionRow(
                         title = stringResource(R.string.onboarding_overlay),
@@ -253,15 +253,17 @@ fun OnboardingScreen(
 private fun HowStep(number: Int, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Surface(
+            modifier = Modifier.size(24.dp),
             shape = CircleShape,
             color = MaterialTheme.colorScheme.primaryContainer,
         ) {
-            Text(
-                text = number.toString(),
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = number.toString(),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
         }
         Spacer(Modifier.width(12.dp))
         Text(
