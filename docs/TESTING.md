@@ -22,7 +22,6 @@ There are **no instrumented tests**. `app/src/androidTest` contains only a manif
 | `com.whispertype.android.core.audio` | `AudioInputSelectionTest` (0.7.0 input priorities and fallbacks). |
 | `com.whispertype.android.core.groq` | `GroqKeyValidationTest` (0.7.0 key shape rules). |
 | `com.whispertype.android.audio` | `AudioCaptureOrderlyShutdownTest` (producer-owned flush, zero-padded partial frame, unblocking a blocking read, timeout fallback), `PreReadyAudioBufferTest` (bounded FIFO, overflow, close). |
-| `com.whispertype.android.core.state` | `DictationReducerTest` — state transitions, stale-session rejection, exactly-once consumption. |
 | `com.whispertype.android.core.privacy` | `LogRedactorTest`. |
 | `com.whispertype.android.data.secrets` | `SecretCipherTest`, `ClientInvalidRecoveryTest` — Keystore/AES-GCM storage, corrupt-blob recovery. |
 | `com.whispertype.android.data.settings` | `SettingsRepositoryTest` — defaults and persistence. |
