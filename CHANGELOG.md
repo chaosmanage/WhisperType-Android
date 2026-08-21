@@ -4,6 +4,48 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-08-21
+
+### Added
+
+- **Material 3 / Material You redesign.** Dynamic color from the wallpaper on
+  Android 12+ (emerald-teal brand fallback below), a full M3 typography and
+  shape system, top app bars, a bottom navigation bar, edge-to-edge layout,
+  animated destination transitions, and restyled settings/history/dictionary/
+  onboarding screens. The overlay bubble and recording pill adopt matching
+  tonal surfaces with unchanged behavior.
+
+### Fixed
+
+- **Browser address bars and phonetic name fields are dictatable again.** The
+  secure-field classifier referenced wrong InputType constants, blocking URI
+  fields and misclassifying phonetic-name fields as passwords.
+- **The polish stage can no longer freeze the UI.** Groq response reading and
+  parsing moved off the main thread with a hard 10 s call timeout.
+- **Overlay window can no longer leak after a failed attach**, and a failed
+  DeX display move now recovers instead of stranding the bubble until restart.
+- **The Copy button on the ambiguous-insertion panel works** — it copies the
+  settled transcript and shows the copied confirmation.
+- **Quick re-enabling from Quick Settings no longer risks a crash** (missing
+  `onStartCommand` foreground promotion).
+- **Groq API keys (`gsk_…`) are always redacted from logs**, including
+  percent-encoded parameter forms; history copies are marked sensitive.
+- **History is decrypted off the main thread** — Home no longer re-decrypts
+  the whole blob every second; sliders commit once on release instead of
+  writing settings ~60×/s while dragging.
+- **Warm session reconnects back off when an endpoint flaps** instead of
+  looping at 1 s; audio capture backs off silent sources instead of spinning;
+  Bluetooth teardown restores the prior audio mode.
+- **Accessibility event handling is calmer**: own-package events skipped,
+  content-change refreshes debounced, settings polling moved off the main
+  thread, honest microphone-permission eligibility.
+
+### Removed
+
+- Dead code: the unused reserve/commit IPC protocol half, the test-only
+  dictation reducer, the unreachable echo/repair transcript machinery, and
+  the framework-free violation in `GemAudioFormat`.
+
 ## [0.8.3] - 2026-08-17
 
 ### Added
