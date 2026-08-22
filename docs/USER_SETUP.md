@@ -112,7 +112,7 @@ Keep SwiftKey, Gboard, or Samsung Keyboard selected as your default.
 
 1. Open WhisperType.
 2. Tap the `Settings` tab (bottom navigation).
-3. Open the `Gemini account` section.
+3. Open the `API keys` section.
 4. Paste or type your key.
 5. Tap `Save key`.
 6. The card confirms the key is configured; the Home tab's `Gemini API key` tile reads On.
@@ -477,7 +477,7 @@ Disabling the service immediately hides the bubble and cancels any active record
 
 Open:
 
-`WhisperType → Settings tab → Gemini account → Clear key`
+`WhisperType → Settings tab → API keys → Clear key`
 
 Then confirm deletion.
 

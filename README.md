@@ -130,7 +130,7 @@ transcript text ever appears in logs.
    prompted.
 3. **Enable the Accessibility Service** — `Settings → Accessibility →
    WhisperType`.
-4. **Add your Gemini API key** — Settings tab → Gemini account → Save key. The
+4. **Add your Gemini API key** — Settings tab → API keys → Save key. The
    key is encrypted on-device with an Android Keystore AES-GCM key and never
    logged.
 5. **Dictate** — focus a text field, tap the bubble, and speak.

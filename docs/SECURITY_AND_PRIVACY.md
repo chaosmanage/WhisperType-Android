@@ -24,17 +24,20 @@ Reasonable reports are acknowledged and triaged as a normal PR with the `privacy
 
 | Version | Support |
 | --- | --- |
-| 0.4.x | Current line; developed on the `feature` branch. |
+| 0.9.x | Current line; developed on short-lived `feature/…` branches. |
 
 Only the current minor line is actively maintained. Devices on an older line than the currently tested one receive security fixes by upgrading to the current release.
 
 ## App threat model summary
 
-- **API key encryption.** The Gemini API key is encrypted with an Android Keystore AES-GCM 256-bit key (alias `whispertype_api_key`) and stored as ciphertext plus a random 12-byte IV in an app-private no-backup file. The plaintext key is never written to DataStore, SharedPreferences, Room, resources, BuildConfig, or logs; it exists only transiently in memory. Incoming keys are rejected unless prefixed `AIza`. If the Keystore reports the key invalidated, the stored ciphertext is discarded and the user is asked to re-enter the key.
+- **API key encryption.** The Gemini API key is encrypted with an Android Keystore AES-GCM 256-bit key (alias `whispertype_api_key`) and stored as ciphertext plus a random 12-byte IV in an app-private no-backup file. The plaintext key is never written to DataStore, SharedPreferences, Room, resources, BuildConfig, or logs; it exists only transiently in memory. Incoming keys are accepted in the current Google key formats (`AIza…` legacy and `AQ.`-prefixed app keys), validated as non-empty at save time and charset-guarded when a session is created. If the Keystore reports the key invalidated, the stored ciphertext is discarded and the user is asked to re-enter the key.
 - **No key in Git.** Keystore files, `signing.properties`, API keys, and transcripts are blacklisted for the repository (text node). The optional local history is encrypted with a separate AES-GCM Keystore key (`whispertype_history`).
 - **Transcripts are kept only in encrypted local history.** Transcript candidates exist only in memory for the duration of a session and are cleared on insertion, copy fallback, cancellation, or failure. Settled dictations are stored encrypted in local history, which is on by default (30-day retention) and can be turned off in the History tab. Transcripts are never logged.
 - **No backend server.** Audio streams directly from the device to the Gemini Live API over TLS. There is no WhisperType cloud account or backend.
 - **Backup exclusions.** `android:allowBackup="false"` plus `data_extraction_rules.xml` exclude every backup/device-transfer path (root, database, sharedpref, file, external).
+
+- **Transport hardening (0.9.2).** The Groq text client disables redirects (transcript-bearing bodies can never be replayed cross-host); inbound Gemini WebSocket frames larger than 8 MB fail the session instead of risking heap exhaustion; server-supplied error strings are bounded before reaching UI; IPC messages from foreign UIDs are dropped at the runtime Messenger gate.
+- **UI hygiene.** API-key fields are masked with a visibility toggle; the overlay bubble has a 30% minimum opacity so it never invisibly consumes touches.
 - **Diagnostics redaction.** `DiagnosticsExporter` keeps at most 256 typed events with aggregate timing. Exports never include transcripts, audio, API keys, the authenticated Gemini URL, editor text, or app package data. Logging tags are stable and non-sensitive (`WT-Accessibility`, `WT-Gemini`, `WT-Dictation`, `WT-Settings`), and `LogRedactor` is applied to logs and exceptions.
 - **Accessibility disclosure.** The service requests only editable-field detection, keyboard-window bounds, input connection access, and final text insertion, and never reads or stores unrelated screen content. Secure fields are excluded.
 - **Microphone.** Recorded only during an active dictation session initiated by the user. A foreground notification with Stop and Cancel actions is shown while recording; there is no background recording.
@@ -56,7 +59,7 @@ The Gemini API key is the only secret the app stores.
 - The ciphertext and its IV are stored in an app-private no-backup file inside `getNoBackupFilesDir()`.
 - The plaintext key is never placed in DataStore, SharedPreferences, Room, resources, BuildConfig, environment variables, or logs.
 - Plaintext key material is cleared from memory after each use.
-- Incoming keys are rejected if they do not start with the `AIza` prefix (invalid-key rejection at entry).
+- Incoming keys are validated non-empty at entry; session creation charset-guards the key before it is embedded in the WebSocket URL.
 - If the Keystore reports `KEY_INVALIDATED` (for example after device lock-state or key-access changes), the stored ciphertext is discarded and the recovery path asks the user to re-enter the key.
 - Keys are not bound to user authentication; a lock-screen credential is not required to use the key.
 

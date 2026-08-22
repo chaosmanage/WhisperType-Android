@@ -858,8 +858,10 @@ API key configured, no active dictation — `FlowRuntimeService.computeWarmEligi
 - States: `None -> Connecting -> Ready(session) -> Claimed -> Closing`, with
   `Backoff(retryMs)` between failed attempts.
 - **Reconnect backoff: 1 s, 2 s, 5 s, then 10 s** (`Config.backoffStepsMs`); the
-  last step repeats (`getOrElse ... last()`), with `backoffAttempt` reset to 0
-  on success.
+  last step repeats. 0.9.x: the ladder resets to the fastest step only when a
+  session stayed ready for at least `Config.readyLifetimeFloorMs` (default
+  10 s) — a flapping connect→ready→die endpoint climbs the ladder instead of
+  looping at 1 s forever.
 - **Idle timeout: 30 s** (`Config.warmIdleTimeoutMs`); when it fires, the warm
   session is closed and the pool returns to `None`. A `Claimed` session is never
   closed by the manager — it belongs to an active dictation.

@@ -54,7 +54,7 @@ The bubble requires all of the following at once:
 2. The runtime service is running (Home tab -> "Runtime service" tile -> Fix restarts it).
 3. Accessibility Service enabled.
 4. Microphone permission granted.
-5. A Gemini API key saved (key status is shown on the Home tab and under `Settings -> Gemini account`).
+5. A Gemini API key saved (key status is shown on the Home tab and under `Settings → API keys`).
 6. The app is enabled: `Settings -> General -> App enabled` must be ON. When it is off, the runtime is fully stopped — bubble, notifications, and dictation are all off until you turn it back on. This is the kill switch.
 7. A focused text field that is not secure (password/PIN/payment fields never show the bubble).
 8. A fully visible, supported docked keyboard (no floating/split layouts).
@@ -90,7 +90,7 @@ Without the notification permission, the recording foreground service cannot sho
 
 ## API key validation
 
-- Enter the key under `Settings -> Gemini account` and tap `Save key`. The key is encrypted with Android Keystore-backed storage and never stored in logs, preferences, or backups.
+- Enter the key under `Settings → API keys` and tap `Save key`. The key is encrypted with Android Keystore-backed storage and never stored in logs, preferences, or backups.
 - Gemini rejects an invalid key with 400/401/403 on the live connection. Create a new key in Google AI Studio with Gemini API access.
 - "Network error": no internet or a VPN/firewall/private DNS is blocking `generativelanguage.googleapis.com`.
 - A session started without a stored key fails immediately with `runtime_no_api_key`.
