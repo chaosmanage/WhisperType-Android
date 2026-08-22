@@ -1289,6 +1289,120 @@ class DictationCoordinatorTest {
     }
 
     @Test
+    fun `ambiguous error panel persists until dismissed`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        sendTranscript(host, "hello world")
+        advanceUntilIdle()
+
+        coordinator.onInsertionResult(sessionId, InsertionResult.Ambiguous)
+        runCurrent()
+
+        val error = states(host).last() as DictationState.Error
+        assertEquals("insert_ambiguous", error.failure.code)
+        assertEquals(TerminalOutcome.AMBIGUOUS_COMMIT, coordinator.activeMetrics()!!.terminalOutcome)
+
+        // Well past the old transient window (returnToIdleMs = 1_200 ms): the
+        // actionable Copy/Dismiss panel must still be up.
+        advanceTimeBy(5_000)
+        assertIs<DictationState.Error>(states(host).last())
+        assertTrue(coordinator.isActive)
+
+        // OverlayIntent.DISMISS routes here via FlowRuntimeService.
+        coordinator.dismiss()
+        runCurrent()
+
+        assertEquals(DictationState.Idle, states(host).last())
+        assertFalse(coordinator.isActive)
+        // The delayed reset's cleanup duty ran exactly once, user-driven...
+        assertEquals(1, host.finished.size)
+        assertTrue(host.finished.single().first is DictationState.Error)
+        // ...and the lingering safety net later fired as a harmless no-op
+        // (identity guard): still exactly one Idle publication.
+        advanceUntilIdle()
+        assertEquals(1, states(host).count { it == DictationState.Idle })
+        assertEquals(DictationState.Idle, states(host).last())
+    }
+
+    @Test
+    fun `clipboard copy failure error persists until dismissed`() = runTest {
+        val host = FakeHost()
+        host.clipboardResult = false
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        sendTranscript(host, "hello world")
+        advanceUntilIdle()
+
+        coordinator.onInsertionResult(
+            sessionId,
+            InsertionResult.Failed(
+                DictationFailure(
+                    code = "insert_target_ineligible",
+                    message = "No safe text field is focused. Not a password or secure field.",
+                    recoverable = true,
+                ),
+            ),
+        )
+        runCurrent()
+
+        assertEquals(listOf(sessionId to "hello world"), host.clipboardCopies)
+        val error = states(host).filterIsInstance<DictationState.Error>().single()
+        assertEquals("insert_target_ineligible", error.failure.code)
+        assertEquals(TerminalOutcome.TARGET_REJECTED, coordinator.activeMetrics()!!.terminalOutcome)
+
+        // Well past the old transient window: the actionable panel must survive.
+        advanceTimeBy(5_000)
+        assertIs<DictationState.Error>(states(host).last())
+
+        coordinator.dismiss()
+        runCurrent()
+
+        assertEquals(DictationState.Idle, states(host).last())
+        assertFalse(coordinator.isActive)
+        assertEquals(1, host.finished.size)
+        // The lingering safety net later fires as a harmless no-op.
+        advanceUntilIdle()
+        assertEquals(DictationState.Idle, states(host).last())
+    }
+
+    @Test
+    fun `ignored ambiguous panel is still bounded by the generous safety net`() = runTest {
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        val sessionId = listeningId(host)
+        coordinator.stop()
+        sendTranscript(host, "hello world")
+        advanceUntilIdle()
+
+        coordinator.onInsertionResult(sessionId, InsertionResult.Ambiguous)
+        runCurrent()
+        assertIs<DictationState.Error>(states(host).last())
+
+        // One millisecond short of the backstop: still waiting for the user.
+        advanceTimeBy(DictationCoordinator.Config().actionablePanelTimeoutMs - 1)
+        runCurrent()
+        assertIs<DictationState.Error>(states(host).last())
+
+        advanceTimeBy(2)
+        runCurrent()
+
+        // The ignored panel cannot pin a finished session forever.
+        assertEquals(DictationState.Idle, states(host).last())
+        assertFalse(coordinator.isActive)
+        assertEquals(1, host.finished.size)
+        assertTrue(host.finished.single().first is DictationState.Error)
+    }
+
+    @Test
     fun `copy after ambiguous insertion publishes CopiedToClipboard`() = runTest {
         val host = FakeHost()
         val coordinator = coordinator(this, host)
@@ -1300,7 +1414,8 @@ class DictationCoordinatorTest {
         advanceUntilIdle()
 
         // Ambiguous commit: the error panel offers Copy while the session is
-        // still active (the retryable=false reset timer has not fired yet).
+        // still active (the panel persists; only the generous safety net or a
+        // user action ends the session).
         coordinator.onInsertionResult(sessionId, InsertionResult.Ambiguous)
         runCurrent()
         val error = states(host).last() as DictationState.Error

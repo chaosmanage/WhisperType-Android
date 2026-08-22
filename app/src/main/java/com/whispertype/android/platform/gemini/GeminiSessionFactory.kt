@@ -35,6 +35,13 @@ object GeminiSessionFactory {
         metrics: MutableSessionMetrics? = null,
     ): OkHttpGeminiLiveSession {
         require(apiKey.isNotEmpty()) { "apiKey must not be empty" }
+        require(apiKey.matches(Regex("[A-Za-z0-9_\\-]+"))) { "apiKey contains invalid URL characters" }
+        require(
+            config.model == LIVE_MODEL &&
+                config.apiVersion == GeminiSessionConfig.DEFAULT_API_VERSION,
+        ) {
+            "MODEL POLICY — only $LIVE_MODEL over ${GeminiSessionConfig.DEFAULT_API_VERSION} may be called"
+        }
         return OkHttpGeminiLiveSession(client, buildWsUrl(apiKey, config), config, metrics)
     }
 

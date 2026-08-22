@@ -4,6 +4,38 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-08-21
+
+### Security hardening
+
+- **Groq client no longer follows redirects** — a compromised endpoint cannot
+  replay transcript-bearing bodies cross-host.
+- **Gemini API keys are validated** before use (charset guard on the URL
+  transport) and the session factory now enforces the Live-model policy at
+  runtime, not just at build time.
+- **Oversized inbound WebSocket frames (>8 MB) fail the session** instead of
+  risking heap exhaustion; server error strings are bounded before reaching
+  the overlay.
+- **IPC messages from foreign UIDs are dropped** at the runtime's Messenger
+  gate (defense-in-depth for the transcript path).
+- **API key fields are masked** with a visibility toggle in Settings and
+  onboarding; crash-orphaned temp ciphertext files are swept at startup.
+- **Bubble opacity floor raised to 30%** so a near-invisible bubble can no
+  longer silently consume touches over other apps.
+
+### Fixed
+
+- **Actionable error panels stay until dismissed** — the ambiguous-insertion
+  panel ("Use Copy to grab it") and clipboard-failure errors no longer
+  self-destruct after ~1.2 s (30 s safety net instead).
+- **Onboarding**: microphone + notifications merged into one step; a denied
+  permission now offers "Open settings" instead of silently re-asking.
+- **Destructive-action parity**: single-entry history deletes and dictionary
+  clear-all now confirm first; the dictionary add form moved above the list.
+- **Home shows fixes before stats** when something needs attention; stat
+  numbers stay legible under any Material You palette; internal QA language
+  removed from shipped copy.
+
 ## [0.9.1] - 2026-08-21
 
 ### Fixed

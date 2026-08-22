@@ -39,6 +39,8 @@ object GeminiLiveWire {
     private const val AUDIO_CHUNK_MIME_TAIL = "\",\"mimeType\":\"audio/pcm;rate="
     private const val AUDIO_CHUNK_CLOSE = "\"}}}"
 
+    private const val MAX_SERVER_DETAIL_CHARS = 200
+
     // ------------------------------------------------------------------
     // Client -> server
     // ------------------------------------------------------------------
@@ -202,6 +204,7 @@ object GeminiLiveWire {
         message
             ?.takeIf { it.isNotBlank() }
             ?.let(LogRedactor::sanitize)
+            ?.take(MAX_SERVER_DETAIL_CHARS)
             ?: "Unknown setup error"
 
     private fun unknownServerMessage(): ServerMessage =

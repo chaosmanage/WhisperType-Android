@@ -16,6 +16,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -52,6 +54,8 @@ import androidx.compose.foundation.focusable
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.whispertype.android.R
@@ -118,11 +122,13 @@ fun SettingsScreen(
 
     var hasKey by remember { mutableStateOf(keyProvider.hasKey()) }
     var keyInput by remember { mutableStateOf("") }
+    var keyVisible by remember { mutableStateOf(false) }
     var keyFeedback by remember { mutableStateOf<String?>(null) }
 
     // 0.7.0 Groq key management (mirrors the Gemini key card).
     var hasGroqKey by remember { mutableStateOf(groqKeyProvider.hasKey()) }
     var groqKeyInput by remember { mutableStateOf("") }
+    var groqKeyVisible by remember { mutableStateOf(false) }
     var groqKeyFeedback by remember { mutableStateOf<String?>(null) }
 
     val keySavedMessage = stringResource(R.string.settings_key_saved)
@@ -284,13 +290,34 @@ fun SettingsScreen(
                     }
                 }
                 // 0.7.x surface the polish↔Groq coupling: any non-NONE polish
-                // level dials Groq, so flag it loudly while no key is stored.
+                // level dials Groq, so flag it persistently while no key is
+                // stored, with a jump link down to the Groq field.
                 if (polishLevel != TranscriptionStyle.NONE && !hasGroqKey) {
-                    Text(
-                        text = stringResource(R.string.settings_polish_needs_groq),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.medium,
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                        ),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.settings_polish_needs_groq),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = {
+                                scope.launch { scrollState.animateScrollTo(scrollState.maxValue) }
+                            }) {
+                                Text(stringResource(R.string.settings_groq_add_key))
+                            }
+                        }
+                    }
                 }
 
                 // 0.6.0: recording input device. Phone mic by default; the
@@ -473,7 +500,7 @@ fun SettingsScreen(
             }
 
             // ------------------------------------------------------------------
-            // Gemini account
+            // API keys (Gemini Live + Groq polish)
             // ------------------------------------------------------------------
             SettingsSection(stringResource(R.string.settings_section_gemini)) {
                 Text(
@@ -496,6 +523,25 @@ fun SettingsScreen(
                     onValueChange = { keyInput = it },
                     label = { Text(stringResource(R.string.settings_key_hint)) },
                     singleLine = true,
+                    visualTransformation = if (keyVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { keyVisible = !keyVisible }) {
+                            Icon(
+                                imageVector = if (keyVisible) {
+                                    Icons.Filled.VisibilityOff
+                                } else {
+                                    Icons.Filled.Visibility
+                                },
+                                contentDescription = stringResource(
+                                    if (keyVisible) R.string.settings_key_hide else R.string.settings_key_show,
+                                ),
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -558,6 +604,25 @@ fun SettingsScreen(
                     onValueChange = { groqKeyInput = it },
                     label = { Text(stringResource(R.string.settings_groq_key_hint)) },
                     singleLine = true,
+                    visualTransformation = if (groqKeyVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { groqKeyVisible = !groqKeyVisible }) {
+                            Icon(
+                                imageVector = if (groqKeyVisible) {
+                                    Icons.Filled.VisibilityOff
+                                } else {
+                                    Icons.Filled.Visibility
+                                },
+                                contentDescription = stringResource(
+                                    if (groqKeyVisible) R.string.settings_key_hide else R.string.settings_key_show,
+                                ),
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

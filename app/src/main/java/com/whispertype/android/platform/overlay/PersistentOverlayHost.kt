@@ -204,7 +204,7 @@ class PersistentOverlayHost(
                     // Coerced at the host boundary so anchoring math, the
                     // window size and the Compose >=48dp touch floor agree.
                     bubbleSizeDp = size.coerceIn(MIN_BUBBLE_SIZE_DP, MAX_BUBBLE_SIZE_DP),
-                    opacityPercent = opacity.coerceIn(10, 100),
+                    opacityPercent = opacity.coerceIn(30, 100),
                     miniDotEnabled = dot,
                     miniDotAutoMinimizeMs = delay.coerceIn(1, 15) * 1000L,
                 )

@@ -18,6 +18,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.Message
 import android.os.Messenger
+import android.os.Process
 import android.os.RemoteException
 import android.provider.Settings
 import android.util.Log
@@ -229,6 +230,12 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
 
     private val incomingHandler = object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(msg: Message) {
+            // Hardening: only the in-app accessibility process may talk to this
+            // messenger; drop anything from another uid before dispatch.
+            if (msg.sendingUid != Process.myUid()) {
+                Log.w(TAG, "IPC_FOREIGN_SENDER_DROPPED")
+                return
+            }
             when (msg.what) {
                 RuntimeIpc.MSG_REGISTER_REPLY -> {
                     setA11yReplyMessenger(msg.replyTo)

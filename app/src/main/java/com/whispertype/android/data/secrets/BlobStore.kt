@@ -24,6 +24,28 @@ class FileBlobStore(file: File) : BlobStore {
 
     private val target: File = file
 
+    /** One-shot guard: the stale ".tmp" sweep runs once per process lifetime. */
+    @Volatile
+    private var swept = false
+
+    /**
+     * Deletes crash-orphaned temp ciphertext fragments (".tmp", older than one
+     * hour) left behind by an interrupted atomic write. Best-effort and run at
+     * most once per process, before the first write; never affects normal
+     * read/write behavior.
+     */
+    private fun sweepStaleTempFiles() {
+        if (swept) return
+        swept = true
+        try {
+            val dir = target.parentFile ?: return
+            val cutoff = System.currentTimeMillis() - STALE_TEMP_MAX_AGE_MS
+            dir.listFiles { f -> f.name.endsWith(".tmp") && f.lastModified() < cutoff }
+                ?.forEach { it.delete() }
+        } catch (_: Throwable) {
+        }
+    }
+
     override fun read(): ByteArray? =
         try {
             if (target.exists()) target.readBytes() else null
@@ -36,6 +58,7 @@ class FileBlobStore(file: File) : BlobStore {
     // never leave a truncated target behind.
     override fun write(data: ByteArray): Boolean =
         try {
+            sweepStaleTempFiles()
             val temp = File.createTempFile("${target.name}.", ".tmp", target.parentFile)
             try {
                 temp.writeBytes(data)
@@ -59,4 +82,10 @@ class FileBlobStore(file: File) : BlobStore {
         } catch (_: Throwable) {
             false
         }
+
+    private companion object {
+        /** ".tmp" fragments younger than this may belong to an in-flight write
+         *  and are left alone; older ones are crash orphans. */
+        const val STALE_TEMP_MAX_AGE_MS = 60L * 60L * 1000L
+    }
 }

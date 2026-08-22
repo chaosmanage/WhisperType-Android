@@ -258,6 +258,16 @@ class OkHttpGeminiLiveSession(
 
         override fun onMessage(webSocket: WebSocket, text: String) {
             if (state.get() == State.Closed) return
+            // Authenticated-peer DoS bound: the Live peer holds our key, but a
+            // compromised or misbehaving endpoint must not be able to drive
+            // multi-gigabyte allocations in the JSON parser with one frame.
+            // Anything over the cap is a protocol failure and takes the same
+            // terminal path as any other transport failure: exactly one Failed
+            // event, then the socket is cancelled once.
+            if (text.length > MAX_INBOUND_MESSAGE_CHARS) {
+                failTransport(webSocket, DETAIL_INBOUND_OVERSIZED)
+                return
+            }
             when (val message = GeminiLiveWire.parseServerMessage(text)) {
                 GeminiLiveWire.ServerMessage.SetupComplete -> {
                     if (state.compareAndSet(State.Connecting, State.Ready)) {
@@ -447,5 +457,9 @@ class OkHttpGeminiLiveSession(
         const val DETAIL_SETUP_SEND = "The Gemini setup message could not be queued."
         const val DETAIL_AUDIO_SEND = "A Gemini audio frame could not be queued."
         const val DETAIL_CONNECTION_FAILED = "The Gemini connection failed."
+        const val DETAIL_INBOUND_OVERSIZED = "A Gemini server frame exceeded the inbound size limit."
+
+        /** Inbound frame ceiling; larger frames are rejected before parsing. */
+        const val MAX_INBOUND_MESSAGE_CHARS = 8_000_000
     }
 }

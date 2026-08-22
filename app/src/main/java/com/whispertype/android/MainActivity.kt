@@ -156,9 +156,15 @@ class MainActivity : ComponentActivity() {
                     lifecycleOwner.lifecycle.addObserver(observer)
                     onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
                 }
+                // Grants refresh via the next ON_RESUME checklist re-read; an
+                // explicit denial is tracked so onboarding can route recovery
+                // through App info instead of silently re-requesting.
+                var micNotificationsDenied by remember { mutableStateOf(false) }
                 val permissionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestMultiplePermissions(),
-                ) { /* result handled on the next ON_RESUME refresh */ }
+                ) { result ->
+                    micNotificationsDenied = result.any { !it.value }
+                }
                 val scope = rememberCoroutineScope()
                 if (overlayGranted && onboardingDone) {
                     HomeScreen(
@@ -182,6 +188,8 @@ class MainActivity : ComponentActivity() {
                                 ),
                             )
                         },
+                        micNotificationsDenied = micNotificationsDenied,
+                        onOpenAppSettings = ::openAppDetailsSettings,
                         onOpenAccessibility = {
                             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                         },
@@ -223,6 +231,17 @@ class MainActivity : ComponentActivity() {
         startActivity(
             Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                "package:$packageName".toUri(),
+            ),
+        )
+    }
+
+    /** Recovery path after a runtime permission was denied: App info lets the
+     *  user flip the grant without the system suppressing the dialog. */
+    private fun openAppDetailsSettings() {
+        startActivity(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                 "package:$packageName".toUri(),
             ),
         )
@@ -446,11 +465,17 @@ class MainActivity : ComponentActivity() {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(Modifier.height(24.dp))
-                            StatsSection(
-                                historyEnabled = historyEnabled,
-                                entries = historyEntries,
-                            )
-                            Spacer(Modifier.height(24.dp))
+                            // Fix-first ordering: while anything is degraded,
+                            // the status grid and diagnostics lead and stats
+                            // drop below; healthy users keep stats up top.
+                            val homeDegraded = neededPermissions.isNotEmpty() || blockingReasons.isNotEmpty()
+                            if (!homeDegraded) {
+                                StatsSection(
+                                    historyEnabled = historyEnabled,
+                                    entries = historyEntries,
+                                )
+                                Spacer(Modifier.height(24.dp))
+                            }
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = MaterialTheme.shapes.large,
@@ -540,6 +565,13 @@ class MainActivity : ComponentActivity() {
                                 ) {
                                     Text(stringResource(R.string.home_grant_permissions))
                                 }
+                            }
+                            if (homeDegraded) {
+                                Spacer(Modifier.height(24.dp))
+                                StatsSection(
+                                    historyEnabled = historyEnabled,
+                                    entries = historyEntries,
+                                )
                             }
                             Spacer(Modifier.height(24.dp))
                             var showCommit by remember { mutableStateOf(false) }
@@ -817,7 +849,7 @@ class MainActivity : ComponentActivity() {
                     Text(
                         text = data.value,
                         style = MaterialTheme.typography.headlineSmall,
-                        color = data.color,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         text = data.label,

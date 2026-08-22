@@ -65,6 +65,8 @@ fun OnboardingScreen(
     hasAccessibility: () -> Boolean,
     onRequestOverlay: () -> Unit,
     onRequestMicNotifications: () -> Unit,
+    micNotificationsDenied: Boolean = false,
+    onOpenAppSettings: () -> Unit = {},
     onOpenAccessibility: () -> Unit,
     onContinue: () -> Unit,
 ) {
@@ -153,19 +155,19 @@ fun OnboardingScreen(
                         actionLabel = stringResource(R.string.onboarding_grant),
                         onAction = onRequestOverlay,
                     )
+                    // Mic + notifications share one system dialog, so they are
+                    // one checklist row. After an explicit denial the action
+                    // routes to App info instead of silently re-requesting.
                     PermissionRow(
-                        title = stringResource(R.string.onboarding_mic),
-                        description = stringResource(R.string.onboarding_mic_desc),
-                        granted = micGranted,
-                        actionLabel = stringResource(R.string.onboarding_grant),
-                        onAction = onRequestMicNotifications,
-                    )
-                    PermissionRow(
-                        title = stringResource(R.string.onboarding_notifications),
-                        description = stringResource(R.string.onboarding_notifications_desc),
-                        granted = notificationsGranted,
-                        actionLabel = stringResource(R.string.onboarding_grant),
-                        onAction = onRequestMicNotifications,
+                        title = stringResource(R.string.onboarding_mic_notifications),
+                        description = stringResource(R.string.onboarding_mic_notifications_desc),
+                        granted = micGranted && notificationsGranted,
+                        actionLabel = if (micNotificationsDenied) {
+                            stringResource(R.string.onboarding_open_settings)
+                        } else {
+                            stringResource(R.string.onboarding_grant)
+                        },
+                        onAction = if (micNotificationsDenied) onOpenAppSettings else onRequestMicNotifications,
                     )
                     PermissionRow(
                         title = stringResource(R.string.onboarding_accessibility),

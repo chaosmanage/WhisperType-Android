@@ -10,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -57,6 +58,31 @@ fun DictionaryScreen(
     var dictionaryReplacement by remember { mutableStateOf("") }
     var formFeedback by remember { mutableStateOf<DictionaryFeedback?>(null) }
     var feedbackNonce by remember { mutableIntStateOf(0) }
+    var showClearConfirm by remember { mutableStateOf(false) }
+
+    // Clear-all is destructive and irreversible; gate it behind a confirm.
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text(stringResource(R.string.settings_dictionary_clear_confirm_title)) },
+            text = { Text(stringResource(R.string.settings_dictionary_clear_confirm_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearConfirm = false
+                        scope.launch { settings.clearDictionary() }
+                    },
+                ) {
+                    Text(stringResource(R.string.settings_dictionary_clear))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) {
+                    Text(stringResource(R.string.history_cancel))
+                }
+            },
+        )
+    }
 
     // Inline form feedback auto-clears; the nonce re-arms the timer when the
     // same message is shown again in quick succession.
@@ -95,45 +121,8 @@ fun DictionaryScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (dictionary.isEmpty()) {
-                Text(
-                    text = stringResource(R.string.settings_dictionary_empty),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            } else {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = MaterialTheme.shapes.large,
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    ),
-                ) {
-                    Column {
-                        dictionary.forEach { entry ->
-                            ListItem(
-                                headlineContent = {
-                                    Text(
-                                        text = if (entry.replace.isBlank()) {
-                                            entry.match
-                                        } else {
-                                            "${entry.match} → ${entry.replace}"
-                                        },
-                                    )
-                                },
-                                trailingContent = {
-                                    TextButton(
-                                        onClick = {
-                                            scope.launch { settings.removeDictionaryEntry(entry.match) }
-                                        },
-                                    ) {
-                                        Text(stringResource(R.string.history_delete))
-                                    }
-                                },
-                            )
-                        }
-                    }
-                }
-            }
+            // Add-word form sits ABOVE the entries list so it never sinks out
+            // of view as the list grows.
             OutlinedTextField(
                 value = dictionaryWord,
                 onValueChange = { dictionaryWord = it },
@@ -177,9 +166,7 @@ fun DictionaryScreen(
                 ) {
                     Text(stringResource(R.string.settings_dictionary_add))
                 }
-                TextButton(
-                    onClick = { scope.launch { settings.clearDictionary() } },
-                ) {
+                TextButton(onClick = { showClearConfirm = true }) {
                     Text(stringResource(R.string.settings_dictionary_clear))
                 }
             }
@@ -193,6 +180,45 @@ fun DictionaryScreen(
                         MaterialTheme.colorScheme.primary
                     },
                 )
+            }
+            if (dictionary.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.settings_dictionary_empty),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            } else {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.large,
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ),
+                ) {
+                    Column {
+                        dictionary.forEach { entry ->
+                            ListItem(
+                                headlineContent = {
+                                    Text(
+                                        text = if (entry.replace.isBlank()) {
+                                            entry.match
+                                        } else {
+                                            "${entry.match} → ${entry.replace}"
+                                        },
+                                    )
+                                },
+                                trailingContent = {
+                                    TextButton(
+                                        onClick = {
+                                            scope.launch { settings.removeDictionaryEntry(entry.match) }
+                                        },
+                                    ) {
+                                        Text(stringResource(R.string.history_delete))
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
             }
         }
     }

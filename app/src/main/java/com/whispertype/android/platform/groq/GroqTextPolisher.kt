@@ -72,7 +72,10 @@ class GroqTextPolisher(
      * connection pools and dispatchers are shared with the parent client.
      */
     private val boundedClient: OkHttpClient =
-        okHttpClient.newBuilder().callTimeout(CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS).build()
+        okHttpClient.newBuilder()
+            .callTimeout(CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .followRedirects(false)
+            .build()
 
     private var attemptJob: Job? = null
     private var inFlight: Call? = null

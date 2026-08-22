@@ -53,10 +53,9 @@
     <string name="onboarding_setup_title">Set up in a few steps</string>
     <string name="onboarding_overlay">Overlay permission</string>
     <string name="onboarding_overlay_desc">Lets the bubble float above other apps.</string>
-    <string name="onboarding_mic">Microphone</string>
-    <string name="onboarding_mic_desc">Captures your speech while dictating.</string>
-    <string name="onboarding_notifications">Notifications</string>
-    <string name="onboarding_notifications_desc">Shows the recording indicator while you speak.</string>
+    <string name="onboarding_mic_notifications">Microphone &amp; notifications</string>
+    <string name="onboarding_mic_notifications_desc">Captures your speech while dictating and shows the recording indicator while you speak.</string>
+    <string name="onboarding_open_settings">Open settings</string>
     <string name="onboarding_accessibility">Accessibility</string>
     <string name="onboarding_accessibility_desc">Detects the focused text field and inserts your dictation.</string>
     <string name="onboarding_key">Gemini API key</string>
@@ -116,7 +115,7 @@
     <string name="settings_title">Settings</string>
     <string name="settings_back">Back</string>
     <string name="settings_app_enabled">App enabled</string>
-    <string name="settings_app_enabled_desc">Kill switch. Off fully stops the runtime: bubble, notifications, and dictation end until you turn it back on.</string>
+    <string name="settings_app_enabled_desc">Turns all WhisperType activity off.</string>
     <string name="settings_dark_mode">Dark mode</string>
     <string name="settings_dark_mode_desc">Use a dark theme for the app screens.</string>
     <string name="settings_speech_mode">Speech mode</string>
@@ -135,6 +134,8 @@
     <string name="settings_key_saved" tools:ignore="UnusedResources">Key saved</string>
     <string name="settings_key_save_failed" tools:ignore="UnusedResources">Could not save key</string>
     <string name="settings_key_cleared" tools:ignore="UnusedResources">Key removed</string>
+    <string name="settings_key_show">Show key</string>
+    <string name="settings_key_hide">Hide key</string>
 
     <!-- 0.7.0: polish backend + Groq account -->
     <string name="settings_groq_key">Groq API key</string>
@@ -152,7 +153,7 @@
     <string name="settings_auto_stop">Auto-stop timeout</string>
     <string name="settings_auto_stop_desc">Stop automatically after silence or the maximum recording time.</string>
     <string name="settings_segment_at_silence">Segment at pauses</string>
-    <string name="settings_segment_at_silence_desc">Experimental. Ends the utterance at each pause so the model echoes that segment while you keep talking. Faster finalization for long dictations; verify on device before relying on it.</string>
+    <string name="settings_segment_at_silence_desc">Ends the utterance at each pause so long dictations come back faster. Experimental.</string>
     <string name="auto_stop_15s">15 seconds</string>
     <string name="auto_stop_30s">30 seconds</string>
     <string name="auto_stop_60s">60 seconds</string>
@@ -194,12 +195,14 @@
     <string name="settings_dictionary_replacement_hint">Always write as (optional)</string>
     <string name="settings_dictionary_empty">No dictionary entries yet.</string>
     <string name="settings_dictionary_clear">Clear all</string>
+    <string name="settings_dictionary_clear_confirm_title">Clear all corrections?</string>
+    <string name="settings_dictionary_clear_confirm_message">This removes every word→replacement rule. This cannot be undone.</string>
     <string name="settings_bubble_reset">Reset bubble position</string>
     <string name="settings_bubble_reset_desc">Return the mic bubble to its default position.</string>
     <string name="settings_section_general">General</string>
     <string name="settings_section_recording">Recording</string>
     <string name="settings_section_bubble">Bubble</string>
-    <string name="settings_section_gemini">Gemini account</string>
+    <string name="settings_section_gemini">API keys</string>
     <string name="settings_bubble_size">Bubble size</string>
     <string name="settings_bubble_size_value">%1$d dp</string>
     <string name="settings_bubble_opacity">Bubble opacity</string>
@@ -219,12 +222,15 @@
     <string name="history_cleared">History cleared</string>
     <string name="history_delete_all_confirm_title">Clear history?</string>
     <string name="history_delete_all_confirm_message">This removes every saved transcript. This can’t be undone.</string>
+    <string name="settings_history_delete_entry_confirm_title">Delete this entry?</string>
+    <string name="settings_history_delete_entry_confirm_message">The transcript will be permanently removed.</string>
     <string name="history_clear">Clear</string>
     <string name="history_cancel">Cancel</string>
     <string name="history_back_desc">Back</string>
     <string name="quick_settings_subtitle_on">Bubble on</string>
     <string name="quick_settings_subtitle_off">Bubble off</string>
     <string name="settings_polish_needs_groq">Polish levels run on your Groq key. Without it, raw speech is inserted.</string>
+    <string name="settings_groq_add_key">Add Groq key</string>
     <string name="settings_dictionary_duplicate">That word already has a replacement — updated.</string>
     <string name="settings_dictionary_blank_word">Type the word as you say it first.</string>
 </resources>

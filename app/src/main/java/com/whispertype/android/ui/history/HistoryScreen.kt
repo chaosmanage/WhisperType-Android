@@ -84,6 +84,7 @@ fun HistoryScreen(
     var refreshKey by remember { mutableStateOf(0) }
     var entries by remember { mutableStateOf<List<HistoryRepository.HistoryEntry>>(emptyList()) }
     var showClearConfirm by remember { mutableStateOf(false) }
+    var pendingDeleteId by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(refreshKey) { entries = historyRepository.events().first() }
 
@@ -110,6 +111,32 @@ fun HistoryScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showClearConfirm = false }) {
+                    Text(stringResource(R.string.history_cancel))
+                }
+            },
+        )
+    }
+
+    pendingDeleteId?.let { id ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteId = null },
+            title = { Text(stringResource(R.string.settings_history_delete_entry_confirm_title)) },
+            text = { Text(stringResource(R.string.settings_history_delete_entry_confirm_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDeleteId = null
+                        scope.launch {
+                            historyRepository.delete(id)
+                            refreshKey++
+                        }
+                    },
+                ) {
+                    Text(stringResource(R.string.history_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteId = null }) {
                     Text(stringResource(R.string.history_cancel))
                 }
             },
@@ -246,12 +273,7 @@ fun HistoryScreen(
                                 onCopied(copiedLabel)
                             }
                         },
-                        onDelete = {
-                            scope.launch {
-                                historyRepository.delete(entry.id)
-                                refreshKey++
-                            }
-                        },
+                        onDelete = { pendingDeleteId = entry.id },
                     )
                 }
             }

@@ -128,6 +128,10 @@ private class ActiveLiveSession(
     var settleJob: Job? = null
     var asrTailJob: Job? = null
     var insertionResultJob: Job? = null
+
+    /** One-shot safety net behind persistent actionable error panels
+     *  (DictationCoordinator.Config.actionablePanelTimeoutMs). */
+    var panelSafetyJob: Job? = null
     var inserted: Boolean = false
 
     /** The settled dictation text when one existed (opt-in history hook). */
@@ -198,6 +202,14 @@ class DictationCoordinator(
          *  dominated post-stop latency. */
         val asrTailTimeoutMs: Long = 2_500,
         val returnToIdleMs: Long = 1_200,
+        /** UX audit fix: actionable error panels — the Ambiguous-insertion Copy
+         *  prompt and the clipboard-copy-failure error — persist until the user
+         *  taps Copy or Dismiss instead of self-destructing after
+         *  [returnToIdleMs] (1.2 s is shorter than any human can read, let alone
+         *  tap). This generous one-shot backstop still bounds a finished session
+         *  whose panel is ignored entirely, so SESSION DONE aggregation/history
+         *  always runs; 30 s vastly exceeds any realistic read-and-tap latency. */
+        val actionablePanelTimeoutMs: Long = 30_000,
         val captureShutdownTimeoutMs: Long = 1_500,
         /** Dispatcher for the blocking AudioRecord stop/release calls during
          *  finalization/teardown so they never run on the main dispatcher
@@ -322,11 +334,19 @@ class DictationCoordinator(
                         holder.metrics.mark(MutableSessionMetrics.Event.CopiedToClipboard)
                         holder.metrics.recordTerminalOutcome(TerminalOutcome.COPIED_TO_CLIPBOARD)
                         publish(DictationState.CopiedToClipboard(sessionId))
+                        // Transient pill: unchanged.
+                        delay(config.returnToIdleMs)
                     } else {
+                        // UX audit fix: the copy itself failed, so this Error IS
+                        // the actionable surface ("use Copy to grab it"). It
+                        // persists until Copy/Dismiss instead of dying with the
+                        // transient pill window; bounded by the generous safety
+                        // net below.
                         holder.metrics.recordTerminalOutcome(TerminalOutcome.TARGET_REJECTED)
                         publish(DictationState.Error(sessionId, result.failure))
+                        scheduleActionablePanelSafetyNet(holder)
+                        return@launch
                     }
-                    delay(config.returnToIdleMs)
                     resetToIdle(holder)
                 }
                 return
@@ -356,9 +376,37 @@ class DictationCoordinator(
                 }
             },
         )
-        scope.launch {
-            delay(config.returnToIdleMs)
-            resetToIdle(holder)
+        // UX audit fix: Success stays a transient pill, but the Ambiguous panel's
+        // whole purpose is its Copy button, so it must outlive returnToIdleMs.
+        if (result == InsertionResult.Ambiguous) {
+            scheduleActionablePanelSafetyNet(holder)
+        } else {
+            scope.launch {
+                delay(config.returnToIdleMs)
+                resetToIdle(holder)
+            }
+        }
+    }
+
+    /**
+     * UX audit fix: one-shot backstop for persistent actionable panels — the
+     * Ambiguous-insertion Copy prompt and the clipboard-copy-failure error.
+     * Those panels exist to be tapped: OverlayIntent.COPY routes into
+     * [copySettledToClipboard] and OverlayIntent.DISMISS into [dismiss], both of
+     * which reset via compare-and-clear. Replacing the short auto-reset removes
+     * the only previous guarantee that a finished session eventually clears, so
+     * this generous timer keeps that duty bounded: even a fully ignored panel
+     * still reaches [DictationHost.onSessionFinished] and Idle publication.
+     * Identity-guarded like every reset, so firing after Copy/Dismiss is a
+     * harmless no-op.
+     */
+    private fun scheduleActionablePanelSafetyNet(holder: ActiveLiveSession) {
+        holder.panelSafetyJob?.cancel()
+        holder.panelSafetyJob = scope.launch {
+            delay(config.actionablePanelTimeoutMs)
+            if (active === holder && lastPublished is DictationState.Error) {
+                resetToIdle(holder)
+            }
         }
     }
 
@@ -1150,6 +1198,7 @@ class DictationCoordinator(
         holder.eventJob?.cancel()
         holder.polishJob?.cancel()
         holder.insertionResultJob?.cancel()
+        holder.panelSafetyJob?.cancel()
         holder.capture?.let { capture ->
             scope.launch {
                 // AudioRecord stop/release are blocking native calls; never run
