@@ -7,6 +7,14 @@ code.
 
 ## Build & verify
 
+**MODEL POLICY (non-negotiable):** the app may call **exactly one** Gemini model —
+`gemini-3.5-transcribe-live` (the Gemini Live transcription model, over
+`BidiGenerateContent`), pinned as `GeminiSessionFactory.LIVE_MODEL`. It is
+covered at no cost by the owner's Google Pro API key; every other Gemini model,
+endpoint, or provider is explicitly refused. Audio goes only to Gemini Live;
+text shaping runs server-side in the model's `smart` mode. Enforced by
+`ModelPolicyTest` — the build fails on any violation.
+
 Requires JDK 17 and Android SDK platform 36. Run everything from the repo root:
 
 ```bash
@@ -50,9 +58,12 @@ Layer rules:
 ## Conventions
 
 - **Version bump in the same commit** as any behavior change: `versionCode` +1 and
-  `versionName` bump in `app/build.gradle.kts` (currently 0.6.2 / 37). Add a
+  `versionName` bump in `app/build.gradle.kts` (currently 1.0.5 / 50). Add a
   `CHANGELOG.md` entry for user-visible changes. The README version line lags the real
   version — trust `app/build.gradle.kts`.
+- **Every push to the test device carries a fresh build number** — bump
+  `versionCode` +1 and `versionName` on each device push, even when the code is
+  unchanged, so the on-device build is always identifiable.
 - Commit style: scope-qualified, imperative, lowercase —
   `feat(overlay): …`, `fix(insertion): …`, `test(gemini): …`, one logical change per
   commit. Branches: short-lived `feature/…` branches; integration happens on the

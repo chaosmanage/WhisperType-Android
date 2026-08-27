@@ -72,7 +72,7 @@ Audio exists only in memory for the duration of a live session and is never
 retained or stored. The former audio-recovery failsafe — which wrote a temporary
 WAV to the app cache directory (`wt_recovery_<session>.wav`) while
 re-transcribing a retained recording — was removed: the app uses only the
-`gemini-3.1-flash-live-preview` live model, so no recording is ever kept for
+`gemini-3.5-transcribe-live` live model, so no recording is ever kept for
 re-transcription. No transcript or audio content is ever logged.
 
 ## Optional history
@@ -92,7 +92,7 @@ re-transcription. No transcript or audio content is ever logged.
 ## Custom dictionary
 
 - The custom dictionary (correction rules) has its own page in the app and is stored locally in app-private storage; it is never uploaded, backed up, or sent to Gemini.
-- Correction rules are applied at insertion time — they are not prompt injection and are never included in the session `systemInstruction`.
+- Correction rules are applied at insertion time — they are not prompt injection and are never included in any session configuration.
 - Dictionary entries are never logged.
 
 ## Clipboard behavior

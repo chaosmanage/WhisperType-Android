@@ -14,10 +14,10 @@ There are **no instrumented tests**. `app/src/androidTest` contains only a manif
 
 | Package | Coverage |
 | --- | --- |
-| `com.whispertype.android.platform.runtime` | `DictationCoordinatorTest` — virtual-time orchestration (duplicate START, cancel during setup, STOP immediately, stale insertion responses, capture failure, rejected boundaries, exactly-once insertion), settlement (deadline/debounce, provisional rejection, retained early turn-complete), pre-ready buffering (order drain, overflow → `connection_too_slow`), failsafes (lenient fallback insert, retry, persistent errors), auto-stop (silence threshold + hard cap), echo completeness gate. |
-| `com.whispertype.android.platform.gemini` | `GeminiLiveWireTest` (exact wire codec: setup fields, realtime activity builders, server parse), `OkHttpGeminiLiveSessionTest` (MockWebServer WebSocket: setup-first ordering, single activity start/end, audio rejection before start/after end, no `clientContent`, output transcription never a candidate, automatic-VAD variant, setup errors, close idempotence), `WarmLiveSessionManagerTest` (prewarm/claim/backoff/idle). |
+| `com.whispertype.android.platform.runtime` | `DictationCoordinatorTest` — virtual-time orchestration (duplicate START, cancel during setup, STOP immediately, stale insertion responses, capture failure, rejected boundaries, exactly-once insertion), settlement (250 ms quiet window, 2.5 s tail backstop, provisional rejection, retained early turn-complete), pre-ready buffering (order drain, overflow → `connection_too_slow`), failsafes (lenient fallback insert, retry, persistent errors, fragment guard), auto-stop (silence threshold + hard cap), Hinglish verbatim insert. |
+| `com.whispertype.android.platform.gemini` | `GeminiLiveWireTest` (exact wire codec: setup fields incl. `mode`/`languageCodes`/`omitGenerationConfig`, realtime activity builders, interim + final transcription parse), `OkHttpGeminiLiveSessionTest` (MockWebServer WebSocket: setup-first ordering, single activity start/end, audio rejection before start/after end, no `clientContent`, interim/final/echo candidates, automatic-VAD variant, setup errors, close idempotence), `WarmLiveSessionManagerTest` (prewarm/claim/backoff/idle), `ModelPolicyTest` (only `gemini-3.5-transcribe-live` may appear; no non-Live endpoints; audio only to Gemini Live). |
 | `com.whispertype.android.core.transcript` | `TranscriptAccumulatorTest` (cumulative merge rules), `TranscriptCompletenessTest`, `TranscriptSelectorTest` (user-speech trust policy, `diagnose()`, long-sentence regression). |
-| `com.whispertype.android.core.model` | `MutableSessionMetricsTest` (monotonic timing/counters/summary), `LanguageModeTest` (Hinglish instruction; polish styles × languages). |
+| `com.whispertype.android.core.model` | `MutableSessionMetricsTest` (monotonic timing/counters/summary). |
 | `com.whispertype.android.audio` | `AudioCaptureOrderlyShutdownTest` (producer-owned flush, zero-padded partial frame, unblocking a blocking read, timeout fallback), `PreReadyAudioBufferTest` (bounded FIFO, overflow, close). |
 | `com.whispertype.android.core.state` | `DictationReducerTest` — state transitions, stale-session rejection, exactly-once consumption. |
 | `com.whispertype.android.core.privacy` | `LogRedactorTest`. |
@@ -33,7 +33,7 @@ All unit tests run on the JVM with no device and no live API key.
 
 ## Fake WebSocket contract tests
 
-`OkHttpGeminiLiveSessionTest` drives `OkHttpGeminiLiveSession` against a local MockWebServer WebSocket that mirrors the Live endpoint's **binary-frame** delivery. It asserts: setup is the first client message with the exact fields (manual activity config, no output transcription, no `clientContent`), exactly one `activityStart` / `activityEnd`, ordered audio with `audio/pcm;rate=16000`, audio rejection before start and after end, prompt failure propagation, and that `outputTranscription` / `modelTurn` text never emit a user candidate. No live network or API key is used. See `docs/GEMINI_LIVE.md` for the wire protocol.
+`OkHttpGeminiLiveSessionTest` drives `OkHttpGeminiLiveSession` against a local MockWebServer WebSocket that mirrors the Live endpoint's **binary-frame** delivery. It asserts: setup is the first client message with the exact fields (TEXT modality, `inputAudioTranscription` with mode + language hint, manual activity config, no output transcription, no `clientContent`), exactly one `activityStart` / `activityEnd`, ordered audio with `audio/pcm;rate=16000`, audio rejection before start and after end, prompt failure propagation, and that interim + final transcription emit INPUT candidates while `outputTranscription` / `modelTurn` text never emit a user candidate. No live network or API key is used. See `docs/GEMINI_LIVE.md` for the wire protocol.
 
 ## Device matrix
 
@@ -140,7 +140,8 @@ If a precondition fails: reinstall (`install -r`), grant permissions, re-enable 
 - **Auto-stop (silence + hard cap).** Set `Auto-stop timeout`, dictate, stop speaking, and do not touch the panel. Pass: for each option (15/30/60/120/300 s, default 60 s) the session stops automatically after the silence interval, and a hard cap stops any session at the cap even while audio flows.
 - **Recording source / bluetooth headset mic.** With `Recording source` left at `Phone microphone` and a bluetooth headset connected, dictate: Pass: audio still comes from the phone mic (`captured=N accepted=N>0`, no failure). Then set `Recording source` to `Bluetooth headset` with the headset connected and dictate: Pass: the Settings row shows the connected device name, audio is captured from the headset (speak into the headset mic; the waveform responds and the transcript matches). Unplug the headset and dictate again: Pass: dictation still works using the phone mic (graceful fallback, no error).
 - **Physical-keyboard hotkey.** Connect a physical (hardware) keyboard. With the default hotkey (grave/backtick) and no soft IME showing, focus a safe text field and press the hotkey: Pass: dictation starts (session `Starting`/`Listening`). Speak, press again: Pass: the turn finalizes and inserts (same path as tapping Done). Press the hotkey outside any editor: Pass: nothing starts. Select `Off` in `Settings → Recording → Keyboard shortcut`: Pass: the key no longer toggles dictation and types normally. Switch the shortcut to `F9`: Pass: F9 toggles and the grave key types normally. In a password field: Pass: the hotkey does not start dictation.
-- **Output polish levels.** Set `Output polish` to None, Low, Medium, High and dictate the same phrase with filler words at each level. Pass: None returns the raw transcript, High the cleanest, and the four levels are distinguishable.
+- **Smart-mode shaping.** Dictate a phrase with filler words and a mid-sentence self-correction. Pass: the inserted transcript has the fillers removed and the correction resolved (server-side `smart` mode; no polish setting exists anymore).
+- **Interim partials stream live.** During a long dictation, Pass: the recording pill's transcript area shows the partial text revising while you speak, and the final insert matches the last committed segment.
 - **Custom dictionary corrections.** Add a word plus an optional `Always write as` correction in the Custom dictionary page; dictate the uncorrected form. Pass: the inserted text uses the corrected spelling (applied at insertion, word-boundary, case-insensitive); the live transcript is not rewritten mid-session.
 - **History list / copy / delete / delete-all.** Enable `Local history`, complete a dictation, open the History tab. Pass: the transcript appears; Copy copies the text; Delete removes one entry; `Clear all history` empties the list; entries respect the retention period.
 - **Mini-dot auto-minimize.** With the mini-dot option enabled and an idle bubble, Pass: the bubble shrinks to a small dot after the configured delay and the dot still starts dictation.
@@ -167,7 +168,7 @@ Run this sequence on every supported phone/keyboard combination before declaring
 4. Focus a normal single-line text field and verify the dock appears.
 5. Start dictation and verify the keyboard-covering voice panel.
 6. Speak an English test phrase and verify exactly one insertion.
-7. Speak a Hinglish test phrase and verify Latin-script output.
+7. Speak a Hinglish test phrase and verify the code-mixed output is usable (romanized Latin expected from the model's native code-mixing).
 8. Replace a selected text range.
 9. Cancel a dictation and verify nothing is inserted.
 10. Change focus during finalization and verify stale text is not inserted.
@@ -221,7 +222,8 @@ field focused on the DeX display. Pass for each:
 | Tap starts from a dragged position | 5 | session starts (`SESSION DONE`) |
 | Auto-stop silence (each 15/30/60/120/300 s option) | 5 | automatic `outcome=Success` at the interval |
 | Auto-stop hard cap | 5 | session stops at the cap even while speaking |
-| Polish None vs High distinguishable | 5 | visibly different transcript cleanliness |
+| Smart-mode polish (filler removal + self-correction) | 5 | inserted text is cleaned, not verbatim |
+| Hinglish code-mixing (0.10.0) | 10 | ≥9 insert, usable romanized output |
 | Dictionary correction applied at insertion | 5 | corrected spelling in the inserted text |
 | History list / copy / delete / delete-all | 5 | all operations behave |
 | Mini-dot auto-minimize + dot tap | 5 | bubble shrinks to dot; dot starts dictation |
@@ -236,6 +238,31 @@ field focused on the DeX display. Pass for each:
 ## Physical-device requirement
 
 Physical-device validation is mandatory for Accessibility Service behavior, third-party keyboard geometry, overlay layering, microphone foreground-service startup, text insertion, OEM behavior, and release installation. Emulators are insufficient for these paths, and a green CI run on JVM unit tests alone is never sufficient evidence of compatibility.
+
+## 0.10.0 transcribe-live device gates
+
+The model switch cannot be fully verified on the JVM (no live key in tests).
+A **live wire probe (2026-08-27)** against the real endpoint — the app's exact
+setup: TEXT modality, `smart` mode, `languageCodes: ["en-US"]`, manual
+activity signaling — already confirmed: setup accepted; 10 interims streamed;
+one final segment committed after `activityEnd`; `generationComplete` fired;
+text arrived smart-formatted. Automatic VAD (no manual boundaries) produced no
+transcripts. Remaining on-device (S25) checks before claiming 0.10.0 verified:
+
+- **Full-app dictation.** Run the acceptance matrix with the real mic: interims
+  revise live while speaking; the insert equals the last committed segment.
+- **Final flush after `activityEnd`.** Release Done mid-speech: the final
+  `inputTranscription` must arrive promptly (settlement ~250 ms quiet +
+  backstop). The probe confirms `activityEnd` flushes; confirm in-app timing.
+- **`languageCodes` hint.** Probe confirms `["en-US"]` is accepted with no
+  setup error; verify the `hi-IN` Hinglish path and code-mixed output.
+- **Session cap.** A warm or long session may hit the preview's ~10-minute
+  continuous-session limit; verify the `goAway`-based teardown and that a fresh
+  session starts cleanly.
+- **Smart-mode quality.** Filler removal, self-corrections, and formatting on a
+  noisy dictation; Hinglish code-mixing acceptable.
+- **Preview rate limits.** Public preview; confirm the owner's key quota holds
+  for the acceptance matrix runs.
 
 ## Release checklist
 
@@ -262,5 +289,5 @@ Before each private release:
 ./gradlew :app:testDebugUnitTest :app:lintDebug
 ```
 
-- `:app:testDebugUnitTest` (424 JVM unit tests) and `:app:lintDebug` require no device.
+- `:app:testDebugUnitTest` (JVM unit tests) and `:app:lintDebug` require no device.
 - There is no `connectedDebugAndroidTest` step: there are no instrumented tests. On-device validation is performed manually against the protocol above.

@@ -41,7 +41,6 @@ import com.whispertype.android.core.model.MutableSessionMetrics
 import com.whispertype.android.core.model.OverlayIntent
 import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.TargetEligibility
-import com.whispertype.android.core.model.TranscriptionStyle
 import com.whispertype.android.data.history.EncryptedHistoryRepository
 import com.whispertype.android.data.history.HistoryRepository
 import com.whispertype.android.data.secrets.AndroidKeystoreKeyStore
@@ -61,7 +60,6 @@ import com.whispertype.android.platform.gemini.WarmSessionProfile
 import com.whispertype.android.platform.ipc.RuntimeIpc
 import com.whispertype.android.platform.overlay.OverlayOwners
 import com.whispertype.android.platform.overlay.PersistentOverlayHost
-import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -165,9 +163,6 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     private var cachedHistoryRetentionDays: Int = SettingsRepository.DEFAULT_RETENTION_DAYS
 
     @Volatile
-    private var cachedPolishLevel: TranscriptionStyle = TranscriptionStyle.MEDIUM
-
-    @Volatile
     private var cachedAutoStopSeconds: Int = SettingsRepository.DEFAULT_AUTO_STOP_SECONDS
 
     /** 0.6.0 experimental: split the recording at pauses (off by default). */
@@ -238,6 +233,18 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
 
     override fun onBind(intent: Intent?): IBinder = incomingMessenger.binder
 
+    /**
+     * 1.0.1: the Quick Settings tile starts this service with
+     * startForegroundService; a delivery racing a dying or still-alive instance
+     * must promote to foreground within the per-start obligation window or the
+     * system raises ForegroundServiceDidNotStartInTimeException. onCreate alone
+     * does not cover redelivery to an existing instance.
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForeground(NOTIFICATION_ID, buildNotification(), overlayFgsTypes())
+        return START_NOT_STICKY
+    }
+
     override fun onCreate() {
         super.onCreate()
         isRunning = true
@@ -254,7 +261,6 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         scope.launch { settings.speechMode.collect { cachedSpeechMode = it } }
         scope.launch { settings.historyEnabled.collect { cachedHistoryEnabled = it } }
         scope.launch { settings.historyRetentionDays.collect { cachedHistoryRetentionDays = it } }
-        scope.launch { settings.polishLevel.collect { cachedPolishLevel = it } }
         scope.launch { settings.autoStopSeconds.collect { cachedAutoStopSeconds = it } }
         scope.launch { settings.segmentAtSilence.collect { cachedSegmentAtSilence = it } }
         scope.launch { settings.audioSourcePreference.collect { cachedAudioSourcePreference = it } }
@@ -377,7 +383,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         metrics.mark(MutableSessionMetrics.Event.KeyLoadStarted)
         val profile = warmProfile()
         // Prefer a warm (preconnected) session whose exact profile matches the
-        // current settings; a stale polish/language/echo warm session is never
+        // current settings; a stale language/activity warm session is never
         // reused (0.6.0).
         when (val claim = warmManager.claim(profile)) {
             is WarmSessionClaim.Hit -> {
@@ -390,7 +396,6 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                         session = lease.session,
                         language = lease.profile.language,
                         ready = true,
-                        echoEnabled = lease.profile.outputAudioTranscription,
                     ),
                 )
             }
@@ -417,15 +422,14 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                 model = model,
                 apiVersion = profile.apiVersion,
                 language = language,
-                systemInstruction = language.liveInstruction(cachedPolishLevel),
+                transcriptionLanguageCode = transcriptionLanguageCode(language),
                 automaticActivityDetectionDisabled = profile.automaticActivityDetectionDisabled,
                 activityHandlingNoInterruption = profile.activityHandlingNoInterruption,
                 inputAudioTranscription = profile.inputAudioTranscription,
-                outputAudioTranscription = profile.outputAudioTranscription,
                 // Release B production protocol: manual activity signaling
                 // (automaticActivityDetection disabled by default) and no text
-                // prime. The systemInstruction carries the polish level and (for
-                // Hinglish) the Latin-script rule.
+                // prime. Text shaping runs server-side in the transcribe model's
+                // `smart` mode; the language hint biases code-mixing.
             ),
             client = sharedOkHttpClient,
             metrics = metrics,
@@ -435,14 +439,13 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                 session = session,
                 language = language,
                 ready = false,
-                echoEnabled = profile.outputAudioTranscription,
             ),
         )
     }
 
     /** Cold session construction shared by the live path and the warm pool.
-     *  The exact [profile] (language, echo setting, activity signaling) shapes
-     *  the session so a warm session is never reused under different settings. */
+     *  The exact [profile] (language, activity signaling) shapes the session so
+     *  a warm session is never reused under different settings. */
     private suspend fun createColdSession(profile: WarmSessionProfile): com.whispertype.android.core.contracts.GeminiLiveSession {
         val key = withContext(Dispatchers.IO) { keyProvider.provideKey() }
             ?: throw GeminiLiveException(
@@ -458,11 +461,10 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                 model = profile.model,
                 apiVersion = profile.apiVersion,
                 language = profile.language,
-                systemInstruction = profile.language.liveInstruction(cachedPolishLevel),
+                transcriptionLanguageCode = transcriptionLanguageCode(profile.language),
                 automaticActivityDetectionDisabled = profile.automaticActivityDetectionDisabled,
                 activityHandlingNoInterruption = profile.activityHandlingNoInterruption,
                 inputAudioTranscription = profile.inputAudioTranscription,
-                outputAudioTranscription = profile.outputAudioTranscription,
             ),
             client = sharedOkHttpClient,
         )
@@ -471,32 +473,22 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     /** The exact session configuration a warm pool entry must match. */
     private fun warmProfile(): WarmSessionProfile {
         val language = cachedSpeechMode
-        val style = cachedPolishLevel
         return WarmSessionProfile(
-            model = GeminiSessionFactory.DEFAULT_MODEL,
+            model = GeminiSessionFactory.LIVE_MODEL,
             apiVersion = GeminiSessionConfig.DEFAULT_API_VERSION,
             language = language,
-            polishInstructionHash = stableInstructionHash(language, style),
             automaticActivityDetectionDisabled = true,
             activityHandlingNoInterruption = cachedSegmentAtSilence,
             inputAudioTranscription = true,
-            outputAudioTranscription = echoEnabledFor(language, style),
             credentialRevision = 0L,
         )
     }
 
-    /** The echo (outputTranscription) is the polish pipeline for MEDIUM/HIGH and
-     *  for Hinglish (Latin script). NONE/LOW get the raw ASR directly (0.6.0),
-     *  which the Live ASR already punctuates — settling it is ~0.7 s flat. */
-    private fun echoEnabledFor(language: LanguageMode, style: TranscriptionStyle): Boolean =
-        language == LanguageMode.HINGLISH ||
-            (style != TranscriptionStyle.NONE && style != TranscriptionStyle.LOW)
-
-    /** Stable, non-secret digest of the systemInstruction for warm-profile match. */
-    private fun stableInstructionHash(language: LanguageMode, style: TranscriptionStyle): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest(language.liveInstruction(style).toByteArray())
-        return digest.joinToString("") { "%02x".format(it) }
+    /** 0.10.0: BCP-47 language hint for the transcribe model's automatic
+     *  language detection / code-mixing. Null omits the field. */
+    private fun transcriptionLanguageCode(language: LanguageMode): String? = when (language) {
+        LanguageMode.ENGLISH -> "en-US"
+        LanguageMode.HINGLISH -> "hi-IN"
     }
 
     /** Release F2: prewarm only while every eligibility condition holds.
@@ -566,37 +558,6 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
      *  copy. */
     override suspend fun copyToClipboard(sessionId: SessionId, text: String): Boolean =
         withContext(Dispatchers.IO) { sensitiveClipboard.copySensitive(text) }
-
-    /**
-     * 0.5.0 Hinglish: transliterates Devanagari to Latin by opening a dedicated
-     * LIVE session, feeding the text over the realtime text channel, and reading
-     * the model's spoken reply (`outputTranscription`) — the same model, never a
-     * non-live endpoint. Returns null on any failure.
-     */
-    override suspend fun transliterateToLatin(sessionId: SessionId, text: String): String? {
-        val key = keyProvider.provideKey() ?: return null
-        val session = GeminiSessionFactory.create(
-            apiKey = key,
-            config = GeminiSessionConfig(
-                model = GeminiSessionFactory.DEFAULT_MODEL,
-                language = cachedSpeechMode,
-                systemInstruction = TRANSLITERATION_INSTRUCTION,
-            ),
-            client = sharedOkHttpClient,
-        )
-        return try {
-            session.awaitReady()
-            session.requestEchoFor(text)
-        } catch (e: Exception) {
-            Log.w(TAG, "Hinglish transliteration failed: ${e.message}")
-            null
-        } finally {
-            try {
-                session.close()
-            } catch (_: Throwable) {
-            }
-        }
-    }
 
     override fun onSessionFinished(state: DictationState, metrics: MutableSessionMetrics, transcript: String?) {
         // Aggregate per-session outcome + stage latencies. Never transcript or audio.
@@ -789,11 +750,5 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         /** Process-local service-liveness flag for the app UI (set in onCreate/onDestroy). */
         @Volatile
         var isRunning: Boolean = false
-
-        /** 0.5.0 Hinglish: dedicated instruction for the live transliteration turn. */
-        const val TRANSLITERATION_INSTRUCTION =
-            "You transliterate Hindi text to Roman (Latin) script (Hinglish). " +
-                "Always speak the transliteration in Roman/Latin script only, never in " +
-                "Devanagari. Output only the transliterated text."
     }
 }

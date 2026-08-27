@@ -6,7 +6,6 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.whispertype.android.core.dictionary.DictionaryEntry
 import com.whispertype.android.core.model.AudioSourcePreference
 import com.whispertype.android.core.model.LanguageMode
-import com.whispertype.android.core.model.TranscriptionStyle
 import java.io.File
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -96,33 +95,6 @@ class SettingsRepositoryTest {
 
         repo.setAutoStopSeconds(15)
         assertEquals(15, repo.autoStopSeconds.first())
-    }
-
-    @Test
-    fun `polish level defaults to medium and setter round-trips`() = runTest {
-        val repo = newRepository()
-
-        assertEquals(SettingsRepository.DEFAULT_POLISH_LEVEL, repo.polishLevel.first())
-
-        repo.setPolishLevel(TranscriptionStyle.NONE)
-        assertEquals(TranscriptionStyle.NONE, repo.polishLevel.first())
-
-        repo.setPolishLevel(TranscriptionStyle.HIGH)
-        assertEquals(TranscriptionStyle.HIGH, repo.polishLevel.first())
-    }
-
-    @Test
-    fun `unknown stored polish level maps to medium`() = runTest {
-        val dataStore =
-            PreferenceDataStoreFactory.create(
-                produceFile = { File(tmp.root, "corrupt-style.preferences_pb") },
-            )
-        val repo = SettingsRepository(dataStore)
-
-        repo.setPolishLevel(TranscriptionStyle.MEDIUM)
-        dataStore.edit { it[stringPreferencesKey("polish_level")] = "ULTRA" }
-
-        assertEquals(TranscriptionStyle.MEDIUM, repo.polishLevel.first())
     }
 
     @Test

@@ -114,21 +114,22 @@ If the text could not be committed, WhisperType surfaces `insert_ambiguous` (Cop
 
 ## Why a session almost never loses words
 
-Expected behavior. Reliability comes from the **echo completeness gate**: the
-polished echo is accepted only when its content covers the raw ASR, otherwise
-the complete raw is salvaged — and a truncated echo never triggers a retry. If
-neither live source delivers anything usable, the session reports
-`gemini_no_transcript` with a Retry affordance instead of inserting a fragment.
-WhisperType uses only the `gemini-3.1-flash-live-preview` live model; there is
-no recording re-transcription backstop.
+Expected behavior. Reliability comes from committed final segments plus the
+fragment guard: the transcribe model's `inputTranscription` finals are the only
+dictation source, the accumulator never shrinks settled text, and a fragment
+guard refuses to insert a truncated long dictation. If nothing usable arrives
+within the tail backstop, the session reports `gemini_no_transcript` with a
+Retry affordance instead of inserting a fragment. WhisperType uses only the
+`gemini-3.5-transcribe-live` live model; there is no recording
+re-transcription backstop.
 
 ## No transcript could be recognized
 
-Now rare in 0.4.2. When it does happen, check the session's `SESSION DONE` log line:
+Now rare. When it does happen, check the session's `SESSION DONE` log line:
 
 - `reject=<rule>` — a transcript arrived but the selector rejected it; `lenient=true` means the failsafe still inserted it. Any remaining rejection is blank / punctuation-only / garbled / Devanagari-in-English.
-- `inputTx=0` — the Live model returned nothing within the deadline; retry the dictation.
-- `settle=<path>` — how the final text was chosen: `echo_complete`, `raw_only`, `echo_partial_raw`, `echo_only`, or `none`.
+- `inputTx=0` — the Live model returned nothing within the tail backstop; retry the dictation.
+- `settle=<path>` — how the final text was chosen: `raw_only` or `none`.
 
 ## App won't install on Android 13
 

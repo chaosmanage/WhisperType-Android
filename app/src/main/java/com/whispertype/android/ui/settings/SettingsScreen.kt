@@ -55,7 +55,6 @@ import com.whispertype.android.core.audio.AudioInputSelection
 import com.whispertype.android.core.model.AudioSourcePreference
 import com.whispertype.android.core.model.HotkeyShortcut
 import com.whispertype.android.core.model.LanguageMode
-import com.whispertype.android.core.model.TranscriptionStyle
 import com.whispertype.android.data.secrets.KeyProvider
 import com.whispertype.android.data.settings.SettingsRepository
 import kotlin.math.roundToInt
@@ -91,8 +90,6 @@ fun SettingsScreen(
     val autoStopSeconds by settings.autoStopSeconds
         .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_AUTO_STOP_SECONDS)
     val segmentAtSilence by settings.segmentAtSilence.collectAsStateWithLifecycle(initialValue = false)
-    val polishLevel by settings.polishLevel
-        .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_POLISH_LEVEL)
     val audioSourcePreference by settings.audioSourcePreference
         .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_AUDIO_SOURCE_PREFERENCE)
     val hotkeyKeycode by settings.hotkeyKeycode
@@ -216,32 +213,6 @@ fun SettingsScreen(
                         checked = segmentAtSilence,
                         onCheckedChange = { scope.launch { settings.setSegmentAtSilence(it) } },
                     )
-                }
-
-                SettingRow(
-                    title = stringResource(R.string.settings_polish),
-                    description = stringResource(R.string.settings_polish_desc),
-                ) {
-                    var menuOpen by remember { mutableStateOf(false) }
-                    Box {
-                        OutlinedButton(onClick = { menuOpen = true }) {
-                            Text(stringResource(polishLevelLabelRes(polishLevel)))
-                        }
-                        DropdownMenu(
-                            expanded = menuOpen,
-                            onDismissRequest = { menuOpen = false },
-                        ) {
-                            TranscriptionStyle.entries.forEach { style ->
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(polishLevelLabelRes(style))) },
-                                    onClick = {
-                                        menuOpen = false
-                                        scope.launch { settings.setPolishLevel(style) }
-                                    },
-                                )
-                            }
-                        }
-                    }
                 }
 
                 // 0.6.0: recording input device. Phone mic by default; the
@@ -561,14 +532,6 @@ private fun autoStopSecondsLabelRes(seconds: Int): Int = when (seconds) {
     120 -> R.string.auto_stop_120s
     300 -> R.string.auto_stop_300s
     else -> R.string.auto_stop_60s
-}
-
-@StringRes
-private fun polishLevelLabelRes(style: TranscriptionStyle): Int = when (style) {
-    TranscriptionStyle.NONE -> R.string.polish_none
-    TranscriptionStyle.LOW -> R.string.polish_low
-    TranscriptionStyle.MEDIUM -> R.string.polish_medium
-    TranscriptionStyle.HIGH -> R.string.polish_high
 }
 
 @StringRes

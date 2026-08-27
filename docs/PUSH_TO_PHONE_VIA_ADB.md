@@ -61,23 +61,23 @@ adb devices
 
 ## Push the current build
 
-Build first if needed:
+Build first if needed (the signed release APK is the pushed artifact):
 
 ```bash
 cd /workspace/projects/WhisperType-Android
-./gradlew assembleDebug
+./gradlew assembleRelease
 ```
 
 Then install, preserving app data (`-r` = reinstall; keeps settings/permissions):
 
 ```bash
-adb -s <SERIAL> install -r app/build/outputs/apk/debug/app-debug.apk
+adb -s <SERIAL> install -r app/build/outputs/apk/release/app-release.apk
 ```
 
 Example:
 
 ```bash
-adb -s 100.127.110.79:33395 install -r app/build/outputs/apk/debug/app-debug.apk
+adb -s 100.127.110.79:40633 install -r app/build/outputs/apk/release/app-release.apk
 # → Success
 ```
 
@@ -85,14 +85,17 @@ Useful variations:
 
 | Goal | Command |
 | --- | --- |
-| Fresh install, clear data | `adb -s <SERIAL> uninstall com.whispertype.android && adb -s <SERIAL> install app/build/outputs/apk/debug/app-debug.apk` |
+| Fresh install, clear data | `adb -s <SERIAL> uninstall com.whispertype.android && adb -s <SERIAL> install app/build/outputs/apk/release/app-release.apk` |
 | Launch the app | `adb -s <SERIAL> shell am start -n com.whispertype.android/.MainActivity` |
 | Check package path | `adb -s <SERIAL> shell pm path com.whispertype.android` |
 | Service state | `adb -s <SERIAL> shell dumpsys activity services com.whispertype.android` |
-| APK SHA-256 | `sha256sum app/build/outputs/apk/debug/app-debug.apk` |
+| APK SHA-256 | `sha256sum app/build/outputs/apk/release/app-release.apk` |
 
 > Do not `uninstall` during upgrade tests — it wipes the stored Gemini credential and
 > permissions. Use `install -r` unless a clean slate is intentional.
+> Never run `cmd statusbar` tile commands via adb — they can replace the user's
+> entire Quick Settings tile list (the 1.0.5-era incident). Add/remove tiles by hand
+> in the Quick Settings editor only.
 
 ## If the device drops or goes offline
 
@@ -132,12 +135,12 @@ adb -s <SERIAL> shell pidof com.whispertype.android
 adb -s <SERIAL> logcat --pid=<PID>
 ```
 
-## Current device reference (verified 2026-08-08)
+## Current device reference (verified 2026-08-27)
 
 - **Device:** Samsung Galaxy S25 (`SM-S921B`), Android 16 (SDK 36), 1080x2340 @ 480dpi
 - **Tailscale IP:** `100.127.110.79`
-- **ADB connect port:** `44715` — current for the 0.5.7 push; the port rotates after
+- **ADB connect port:** `40633` — current for the 1.0.5 push; the port rotates after
   each phone reboot (re-read it from Wireless debugging)
-- **Package:** `com.whispertype.android` (currently `versionName 0.5.7`, `versionCode 33`)
-- **Branch:** `feature`
-- **APK:** `app/build/outputs/apk/debug/app-debug.apk`
+- **Package:** `com.whispertype.android` (currently `versionName 1.0.5`, `versionCode 50`)
+- **Branch:** `main`
+- **APK:** `app/build/outputs/apk/release/app-release.apk`

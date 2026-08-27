@@ -4,6 +4,106 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] - 2026-08-27
+
+### Fixed
+
+- **Quick Settings logo fills the tile (`quicksettings`)** — the logo artwork
+  now fills ~94% of the icon canvas (the 1.0.4 recentering had shrunk it to 80%,
+  making it look small inside the circle).
+
+## [1.0.4] - 2026-08-27
+
+### Fixed
+
+- **Quick Settings tile uses the owner-designed logo (`quicksettings`)** — the
+  tile icon is now the transparent, monochrome mic + keyboard logo the owner
+  provided (`whispertype_transparent_logo.png`), centered on a 512 px canvas, so
+  the button shows the actual logo mark instead of a solid circle or square.
+
+## [1.0.3] - 2026-08-27
+
+### Fixed
+
+- **Quick Settings tile shows the app logo (`quicksettings`)** — the tile icon
+  was the square `ic_bubble_logo` bitmap, which Android rendered as a generic
+  square. The tile now uses a dedicated circular icon generated from the logo
+  artwork (`@drawable/ic_qs_tile`) — the white mic + keyboard on the blue-teal
+  gradient — so the button renders as the round app logo.
+
+## [1.0.2] - 2026-08-27
+
+> **Device-test build.** Fresh build number on an unchanged 1.0.1 tree so the
+> on-device build is identifiable. No behavior changes.
+
+## [1.0.1] - 2026-08-27
+
+> **Cut-off dictations fixed + Quick Settings tile.**
+
+### Added
+
+- **Quick Settings tile (`quicksettings`)** — add **WhisperType bubble** to
+  Android's Quick Settings panel (app-logo icon) to turn the overlay bubble on
+  or off. It reads and writes the same `App enabled` setting as the Settings
+  screen, starts the runtime when enabling (overlay permission check; opens the
+  permission screen if missing), and uses the existing kill switch when
+  disabling.
+
+### Fixed
+
+- **Settlement waits for the tail final (`runtime`)** — quiet alone is no longer
+  enough to settle: the session now waits for a committed final
+  `inputTranscription` segment that arrives after `activityEnd` (or a server
+  done-hint — `turnComplete` / `generationComplete`) before inserting. The
+  2.5 s tail backstop remains the only path that settles on a partial, so words
+  are never cut off under normal conditions.
+
+## [1.0.0] - 2026-08-27
+
+> **First stable release.** WhisperType 1.0.0 marks the Gemini 3.5 Transcribe
+> Live engine (see 0.10.0) as the stable, supported dictation engine.
+
+## [0.10.0] - 2026-08-27
+
+> **Gemini 3.5 Transcribe Live + raw transcription engine.** The app now runs on
+> Google's dedicated streaming transcription model `gemini-3.5-transcribe-live`
+> (Live API, public preview), and the echo-era text stage is gone: no
+> systemInstruction, no echo channel, no Groq — text shaping happens server-side
+> in the model's `smart` transcription mode.
+
+- **New model (`gemini`)** — the sole Gemini model is now
+  `gemini-3.5-transcribe-live`: real-time streaming STT with interim partials
+  (`interimInputTranscription`) and committed final segments
+  (`inputTranscription`), sub-second latency, and automatic language detection /
+  code-mixing. The setup requests TEXT modality, `smart` transcription mode, and
+  a BCP-47 language hint (`en-US` / `hi-IN`) matching the speech mode. Covered at
+  no cost by the owner's Google Pro API key. Model policy enforcement
+  (`ModelPolicyTest`) is re-established on this base and pins the new model.
+- **Echo channel deleted (`runtime`, `gemini`)** — dictation is now
+  inputTranscription-only. The systemInstruction (which steered the model's
+  spoken reply and made MEDIUM restructure speech) and the whole echo barrier
+  stack (900 ms echo quiet + 2.5 s stall + 2 s source grace + 20 s deadline) are
+  gone. Post-stop settlement is one 250 ms ASR quiet window plus a single 2.5 s
+  tail backstop.
+- **Groq removed entirely** — the Groq text-polish backend, the polish-level
+  setting, the Groq API key field, key storage, validation, prompts, guard and
+  their tests are all deleted. There is no third-party text stage: `smart` mode
+  handles disfluency removal, self-corrections, formatting, and Hinglish
+  code-mixing server-side.
+- **Hinglish (`runtime`)** — the script-repair path is gone. The transcribe
+  model's native code-mixing (with the `hi-IN` hint) produces the output, and
+  whatever text it returns is inserted verbatim — the dictation never hard-fails
+  on script.
+- **Live wire (`gemini`)** — `interimInputTranscription` is parsed and emitted
+  as INPUT candidates alongside finals; `maxOutputTokens` is omitted so no
+  server-side cap can truncate a long transcript; an `omitGenerationConfig`
+  flag exists for the preview-endpoint quirk where `responseModalities:["TEXT"]`
+  suppresses final segments (device-verified; see `docs/GEMINI_LIVE.md`).
+
+> **Note:** built on a hard reset of `main` to the 0.6.2 (37) lineage — the last
+> release without Groq — so version codes 38–43 are intentionally skipped.
+> The 0.7.0–0.9.x commits remain recoverable via the git reflog.
+
 ## [0.6.2] - 2026-08-12
 
 > **Long-dictation truncation fix** — the app was settling before the model

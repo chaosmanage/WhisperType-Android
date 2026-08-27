@@ -12,8 +12,8 @@ defaultConfig {
     applicationId = "com.whispertype.android"
     minSdk = 33
     targetSdk = 36
-    versionCode = 25
-    versionName = "0.4.2"
+    versionCode = 50
+    versionName = "1.0.5"
 }
 ```
 
@@ -86,18 +86,18 @@ APK, so testers download one checksummed artifact (see `docs/TESTING.md`).
 1. **Tag the release** on `main` with an annotated tag and push branch + tag:
 
    ```bash
-   git tag -a v0.5.8 -m "release(0.5.8): <one-line summary>"
+   git tag -a v1.0.5 -m "release(1.0.5): <one-line summary>"
    git push origin main
-   git push origin v0.5.8
+   git push origin v1.0.5
    ```
 
 2. **Create the release and attach the APK.** With the GitHub CLI:
 
    ```bash
-   gh release create v0.5.8 \
-     --title "0.5.8" \
+   gh release create v1.0.5 \
+     --title "1.0.5" \
      --notes-file CHANGELOG.md \
-     app/build/outputs/apk/release/app-release.apk
+     app/build/outputs/apk/release/app-release.apk#WhisperType-1.0.5.apk
    ```
 
    or over the REST API with a personal access token (the `origin` remote of
@@ -107,12 +107,12 @@ APK, so testers download one checksummed artifact (see `docs/TESTING.md`).
    ```bash
    curl -X POST -H "Authorization: token <TOKEN>" -H "Accept: application/vnd.github+json" \
      https://api.github.com/repos/<owner>/<repo>/releases \
-     -d '{"tag_name":"v0.5.8","name":"0.5.8","body":"<release notes>"}'
+     -d '{"tag_name":"v1.0.5","name":"1.0.5","body":"<release notes>"}'
    # upload the asset (replace <id> with the "id" from the create response):
    curl -X POST -H "Authorization: token <TOKEN>" \
      -H "Content-Type: application/octet-stream" \
      --data-binary @app/build/outputs/apk/release/app-release.apk \
-     "https://uploads.github.com/repos/<owner>/<repo>/releases/<id>/assets?name=app-release.apk"
+     "https://uploads.github.com/repos/<owner>/<repo>/releases/<id>/assets?name=WhisperType-1.0.5.apk"
    ```
 
 3. **Share link** — download link for the published release:

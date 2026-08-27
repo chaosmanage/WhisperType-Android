@@ -1,5 +1,10 @@
 # Long-Dictation Truncation — Implementation Plan
 
+> **Historical.** The echo-quiet / stall-backstop fix described here shipped in
+> 0.6.2 and was **deleted in 0.10.0** along with the echo channel. Keep for
+> history; current settlement is one quiet window + one tail backstop (see
+> `docs/GEMINI_LIVE.md` §7.3).
+
 Status: **specified, partially applied, NOT complete.**
 Branch: `feature/perf-overhaul`. Last green commit: `bc0c4e7` (`release(0.6.1)`).
 Target release: **0.6.2 / versionCode 37**.

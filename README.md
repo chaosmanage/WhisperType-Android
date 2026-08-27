@@ -31,16 +31,16 @@ nothing leaves your device except the audio stream to Google's Gemini Live API.
   keyboard being visible; secure fields are still excluded.
 - **Real-time waveform** — a flat line on silence, a dancing multi-peak skyline
   while you speak (sensitive to quiet voices).
-- **Never lose a dictation** — an echo completeness gate accepts the polished
-  transcript only when its content covers your raw speech; otherwise the complete
-  raw ASR is salvaged. There is never a retry just because the echo was
-  truncated, so long dictations are never silently cut short ("Reliability
-  first", 0.4.2).
-- **Four output-polish levels** — `NONE` / `LOW` / `MEDIUM` / `HIGH` (default
-  `MEDIUM`) passed to the model through the Gemini `systemInstruction`.
-- **English + Hinglish** — output is guaranteed Latin script: Hinglish settles
-  only from the instructed echo (the raw ASR is never used for Hinglish because
-  it comes back in Devanagari), with a live-model transliteration fallback.
+- **Never lose a dictation** — the committed final segments from the transcribe
+  model are the sole dictation source; a quiet-window settlement plus a single
+  tail backstop guarantee the session always terminates, and a fragment guard
+  refuses to insert a truncated transcript ("Reliability first", 0.4.2/0.10.0).
+- **Smart transcription** — text shaping runs server-side in the transcribe
+  model's `smart` mode: filler/disfluency removal, inline self-corrections,
+  grammar and casing polish, structured formatting. No separate text stage.
+- **English + Hinglish** — automatic language detection with a `en-US` / `hi-IN`
+  hint from the speech mode; Hinglish code-mixing is handled natively by the
+  model, and whatever it returns is inserted verbatim.
 - **Auto-stop** — stops on silence or at a configurable hard cap
   (15 / 30 / 60 / 120 / 300 s, default 60 s).
 - **Custom dictionary** — client-side correction rules with optional
@@ -74,25 +74,22 @@ App (Messages, Gmail, Notes…)            WhisperType
 4. The validated transcription is inserted at the cursor; your keyboard returns.
 
 **The engine.** Audio streams over TLS to a Gemini Live realtime session that
-uses only the **`gemini-3.1-flash-live-preview`** live model. The model's
-instructed echo (`outputTranscription`) is the primary dictation source — the
-`systemInstruction` tells the model to repeat your speech back with the selected
-polish level (Latin script for Hinglish) — with the raw ASR
-(`inputTranscription`) as a fast fallback. Because the echo streams as
-word-level deltas and the model can condense very long turns, 0.4.2 adds an
-**echo completeness gate**: the polished echo is accepted only when its content
-covers the raw ASR, otherwise the complete raw is salvaged; a truncated echo
-never triggers a retry. The recording re-transcription backstop was removed —
-there is no other model or endpoint to fall back on. See `docs/GEMINI_LIVE.md`
-for the full engine and wire reference.
+uses only the **`gemini-3.5-transcribe-live`** model — Google's dedicated
+streaming transcription model. The server returns revisable partials
+(`interimInputTranscription`) while you speak and committed final segments
+(`inputTranscription`) when each segment ends; both feed a session-local
+accumulator, and settlement waits one short quiet window (250 ms) plus a single
+tail backstop. Text shaping happens in the model's `smart` mode, so there is no
+echo channel, no `systemInstruction`, and no other model or endpoint to fall
+back on. See `docs/GEMINI_LIVE.md` for the full engine and wire reference.
 
 ---
 
 ## Quick start
 
-1. **Install the APK** — copy `app/build/outputs/apk/debug/app-debug.apk` (or a
-   signed release APK) to your phone and install it. On Android 13+, allow the
-   app used to open the APK to install unknown apps.
+1. **Install the APK** — copy the signed release APK
+   `app/build/outputs/apk/release/app-release.apk` to your phone and install it.
+   On Android 13+, allow the app used to open the APK to install unknown apps.
 2. **Grant permissions** — allow overlay, microphone, and notifications when
    prompted.
 3. **Enable the Accessibility Service** — `Settings → Accessibility →
@@ -157,16 +154,18 @@ accepted), and internet access for the Gemini Live API at runtime. The Gradle
 wrapper (Gradle 8.14.3, AGP 8.13.2, Kotlin 2.4.10) downloads everything else.
 
 ```bash
-./gradlew :app:testDebugUnitTest   # JVM unit tests (424 tests, device-free)
+./gradlew :app:testDebugUnitTest   # JVM unit tests (device-free)
 ./gradlew :app:lintDebug            # lint; warnings are treated as errors
-./gradlew :app:assembleDebug        # debug APK
+./gradlew :app:assembleRelease      # signed release APK
 ```
 
-The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
+The signed release APK is written to
+`app/build/outputs/apk/release/app-release.apk` (a debug APK is available via
+`:app:assembleDebug`).
 
-A signed **release** build requires a keystore configured in `signing.properties`
-at the repository root (never commit it). See `docs/RELEASE_PROCESS.md` for
-signing, versioning, checksums, upgrade tests, and the release checklist.
+The release build is signed when `signing.properties` exists at the repository
+root (see `docs/RELEASE_PROCESS.md` for signing, versioning, checksums, upgrade
+tests, and the release checklist).
 
 ---
 
@@ -214,5 +213,5 @@ scripts/        build, install, and diagnostics helper scripts
 
 ## Version
 
-Current version **0.5.6** (versionCode 32), developed on the `feature` branch.
+Current version **1.0.5** (versionCode 50), developed on the `main` branch.
 See `CHANGELOG.md` for the full release history.

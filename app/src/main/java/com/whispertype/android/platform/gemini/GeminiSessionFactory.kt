@@ -9,15 +9,29 @@ import okhttp3.OkHttpClient
  * Constructs [OkHttpGeminiLiveSession]s against the Gemini Live WebSocket
  * endpoint. The API key is required per session; the URL is derived from the
  * key and the [GeminiSessionConfig] so callers never assemble endpoints.
+ *
+ * MODEL POLICY (non-negotiable): [LIVE_MODEL] is the ONLY Gemini model this app
+ * may ever call. See the policy block at the top of `README.md`; enforced by
+ * `ModelPolicyTest`.
  */
 object GeminiSessionFactory {
 
-    /** Default Live model used when the caller does not pin one. */
-    const val DEFAULT_MODEL = "gemini-3.1-flash-live-preview"
+    /**
+     * The one and only Gemini model this project is permitted to call: the
+     * Gemini **Live** transcription model, over `BidiGenerateContent`.
+     *
+     * No other Gemini model may be used — not `generateContent`, not Flash,
+     * Pro, Flash-Lite, native-audio or TTS variants, and not the non-live
+     * synchronous transcribe model. Only this live model is covered at no cost
+     * by the owner's Google Pro API key; every other Gemini model is
+     * explicitly refused. Audio goes only to this model; text shaping runs
+     * server-side in the model's `smart` transcription mode.
+     */
+    const val LIVE_MODEL = "gemini-3.5-transcribe-live"
 
     fun create(
         apiKey: String,
-        config: GeminiSessionConfig = GeminiSessionConfig(model = DEFAULT_MODEL),
+        config: GeminiSessionConfig = GeminiSessionConfig(model = LIVE_MODEL),
         client: OkHttpClient = defaultClient(),
         metrics: MutableSessionMetrics? = null,
     ): OkHttpGeminiLiveSession {

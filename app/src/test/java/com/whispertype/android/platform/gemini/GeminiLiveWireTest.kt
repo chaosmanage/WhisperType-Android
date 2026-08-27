@@ -16,8 +16,7 @@ class GeminiLiveWireTest {
 
     private val config = GeminiSessionConfig(
         model = "gemini-test-live",
-        responseModalities = listOf("AUDIO"),
-        systemInstruction = "Transcribe speech only.",
+        responseModalities = listOf("TEXT"),
         inputSampleRateHz = 16_000,
         language = LanguageMode.HINGLISH,
     )
@@ -34,23 +33,19 @@ class GeminiLiveWireTest {
     }
 
     @Test
-    fun `buildSetup emits responseModalities and systemInstruction`() {
+    fun `buildSetup emits responseModalities`() {
         val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(config)).jsonObject
         val setup = root["setup"]!!.jsonObject
         val generationConfig = setup["generationConfig"]!!.jsonObject
         val modalities = generationConfig["responseModalities"]!!.jsonArray
-        assertEquals(listOf("AUDIO"), modalities.map { it.jsonPrimitive.content })
-
-        val instruction = setup["systemInstruction"]!!.jsonObject["parts"]!!
-            .jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
-        assertEquals("Transcribe speech only.", instruction)
+        assertEquals(listOf("TEXT"), modalities.map { it.jsonPrimitive.content })
     }
 
     @Test
-    fun `buildSetup sends an explicit maxOutputTokens budget by default`() {
+    fun `buildSetup omits maxOutputTokens by default so a long transcript never truncates`() {
         val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(config)).jsonObject
         val generationConfig = root["setup"]!!.jsonObject["generationConfig"]!!.jsonObject
-        assertEquals(8192, generationConfig["maxOutputTokens"]!!.jsonPrimitive.content.toInt())
+        assertFalse(generationConfig.containsKey("maxOutputTokens"))
     }
 
     @Test
@@ -62,6 +57,16 @@ class GeminiLiveWireTest {
     }
 
     @Test
+    fun `buildSetup omits generationConfig entirely when omitGenerationConfig is set`() {
+        val flag = GeminiSessionConfig(model = "m", omitGenerationConfig = true)
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(flag)).jsonObject
+        assertFalse(
+            root["setup"]!!.jsonObject.containsKey("generationConfig"),
+            "the empirically working transcribe-live shape omits generationConfig",
+        )
+    }
+
+    @Test
     fun `buildSetup enables inputAudioTranscription by default`() {
         val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(config)).jsonObject
         val setup = root["setup"]!!.jsonObject
@@ -69,11 +74,33 @@ class GeminiLiveWireTest {
     }
 
     @Test
-    fun `buildSetup sends no languageCode on inputAudioTranscription`() {
-        // The Live API rejects a languageCode field here; the wire must stay clean.
-        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(GeminiSessionConfig(model = "m"))).jsonObject
+    fun `buildSetup sends the smart transcription mode by default`() {
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(config)).jsonObject
         val transcription = root["setup"]!!.jsonObject["inputAudioTranscription"]!!.jsonObject
-        assertFalse(transcription.containsKey("languageCode"))
+        assertEquals("smart", transcription["mode"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `buildSetup sends the configured transcription mode`() {
+        val verbatim = GeminiSessionConfig(model = "m", transcriptionMode = "verbatim")
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(verbatim)).jsonObject
+        val transcription = root["setup"]!!.jsonObject["inputAudioTranscription"]!!.jsonObject
+        assertEquals("verbatim", transcription["mode"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `buildSetup sends languageCodes only when configured`() {
+        val hinted = GeminiSessionConfig(model = "m", transcriptionLanguageCode = "hi-IN")
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(hinted)).jsonObject
+        val transcription = root["setup"]!!.jsonObject["inputAudioTranscription"]!!.jsonObject
+        assertEquals(
+            listOf("hi-IN"),
+            transcription["languageCodes"]!!.jsonArray.map { it.jsonPrimitive.content },
+        )
+        val bare = GeminiSessionConfig(model = "m")
+        val bareRoot = Json.parseToJsonElement(GeminiLiveWire.buildSetup(bare)).jsonObject
+        val bareTranscription = bareRoot["setup"]!!.jsonObject["inputAudioTranscription"]!!.jsonObject
+        assertFalse(bareTranscription.containsKey("languageCodes"))
     }
 
     @Test
@@ -101,25 +128,32 @@ class GeminiLiveWireTest {
         assertFalse(realtime.containsKey("activityHandling"))
     }
 
+    /**
+     * 0.8.0 regression guard: the echo channel is gone. The Live session is raw
+     * transcription transport, so the setup must never enable
+     * `outputAudioTranscription` (which produced the reply that the
+     * 900 ms/2.5 s barrier stack waited on) and must never carry a
+     * `systemInstruction` (which is what made MEDIUM restructure the user's
+     * speech). Shaping now lives in the transcribe model's `smart` mode.
+     */
     @Test
-    fun `buildSetup includes outputAudioTranscription by default`() {
-        val bare = GeminiSessionConfig(model = "m")
-        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(bare)).jsonObject
-        assertTrue(root["setup"]!!.jsonObject.containsKey("outputAudioTranscription"))
-    }
-
-    @Test
-    fun `buildSetup omits outputAudioTranscription when explicitly disabled`() {
-        val off = GeminiSessionConfig(model = "m", outputAudioTranscription = false)
-        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(off)).jsonObject
-        assertFalse(root["setup"]!!.jsonObject.containsKey("outputAudioTranscription"))
-    }
-
-    @Test
-    fun `buildSetup omits systemInstruction when null`() {
-        val bare = GeminiSessionConfig(model = "m")
-        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(bare)).jsonObject
-        assertFalse(root["setup"]!!.jsonObject.containsKey("systemInstruction"))
+    fun `buildSetup never enables the echo channel or a systemInstruction`() {
+        listOf(config, GeminiSessionConfig(model = "m")).forEach { candidate ->
+            val setup = Json.parseToJsonElement(GeminiLiveWire.buildSetup(candidate))
+                .jsonObject["setup"]!!.jsonObject
+            assertFalse(
+                setup.containsKey("outputAudioTranscription"),
+                "the echo channel must never be requested",
+            )
+            assertFalse(
+                setup.containsKey("systemInstruction"),
+                "the Live session must never carry a style instruction",
+            )
+            assertTrue(
+                setup.containsKey("inputAudioTranscription"),
+                "raw ASR is the only dictation source and must be enabled",
+            )
+        }
     }
 
     @Test
@@ -128,6 +162,17 @@ class GeminiLiveWireTest {
         val audio = root["realtimeInput"]!!.jsonObject["audio"]!!.jsonObject
         assertEquals("AQIDBA==", audio["data"]!!.jsonPrimitive.content)
         assertEquals("audio/pcm;rate=16000", audio["mimeType"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `buildAudioChunk emits the exact compact wire bytes`() {
+        // The hot-path builder assembles this string by hand; it must stay
+        // byte-identical to the kotlinx.serialization form (compact, insertion
+        // order: data then mimeType).
+        assertEquals(
+            """{"realtimeInput":{"audio":{"data":"AQIDBA==","mimeType":"audio/pcm;rate=16000"}}}""",
+            GeminiLiveWire.buildAudioChunk("AQIDBA==", 16_000),
+        )
     }
 
     @Test
@@ -240,6 +285,31 @@ class GeminiLiveWireTest {
         val msg = GeminiLiveWire.parseServerMessage(raw) as GeminiLiveWire.ServerMessage.ServerContent
         assertEquals("recognized speech", msg.inputTranscription)
         assertTrue(msg.textParts.isEmpty())
+    }
+
+    @Test
+    fun `serverContent interimInputTranscription is extracted`() {
+        // 0.10.0 transcribe model: revisable partials arrive on the interim
+        // field; finals on inputTranscription.
+        val raw = """{"serverContent":{"interimInputTranscription":{"text":"recognized spe"}}}"""
+        val msg = GeminiLiveWire.parseServerMessage(raw) as GeminiLiveWire.ServerMessage.ServerContent
+        assertEquals("recognized spe", msg.interimInputTranscription)
+        assertNull(msg.inputTranscription)
+    }
+
+    @Test
+    fun `serverContent interim and final transcription parse independently`() {
+        val raw = """
+            {
+              "serverContent": {
+                "interimInputTranscription": {"text": "recognized spe"},
+                "inputTranscription": {"text": "recognized speech"}
+              }
+            }
+        """.trimIndent()
+        val msg = GeminiLiveWire.parseServerMessage(raw) as GeminiLiveWire.ServerMessage.ServerContent
+        assertEquals("recognized spe", msg.interimInputTranscription)
+        assertEquals("recognized speech", msg.inputTranscription)
     }
 
     @Test

@@ -3,7 +3,6 @@ package com.whispertype.android.data.settings
 import com.whispertype.android.core.dictionary.DictionaryEntry
 import com.whispertype.android.core.model.AudioSourcePreference
 import com.whispertype.android.core.model.LanguageMode
-import com.whispertype.android.core.model.TranscriptionStyle
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -17,7 +16,6 @@ interface SettingsProvider {
     val appEnabled: Flow<Boolean>
     val onboardingCompleted: Flow<Boolean>
     val autoStopSeconds: Flow<Int>
-    val polishLevel: Flow<TranscriptionStyle>
 
     /** 0.6.0: recording input device; [AudioSourcePreference.DEFAULT] is the phone mic. */
     val audioSourcePreference: Flow<AudioSourcePreference>

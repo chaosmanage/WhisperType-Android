@@ -1,5 +1,12 @@
 # Optimization Plan — WhisperType Android
 
+> **Historical (0.6.x-era).** The perf-overhaul work described here shipped in
+> 0.6.0–0.6.2 and was subsequently superseded: the echo architecture it
+> optimized was **deleted in 0.10.0** when the app moved to the dedicated
+> `gemini-3.5-transcribe-live` model (raw transcription, no echo barrier stack,
+> no polish levels). Keep this document for history; current engine behavior is
+> in `docs/GEMINI_LIVE.md`.
+
 Branched from `main` as `feature/perf-overhaul` (WIP commit `35aa37f` + baseline
 test fix `ba48716`). This document is the authoritative record of the perf and
 correctness work, why each change exists, and how it is verified.

@@ -65,13 +65,6 @@ interface DictationHost {
     suspend fun copyToClipboard(sessionId: SessionId, text: String): Boolean
 
     /**
-     * 0.5.0 Hinglish: transliterates [text] (Hindi in Devanagari) to Latin script
-     * server-side by having the live model speak it back and reading the
-     * `outputTranscription` echo. Returns the Latin text, or null on failure.
-     */
-    suspend fun transliterateToLatin(sessionId: SessionId, text: String): String?
-
-    /**
      * Per-session aggregate diagnostics at terminal state. Must never contain
      * audio, keys, or full server frames. [transcript] is the settled dictation
      * text when one existed (used for opt-in history), or null otherwise.
@@ -87,13 +80,13 @@ sealed interface SessionResolve {
 
 /** A created Live session plus the language it should stamp on candidates.
  *  [ready] is true when the session was already connected (warm claim).
- *  [echoEnabled] is false when the session was configured without the output
- *  echo (NONE/LOW polish), in which case settlement uses the raw ASR only. */
+ *  0.10.0: the session is raw transcription transport only — the server's
+ *  `inputTranscription` / `interimInputTranscription` are the only dictation
+ *  source, so there is no echo flag. */
 data class SessionResolution(
     val session: GeminiLiveSession,
     val language: LanguageMode,
     val ready: Boolean = false,
-    val echoEnabled: Boolean = true,
 )
 
 /** Outcome of [DictationHost.startCapture]. */
@@ -112,15 +105,10 @@ private class ActiveLiveSession(
     val sessionId: SessionId,
     val metrics: MutableSessionMetrics,
     val accumulator: TranscriptAccumulator,
-    val echoAccumulator: TranscriptAccumulator,
     var language: LanguageMode = LanguageMode.ENGLISH,
 ) {
     var session: GeminiLiveSession? = null
     var capture: AudioPipeline? = null
-
-    /** True when the session is configured to emit the output echo. NONE/LOW
-     *  polish turns the echo off and settles on the raw ASR (0.6.0). */
-    var echoEnabled: Boolean = true
 
     /** True once activityStart was accepted (segmentation only acts mid-turn). */
     var activityStarted: Boolean = false
@@ -132,9 +120,7 @@ private class ActiveLiveSession(
     var captureFailureJob: Job? = null
     var finalizationJob: Job? = null
     var settleJob: Job? = null
-    var deadlineJob: Job? = null
-    var echoFallbackJob: Job? = null
-    var transliterationJob: Job? = null
+    var asrTailJob: Job? = null
     var insertionResultJob: Job? = null
     var inserted: Boolean = false
 
@@ -147,37 +133,28 @@ private class ActiveLiveSession(
     /** Retained even when the server sends it before STOP (Release E7). */
     var turnCompleteSeen: Boolean = false
 
-    /** Model generation completion is only a lifecycle hint, never transcript finality. */
+    /** Server done-hint; a settlement gate alongside [tailFinalSeen]. */
     var generationCompleteSeen: Boolean = false
 
     /** True only after an accepted activity-end send for this holder. */
     var activityEndQueued: Boolean = false
 
-    /** Global quiet barrier across both raw and echo transcript sources. */
+    /**
+     * 1.0.0: a committed final `inputTranscription` segment was received after
+     * the activity-end boundary. The transcribe model commits final segments
+     * incrementally while speaking, and the tail segment's final lands only
+     * after `activityEnd`; settlement waits for this so the end of the
+     * utterance is never cut off.
+     */
+    var tailFinalSeen: Boolean = false
+
+    /** The ASR revision stream has been quiet long enough to settle. */
     var transcriptQuiet: Boolean = false
 
-    /** Raw-only settlement may proceed once the echo preference grace expires. */
-    var sourceMissingGraceElapsed: Boolean = false
+    /** 0.8.0: the single settlement backstop fired (ASR tail took too long). */
+    var asrTailElapsed: Boolean = false
 
-    /** Retains an absolute deadline that fired before activity-end could be queued. */
-    var hardDeadlineReached: Boolean = false
-
-    /**
-     * 0.6.2: true from the activity-end boundary until the server confirms the
-     * generation ended (`generationComplete` / `turnComplete`). While the model
-     * may still be speaking, a gap in the echo stream must NOT be mistaken for
-     * the end of the reply — that truncated long dictations.
-     */
-    var generationInFlight: Boolean = false
-
-    /** 0.6.2: the echo has been silent for [Config.echoStallMs] with no
-     *  completion signal, so the reply is assumed finished. */
-    var echoStalled: Boolean = false
-
-    /** 0.6.2: rearmed on every echo revision; fires the stall backstop. */
-    var echoStallJob: Job? = null
-
-    /** Exact duration represented by captured frames, used for echo-only plausibility. */
+    /** Exact duration represented by captured frames (fragment plausibility). */
     var capturedAudioDurationMs: Long = 0L
 }
 
@@ -211,33 +188,18 @@ class DictationCoordinator(
 
     /** Tunable timing knobs (all monotonic delays, host-tested via virtual time). */
     data class Config(
-        /** Absolute deadline from STOP (0.4.1): the polished echo for long
-         *  dictations can take several seconds, so the cap is generous (~20 s).
-         *  The echo-fallback watchdog settles on the fast raw transcript when no
-         *  echo arrives at all. */
-        val hardDeadlineMs: Long = 20_000,
-        /** If no echo (outputTranscription) has arrived this many ms after the
-         *  activity end boundary, settle on the fast raw inputTranscription
-         *  instead of waiting. Measured from activity end so the raw is always
-         *  final (never a provisional mid-activity revision). */
-        val echoFallbackWaitMs: Long = 2_000,
-        /** Quiet required after a RAW-only transcript revision. The raw ASR is
-         *  delivered as one final text (measured: 2 messages, 0-2 ms apart), so a
-         *  short window is safe here. */
+        /** 0.8.0: quiet required after an ASR revision before settling. The raw
+         *  `inputTranscription` is delivered as one final text (measured: 2
+         *  messages, 0-2 ms apart), so a short window is safe — and it is now
+         *  the ONLY barrier on the settlement path. */
         val settleDebounceMs: Long = 250,
-        /** 0.6.2: quiet required after an ECHO revision once generation is known
-         *  to be finished. The model's spoken reply streams with natural gaps of
-         *  300-600 ms (measured on device), so the old 250 ms window settled
-         *  mid-reply and truncated long dictations. */
-        val echoQuietMs: Long = 900,
-        /** 0.6.2: backstop for a streaming echo when the server never sends a
-         *  completion signal (measured: `turnComplete` never arrives and
-         *  `generationComplete` only ~4 of 7 sessions). Settlement waits for this
-         *  much echo silence before assuming the reply ended. */
-        val echoStallMs: Long = 2_500,
-        /** 0.4.2: the polished echo is only accepted as the dictation source
-         *  when it plausibly covers the raw ASR (see [TranscriptCompleteness]). */
-        val minEchoRatio: Double = TranscriptCompleteness.DEFAULT_MIN_RATIO,
+        /** 0.8.0: the single settlement backstop, measured from the activity-end
+         *  boundary. If the ASR tail never goes quiet (or never arrives at all),
+         *  settlement proceeds on whatever text exists once this elapses. This
+         *  replaces the 0.6.2 stack of echo-quiet (900 ms), echo-stall (2.5 s),
+         *  source-missing grace (2 s) and hard deadline (20 s) barriers that
+         *  dominated post-stop latency. */
+        val asrTailTimeoutMs: Long = 2_500,
         val returnToIdleMs: Long = 1_200,
         val captureShutdownTimeoutMs: Long = 1_500,
         /** Dispatcher for the blocking AudioRecord stop/release calls during
@@ -306,9 +268,6 @@ class DictationCoordinator(
             sessionId = sessionId,
             metrics = metrics,
             accumulator = TranscriptAccumulator(),
-            // The server streams outputTranscription as word-level deltas
-            // (verified 0.4.2), so the echo accumulator appends deltas.
-            echoAccumulator = TranscriptAccumulator(appendDeltas = true),
         )
         active = holder
         publish(DictationState.Starting(sessionId, EMPTY_TARGET(sessionId)))
@@ -435,7 +394,6 @@ class DictationCoordinator(
             }
             holder.session = resolution.session
             holder.language = resolution.language
-            holder.echoEnabled = resolution.echoEnabled
             // Event collector installed as soon as the session exists, before
             // awaiting readiness, so setup failures/closure are processed promptly.
             holder.eventJob = scope.launch {
@@ -702,24 +660,27 @@ class DictationCoordinator(
         when (event) {
             GeminiEvent.Ready -> Unit
             is GeminiEvent.TranscriptCandidates -> {
-                // ECHO (outputTranscription, instruction-controlled) is the primary
-                // source; INPUT (raw ASR) is the fast fallback.
-                val isEcho = event.source == GeminiEvent.TranscriptSource.ECHO
-                val target = if (isEcho) holder.echoAccumulator else holder.accumulator
+                // 0.8.0: the raw transcription (INPUT) is the only dictation
+                // source. The echo channel is not enabled, so any ECHO candidate
+                // is ignored.
+                if (event.source == GeminiEvent.TranscriptSource.ECHO) return
                 event.candidates.forEach { candidate ->
-                    if (target.acceptWithResult(candidate.raw).changed) {
-                        if (isEcho) {
-                            holder.metrics.recordEchoRevision()
-                        } else {
-                            holder.metrics.recordInputRevision()
-                        }
-                        onTranscriptRevision(holder, isEcho)
+                    if (holder.accumulator.acceptWithResult(candidate.raw).changed) {
+                        holder.metrics.recordInputRevision()
+                        onTranscriptRevision(holder)
                     }
+                }
+                // 1.0.0: only a committed final segment that lands after the
+                // activity-end boundary proves the tail is done. Pre-boundary
+                // finals (segments committed during speech) must not satisfy the
+                // settlement gate.
+                if (event.isFinal && holder.activityEndQueued) {
+                    holder.tailFinalSeen = true
                 }
             }
             GeminiEvent.TurnComplete -> onTurnComplete(holder)
             GeminiEvent.GenerationComplete -> onGenerationComplete(holder)
-            GeminiEvent.Interrupted -> onInterrupted(holder)
+            GeminiEvent.Interrupted -> Unit // no echo generation to interrupt (0.8.0)
             is GeminiEvent.GoAway -> Unit // advance notice; not a terminal event
             is GeminiEvent.Failed -> fail(holder, event.failure)
             GeminiEvent.SessionEnd -> if (!isInserting(holder)) {
@@ -747,16 +708,6 @@ class DictationCoordinator(
     private fun startFinalization(holder: ActiveLiveSession) {
         val session = holder.session ?: return
         val capture = holder.capture
-        // One absolute monotonic deadline from STOP (Release E4): selection or an
-        // explicit failure, never a waiting state. Independent of the settle
-        // debounce so a debounce reset can never extend the deadline.
-        holder.deadlineJob = scope.launch {
-            delay(config.hardDeadlineMs)
-            if (active === holder && isFinalizing(holder)) {
-                holder.hardDeadlineReached = true
-                reevaluateSettlement(holder)
-            }
-        }
         // Orderly producer drain before the completion boundary: request stop,
         // let the producer flush its final partial frame and close the channel,
         // join the ordered sender, then send the boundary.
@@ -790,34 +741,15 @@ class DictationCoordinator(
     }
 
     /**
-     * Every actual raw or echo text change invalidates the one global quiet
-     * barrier. Exact duplicates are filtered by [TranscriptAccumulator] and do
-     * not extend settlement.
+     * Every actual ASR text change invalidates the quiet barrier. Exact
+     * duplicates are filtered by [TranscriptAccumulator] and do not extend
+     * settlement.
      */
-    private fun onTranscriptRevision(holder: ActiveLiveSession, isEcho: Boolean) {
+    private fun onTranscriptRevision(holder: ActiveLiveSession) {
         if (active !== holder) return
         if (!isFinalizing(holder)) return
         holder.transcriptQuiet = false
-        // 0.6.2: an echo revision proves the model is still speaking. Rearm the
-        // stall backstop so a mid-reply gap can never settle the session.
-        if (isEcho) {
-            holder.echoStalled = false
-            restartEchoStallBackstop(holder)
-        }
         if (holder.activityEndQueued) restartQuietDebounce(holder)
-    }
-
-    /** 0.6.2: after [Config.echoStallMs] of echo silence the reply is treated as
-     *  finished even without a server completion signal. */
-    private fun restartEchoStallBackstop(holder: ActiveLiveSession) {
-        holder.echoStallJob?.cancel()
-        holder.echoStallJob = scope.launch {
-            delay(config.echoStallMs)
-            if (active === holder && isFinalizing(holder) && holder.activityEndQueued) {
-                holder.echoStalled = true
-                reevaluateSettlement(holder)
-            }
-        }
     }
 
     /** Server lifecycle events are hints; transcript quiet is still mandatory. */
@@ -825,9 +757,6 @@ class DictationCoordinator(
         if (active !== holder) return
         holder.turnCompleteSeen = true
         holder.metrics.recordTurnComplete()
-        // 0.6.2: the server confirmed the reply ended.
-        holder.generationInFlight = false
-        holder.echoStallJob?.cancel()
         onLifecycleHint(holder)
     }
 
@@ -835,24 +764,7 @@ class DictationCoordinator(
         if (active !== holder) return
         holder.generationCompleteSeen = true
         holder.metrics.recordGenerationComplete()
-        // 0.6.2: the server confirmed the reply ended.
-        holder.generationInFlight = false
-        holder.echoStallJob?.cancel()
         onLifecycleHint(holder)
-    }
-
-    private fun onInterrupted(holder: ActiveLiveSession) {
-        if (active !== holder) return
-        // A hint from an interrupted generation cannot establish finality for
-        // the current audio activity. Aggregate metrics remain historical.
-        holder.generationCompleteSeen = false
-        holder.turnCompleteSeen = false
-        // 0.6.2: a cut generation may restart; treat it as in-flight again so a
-        // post-interruption gap cannot settle the session, and rearm the stall
-        // backstop in case the generation never resumes.
-        holder.generationInFlight = true
-        holder.echoStalled = false
-        restartEchoStallBackstop(holder)
     }
 
     private fun onLifecycleHint(holder: ActiveLiveSession) {
@@ -864,23 +776,19 @@ class DictationCoordinator(
         }
     }
 
-    /** Starts post-boundary quiet and source-missing grace barriers. */
+    /**
+     * 0.8.0: the whole post-boundary wait. One quiet debounce over ASR
+     * revisions, plus one absolute [Config.asrTailTimeoutMs] backstop from the
+     * activity-end boundary. No echo barriers, no generation gates.
+     */
     private fun afterActivityEnd(holder: ActiveLiveSession) {
         if (active !== holder) return
-        if (holder.hardDeadlineReached) {
-            reevaluateSettlement(holder)
-            return
-        }
-        // 0.6.2: the model's reply starts at the activity-end boundary; it is
-        // "in flight" until the server confirms completion.
-        holder.generationInFlight = true
-        holder.echoStalled = false
-        holder.sourceMissingGraceElapsed = false
-        holder.echoFallbackJob?.cancel()
-        holder.echoFallbackJob = scope.launch {
-            delay(config.echoFallbackWaitMs)
+        holder.asrTailElapsed = false
+        holder.asrTailJob?.cancel()
+        holder.asrTailJob = scope.launch {
+            delay(config.asrTailTimeoutMs)
             if (active === holder && isFinalizing(holder) && holder.activityEndQueued) {
-                holder.sourceMissingGraceElapsed = true
+                holder.asrTailElapsed = true
                 reevaluateSettlement(holder)
             }
         }
@@ -889,21 +797,12 @@ class DictationCoordinator(
         }
     }
 
-    /** Resets the global revision quiet debounce; never extends the deadline.
-     *  0.6.2: an in-progress echo uses the longer [Config.echoQuietMs] window so a
-     *  natural speech gap cannot settle the session mid-reply; the raw ASR (which
-     *  is delivered as one final text) keeps the short [Config.settleDebounceMs]. */
+    /** Resets the ASR quiet debounce; never extends the tail backstop. */
     private fun restartQuietDebounce(holder: ActiveLiveSession) {
         holder.settleJob?.cancel()
         holder.transcriptQuiet = false
-        val quietMs =
-            if (holder.echoEnabled && holder.echoAccumulator.settledText()?.isNotBlank() == true) {
-                config.echoQuietMs
-            } else {
-                config.settleDebounceMs
-            }
         holder.settleJob = scope.launch {
-            delay(quietMs)
+            delay(config.settleDebounceMs)
             if (active === holder && isFinalizing(holder) && holder.activityEndQueued) {
                 holder.transcriptQuiet = true
                 reevaluateSettlement(holder)
@@ -913,108 +812,53 @@ class DictationCoordinator(
 
     private fun reevaluateSettlement(holder: ActiveLiveSession) {
         if (active !== holder || !isFinalizing(holder) || !holder.activityEndQueued) return
-        if (holder.hardDeadlineReached) {
-            settle(holder, SettlementReason.HARD_DEADLINE)
+        val hasText = holder.accumulator.settledText()?.isNotBlank() == true
+        // The tail backstop is the only hard stop: settle on whatever exists,
+        // or fail explicitly when nothing arrived.
+        if (holder.asrTailElapsed) {
+            settle(
+                holder,
+                if (holder.turnCompleteSeen) {
+                    SettlementReason.TURN_COMPLETE_QUIET
+                } else {
+                    SettlementReason.RAW_FALLBACK_TIMEOUT
+                },
+            )
             return
         }
-        if (!holder.transcriptQuiet || !hasUsableSettlementEvidence(holder)) return
-        val reason = when {
-            holder.turnCompleteSeen -> SettlementReason.TURN_COMPLETE_QUIET
-            holder.generationCompleteSeen -> SettlementReason.GENERATION_COMPLETE_QUIET
-            holder.echoAccumulator.settledText()?.isNotBlank() == true ->
-                // 0.6.2: never treat an echo gap as the end of the reply while the
-                // model may still be speaking (no completion signal yet). Only the
-                // stall backstop or a confirmed completion ends an echo settlement.
-                if (!holder.generationInFlight || holder.echoStalled) {
-                    SettlementReason.ECHO_DEBOUNCE
-                } else {
-                    null
-                }
-            // NONE/LOW polish runs without the echo; settle on the raw ASR as
-            // soon as quiet elapses (0.6.0).
-            !holder.echoEnabled && holder.accumulator.settledText()?.isNotBlank() == true ->
-                SettlementReason.RAW_FALLBACK_TIMEOUT
-            holder.sourceMissingGraceElapsed &&
-                holder.accumulator.settledText()?.isNotBlank() == true ->
-                SettlementReason.RAW_FALLBACK_TIMEOUT
-            else -> null
-        } ?: return
+        if (!holder.transcriptQuiet || !hasText) return
+        // 1.0.0: never settle on provisional text. The transcribe model commits
+        // final segments incrementally during speech; the tail segment's final
+        // arrives only after activityEnd. Quiet alone is not enough — wait for
+        // a post-boundary final segment (or a server done-hint); only the tail
+        // backstop above may settle on a partial.
+        if (!holder.tailFinalSeen && !holder.turnCompleteSeen && !holder.generationCompleteSeen) return
         holder.metrics.recordQuietBarrierSatisfied()
-        settle(holder, reason)
+        settle(
+            holder,
+            if (holder.turnCompleteSeen) {
+                SettlementReason.TURN_COMPLETE_QUIET
+            } else {
+                SettlementReason.RAW_FALLBACK_TIMEOUT
+            },
+        )
     }
 
     private fun hasTranscriptEvidence(holder: ActiveLiveSession): Boolean =
-        holder.accumulator.settledText()?.isNotBlank() == true ||
-            holder.echoAccumulator.settledText()?.isNotBlank() == true
-
-    private fun hasUsableSettlementEvidence(holder: ActiveLiveSession): Boolean =
-        selectSettledText(holder) != null ||
-            (
-                holder.language == LanguageMode.HINGLISH &&
-                    holder.accumulator.settledText()?.isNotBlank() == true
-                )
+        holder.accumulator.settledText()?.isNotBlank() == true
 
     /**
-     * 0.4.2 settlement policy — the user's words are never lost to a partial
-     *  echo (never a retry because the echo was truncated):
-     *   - echo complete (covers the raw ASR) -> the polished echo;
-     *   - echo absent -> the complete raw ASR;
-     *   - echo present but partial -> the complete raw ASR (salvage);
-     *   - raw absent but echo present -> the echo;
-     *   - nothing -> null.
+     * 0.8.0 settlement: one source (the raw transcription), no text stage.
+     * The server-side `smart` mode already shapes the transcript; the raw
+     * text is inserted verbatim. No echo, no script branch.
      */
-    private fun selectSettledText(holder: ActiveLiveSession): Pair<String, SettlePath>? {
-        // NONE/LOW polish: no echo channel exists, so the raw ASR is the source.
-        if (!holder.echoEnabled) {
-            return holder.accumulator.settledText()
-                ?.takeIf { it.isNotBlank() }
-                ?.let { it to SettlePath.RAW_ONLY }
-        }
-        val echo = holder.echoAccumulator.settledText()?.takeIf { it.isNotBlank() }
-        val raw = holder.accumulator.settledText()?.takeIf { it.isNotBlank() }
-        // 0.5.0 Hinglish: the raw ASR for Hindi is always Devanagari (never
-        // instruction-influenced), so it is never a dictation source; only the
-        // instructed Latin echo is usable.
-        if (holder.language == LanguageMode.HINGLISH) {
-            return echo
-                ?.takeIf { isPlausibleEchoOnly(holder, it) }
-                ?.let { it to SettlePath.ECHO_ONLY }
-        }
-        return when {
-            echo != null && raw != null &&
-                TranscriptCompleteness.covers(echo, raw, config.minEchoRatio) ->
-                echo to SettlePath.ECHO_COMPLETE
-
-            raw != null && echo == null -> raw to SettlePath.RAW_ONLY
-
-            raw != null -> raw to SettlePath.ECHO_PARTIAL_RAW
-
-            echo != null && isPlausibleEchoOnly(holder, echo) ->
-                echo to SettlePath.ECHO_ONLY
-
-            else -> null
-        }
-    }
-
-    private fun isPlausibleEchoOnly(holder: ActiveLiveSession, echo: String): Boolean =
-        TranscriptCompleteness.isPlausibleForDuration(
-            transcript = echo,
-            durationMs = holder.capturedAudioDurationMs,
-        )
-
     private fun settle(holder: ActiveLiveSession, reason: SettlementReason) {
         if (active !== holder || !isFinalizing(holder) || !holder.activityEndQueued) return
         holder.settleJob?.cancel()
-        holder.deadlineJob?.cancel()
-        holder.echoFallbackJob?.cancel()
+        holder.asrTailJob?.cancel()
         holder.metrics.recordSettlement(reason)
-        if (holder.language == LanguageMode.HINGLISH) {
-            settleHinglish(holder)
-            return
-        }
-        val selected = selectSettledText(holder)
-        holder.metrics.settlePath = selected?.second ?: SettlePath.NONE
-        val raw = selected?.first
+        val raw = holder.accumulator.settledText()?.takeIf { it.isNotBlank() }
+        holder.metrics.settlePath = if (raw != null) SettlePath.RAW_ONLY else SettlePath.NONE
         val candidate = raw?.let {
             ResultCandidate(raw = it, cleaned = null, language = holder.language)
         }
@@ -1063,83 +907,11 @@ class DictationCoordinator(
     }
 
     /**
-     * 0.5.0 Hinglish settlement — output is ALWAYS Latin:
-     *  - a complete instructed echo (Latin) is inserted as-is;
-     *  - when the echo is missing or partial, the raw ASR (Devanagari) is
-     *    transliterated to Latin server-side via the live model and inserted;
-     *  - a Latin echo is never replaced, and Devanagari is never inserted.
+     * 0.10.0 Hinglish: there is no script repair stage. The transcribe model
+     * handles code-mixing natively (a `hi-IN` language hint is sent in setup),
+     * and whatever text it returns is inserted verbatim — including, at worst,
+     * Devanagari, which is inserted as-is rather than hard-failing the session.
      */
-    private fun settleHinglish(holder: ActiveLiveSession) {
-        val echo = holder.echoAccumulator.settledText()?.takeIf { it.isNotBlank() }
-        val raw = holder.accumulator.settledText()?.takeIf { it.isNotBlank() }
-        val echoComplete = echo != null &&
-            (
-                if (raw == null) {
-                    isPlausibleEchoOnly(holder, echo)
-                } else {
-                    isCompleteHinglishEcho(holder, echo, raw)
-                }
-                )
-        when {
-            echoComplete -> {
-                holder.metrics.settlePath =
-                    if (raw != null) SettlePath.ECHO_COMPLETE else SettlePath.ECHO_ONLY
-                // 0.6.1: never silently insert a fragment for a long recording.
-                if (isFragmentForDuration(holder, echo)) {
-                    failFragment(holder)
-                    return
-                }
-                holder.settledText = echo
-                insertSettled(holder, echo)
-            }
-            raw != null -> {
-                holder.metrics.settlePath = SettlePath.ECHO_PARTIAL_RAW
-                holder.transliterationJob?.cancel()
-                holder.transliterationJob = scope.launch {
-                    holder.metrics.recordRepairStarted()
-                    val latin = try {
-                        host.transliterateToLatin(holder.sessionId, raw)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        null
-                    } finally {
-                        holder.metrics.recordRepairEnded()
-                    }
-                    if (active !== holder) return@launch
-                    val final = latin?.takeIf { it.isNotBlank() } ?: echo
-                    when {
-                        final == null -> failNoTranscript(holder)
-                        // 0.6.1: the repair failed and all that remains is a
-                        // fragment — surface a retry instead of inserting it.
-                        isFragmentForDuration(holder, final) -> failFragment(holder)
-                        else -> {
-                            holder.settledText = final
-                            insertSettled(holder, final)
-                        }
-                    }
-                }
-            }
-            else -> failNoTranscript(holder)
-        }
-    }
-
-    /**
-     * Hindi input and Latin-script echo cannot share normalized tokens. Keep the
-     * cross-script length guard, augmented by captured-duration plausibility.
-     */
-    private fun isCompleteHinglishEcho(
-        holder: ActiveLiveSession,
-        echo: String,
-        raw: String,
-    ): Boolean {
-        val rawWords = TranscriptCompleteness.contentWords(raw).size
-        val echoWords = TranscriptCompleteness.contentWords(echo).size
-        val lengthRatio = if (rawWords == 0) 0.0 else echoWords.toDouble() / rawWords
-        return lengthRatio >= config.minEchoRatio && isPlausibleEchoOnly(holder, echo)
-    }
-
-    /** Lenient failsafe acceptance for user speech rejected by strict validation. */
     private fun lenientAccept(
         holder: ActiveLiveSession,
         candidate: ResultCandidate,
@@ -1264,16 +1036,13 @@ class DictationCoordinator(
         holder.sessionJob?.cancel()
         holder.readyJob?.cancel()
         holder.settleJob?.cancel()
-        holder.deadlineJob?.cancel()
-        holder.echoFallbackJob?.cancel()
-        holder.echoStallJob?.cancel()
+        holder.asrTailJob?.cancel()
         holder.finalizationJob?.cancel()
         holder.audioJob?.cancel()
         holder.amplitudeJob?.cancel()
         holder.autoStopJob?.cancel()
         holder.captureFailureJob?.cancel()
         holder.eventJob?.cancel()
-        holder.transliterationJob?.cancel()
         holder.insertionResultJob?.cancel()
         holder.capture?.let { capture ->
             scope.launch {

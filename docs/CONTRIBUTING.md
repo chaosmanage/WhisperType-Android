@@ -43,9 +43,9 @@ Every commit that changes app behavior bumps the app version **in the same commi
 - `versionCode` — increment by exactly 1 (Android requires a strictly increasing integer to update an existing install).
 - `versionName` — bump in lockstep, at minimum a patch increment (e.g. `0.2.0 -> 0.2.1`); reserve minor bumps for features and major for breaking changes.
 
-Keep the bump in the same commit as the behavior change so the tracked debug APK (`app/build/outputs/apk/debug/app-debug.apk`) always carries a `versionName`/`versionCode` that matches the committed source. Refresh the "Current device reference" in `docs/PUSH_TO_PHONE_VIA_ADB.md` whenever the version changes.
+Keep the bump in the same commit as the behavior change so the tracked release APK (`app/build/outputs/apk/release/app-release.apk`) always carries a `versionName`/`versionCode` that matches the committed source. Refresh the "Current device reference" in `docs/PUSH_TO_PHONE_VIA_ADB.md` whenever the version changes.
 
-Current baseline: `0.4.2` (versionCode `25`).
+Current baseline: `1.0.5` (versionCode `50`).
 
 ## Build and test commands
 

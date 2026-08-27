@@ -241,6 +241,18 @@ class TranscriptCompletenessTest {
     }
 
     @Test
+    fun `ordinal day numbers survive polish that drops the suffix`() {
+        // "15th" and "15" are the same NUMBER anchor and the same content
+        // token; the polish must not fail MISSING_ANCHOR or ordered coverage.
+        assertTrue(
+            TranscriptCompleteness.covers(
+                echo = "May 15",
+                raw = "May 15th",
+            ),
+        )
+    }
+
+    @Test
     fun `repeated anchors must be preserved with multiplicity`() {
         val assessment = TranscriptCompleteness.assess(
             echo = "use code 7 and then continue later",
@@ -281,49 +293,5 @@ class TranscriptCompletenessTest {
                 fillers,
             )
         }
-    }
-
-    @Test
-    fun `long echo-only duration helper rejects tiny summaries`() {
-        val assessment = TranscriptCompleteness.assessDuration(
-            transcript = "brief reply",
-            durationMs = 120_000,
-        )
-
-        assertFalse(assessment.isPlausible)
-        assertEquals(
-            TranscriptCompleteness.DurationDiagnosis.TOO_FEW_WORDS,
-            assessment.diagnosis,
-        )
-        assertFalse(
-            TranscriptCompleteness.isPlausibleForDuration(
-                transcript = "brief reply",
-                durationMs = 120_000,
-            ),
-        )
-    }
-
-    @Test
-    fun `duration helper accepts sufficient long text and grants short recordings grace`() {
-        val longText = (1..30).joinToString(" ") { "word$it" }
-
-        assertTrue(
-            TranscriptCompleteness.isPlausibleForDuration(
-                transcript = longText,
-                durationMs = 120_000,
-            ),
-        )
-        assertTrue(
-            TranscriptCompleteness.isPlausibleForDuration(
-                transcript = "yes",
-                durationMs = 5_000,
-            ),
-        )
-        assertFalse(
-            TranscriptCompleteness.isPlausibleForDuration(
-                transcript = "   ",
-                durationMs = 5_000,
-            ),
-        )
     }
 }

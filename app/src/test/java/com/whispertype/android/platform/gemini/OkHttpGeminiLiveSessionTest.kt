@@ -6,9 +6,7 @@ import com.whispertype.android.core.model.GeminiEvent
 import com.whispertype.android.core.model.SendResult
 import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -127,11 +125,14 @@ class OkHttpGeminiLiveSessionTest {
         assertEquals("models/gemini-test-live", setup["model"]!!.jsonPrimitive.content)
         val modalities = setup["generationConfig"]!!.jsonObject["responseModalities"]!!
         assertEquals(
-            listOf("AUDIO"),
+            listOf("TEXT"),
             (modalities as kotlinx.serialization.json.JsonArray).map { it.jsonPrimitive.content },
         )
         assertTrue(setup.containsKey("inputAudioTranscription"))
-        assertTrue(setup.containsKey("outputAudioTranscription"), "output transcription (echo) must be on by default")
+        assertFalse(
+            setup.containsKey("outputAudioTranscription"),
+            "0.8.0: the echo channel must never be requested",
+        )
         val automaticActivityDetection = setup["realtimeInputConfig"]!!.jsonObject["automaticActivityDetection"]!!.jsonObject
         assertTrue(automaticActivityDetection["disabled"]!!.jsonPrimitive.boolean)
         assertFalse(setup.containsKey("systemInstruction"))
@@ -379,7 +380,7 @@ class OkHttpGeminiLiveSessionTest {
     }
 
     @Test
-    fun `inputTranscription emits a candidate`() = runBlocking {
+    fun `inputTranscription emits a final candidate`() = runBlocking {
         val session = newSession()
         val events = bufferEvents(session)
         session.awaitReady()
@@ -389,6 +390,46 @@ class OkHttpGeminiLiveSessionTest {
         val event = receiveWithTimeout(events)
         assertIs<GeminiEvent.TranscriptCandidates>(event)
         assertEquals(listOf("recognized speech"), event.candidates.map { it.raw })
+        assertTrue(event.isFinal, "a committed inputTranscription segment must be marked final")
+        session.close()
+    }
+
+    @Test
+    fun `interimInputTranscription emits a non-final INPUT candidate`() = runBlocking {
+        // 0.10.0 transcribe model: revisable partials arrive on the interim
+        // field and must never be treated as final.
+        val session = newSession()
+        val events = bufferEvents(session)
+        session.awaitReady()
+        receiveWithTimeout(events)
+
+        serverSocket.push("""{"serverContent":{"interimInputTranscription":{"text":"recognized spe"}}}""")
+        val event = receiveWithTimeout(events)
+        assertIs<GeminiEvent.TranscriptCandidates>(event)
+        assertEquals(listOf("recognized spe"), event.candidates.map { it.raw })
+        assertEquals(GeminiEvent.TranscriptSource.INPUT, event.source)
+        assertFalse(event.isFinal, "a revisable interim must never be marked final")
+        session.close()
+    }
+
+    @Test
+    fun `interim and final transcription in one frame emit candidates in order`() = runBlocking {
+        val session = newSession()
+        val events = bufferEvents(session)
+        session.awaitReady()
+        receiveWithTimeout(events)
+
+        serverSocket.push(
+            """{"serverContent":{"interimInputTranscription":{"text":"recognized spe"},"inputTranscription":{"text":"recognized speech"}}}""",
+        )
+        val interim = receiveWithTimeout(events)
+        assertIs<GeminiEvent.TranscriptCandidates>(interim)
+        assertEquals(listOf("recognized spe"), interim.candidates.map { it.raw })
+        assertFalse(interim.isFinal)
+        val final = receiveWithTimeout(events)
+        assertIs<GeminiEvent.TranscriptCandidates>(final)
+        assertEquals(listOf("recognized speech"), final.candidates.map { it.raw })
+        assertTrue(final.isFinal)
         session.close()
     }
 
@@ -468,47 +509,6 @@ class OkHttpGeminiLiveSessionTest {
     }
 
     @Test
-    fun `requestEchoFor uses manual realtime text order and returns on TurnComplete`() = runBlocking {
-        val session = newSession()
-        session.awaitReady()
-
-        val result = async(start = CoroutineStart.UNDISPATCHED) {
-            session.requestEchoFor("source text")
-        }
-        awaitMessages { countMessages(serverSocket.clientMessages, "activityEnd") == 1 }
-
-        val messages = serverSocket.clientMessages.toList()
-        val frames = realtimeInputFrames(messages)
-        assertEquals(
-            listOf("activityStart", "text", "activityEnd"),
-            frames.map { it.keys.single() },
-        )
-        assertEquals("source text", frames[1]["text"]!!.jsonPrimitive.content)
-        assertTrue(messages.none { it.contains("clientContent") })
-
-        serverSocket.push("""{"serverContent":{"generationComplete":true}}""")
-        serverSocket.push("""{"serverContent":{"outputTranscription":{"text":"latin text"}}}""")
-        serverSocket.push("""{"serverContent":{"turnComplete":true}}""")
-        assertEquals("latin text", withTimeout(5_000) { result.await() })
-        session.close()
-    }
-
-    @Test
-    fun `requestEchoFor returns immediately on Failed without another event`() = runBlocking {
-        val session = newSession()
-        session.awaitReady()
-
-        val result = async(start = CoroutineStart.UNDISPATCHED) {
-            session.requestEchoFor("source text")
-        }
-        awaitMessages { countMessages(serverSocket.clientMessages, "activityEnd") == 1 }
-
-        serverSocket.push("""{"error":{"message":"synthetic failure"}}""")
-        assertNull(withTimeout(5_000) { result.await() })
-        session.close()
-    }
-
-    @Test
     fun `setupError fails awaitReady and emits Failed`() = runBlocking {
         val failing = MockWebServer()
         failing.enqueue(
@@ -567,6 +567,45 @@ class OkHttpGeminiLiveSessionTest {
             activeClient?.dispatcher?.cancelAll()
             activeClient?.connectionPool?.evictAll()
             closing.close()
+        }
+    }
+
+    @Test
+    fun `awaitReady timeout cancels the socket and takes the session terminal`() = runBlocking {
+        // A server that upgrades but never sends setupComplete.
+        val silent = MockWebServer()
+        silent.enqueue(
+            MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {}).build(),
+        )
+        silent.start()
+        try {
+            val client = OkHttpClient()
+            activeClient = client
+            val session = OkHttpGeminiLiveSession(
+                client = client,
+                wsUrl = silent.url("/live").toString(),
+                config = GeminiSessionConfig(model = "test-model"),
+                readyTimeoutMs = 250L,
+            )
+            val events = bufferEvents(session)
+
+            val error = assertFailsWith<GeminiLiveException> { session.awaitReady() }
+            assertEquals("gemini_setup", error.failure.code)
+            assertEquals("Timed out waiting for the Gemini session to start.", error.failure.message)
+
+            // The session self-cleans: the failure is terminal and emitted once,
+            // and later calls are rejected as closed instead of hanging.
+            val failed = assertIs<GeminiEvent.Failed>(receiveWithTimeout(events))
+            assertEquals("gemini_setup", failed.failure.code)
+            assertNull(events.tryReceive().getOrNull(), "the timeout failure must be emitted once")
+            assertEquals(SendResult.Rejected("socket_closed"), session.startActivity())
+            assertEquals(SendResult.Rejected("socket_closed"), session.endActivity())
+            session.close()
+        } finally {
+            activeClient?.dispatcher?.cancelAll()
+            activeClient?.connectionPool?.evictAll()
+            activeClient?.dispatcher?.executorService?.shutdown()
+            silent.close()
         }
     }
 

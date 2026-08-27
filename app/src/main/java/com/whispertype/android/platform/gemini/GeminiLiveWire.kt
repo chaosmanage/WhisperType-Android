@@ -6,7 +6,6 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -19,14 +18,13 @@ import kotlinx.serialization.json.put
  * socket; [OkHttpGeminiLiveSession] only forwards the produced JSON strings and
  * feeds received strings back through [parseServerMessage].
  *
- * Wire contract (per the Live API reference):
- *  - the first client message is `{"setup": {model, generationConfig, systemInstruction}}`
+ * Wire contract (per the Live API reference for `gemini-3.5-transcribe-live`):
+ *  - the first client message is `{"setup": {model, generationConfig, inputAudioTranscription}}`
  *    and the server replies `setupComplete` (or `setupError`);
  *  - audio is sent as `{"realtimeInput": {"audio": {"data": <base64>, "mimeType": "audio/pcm;rate=16000"}}}`;
- *  - ongoing text is sent through `realtimeInput.text`; manual activity
- *    boundaries, not `clientContent.turnComplete`, delimit that input;
- *  - the server streams `serverContent` objects carrying `modelTurn.parts[].text`,
- *    transcription text, and independent turn lifecycle flags.
+ *  - the server streams `serverContent` objects carrying the transcription
+ *    text: `interimInputTranscription` (revisable partials) and
+ *    `inputTranscription` (committed final segments), plus turn lifecycle flags.
  */
 object GeminiLiveWire {
 
@@ -34,6 +32,11 @@ object GeminiLiveWire {
         ignoreUnknownKeys = true
         isLenient = false
     }
+
+    // Fixed segments of the audio-chunk frame; see [buildAudioChunk].
+    private const val AUDIO_CHUNK_HEAD = "{\"realtimeInput\":{\"audio\":{\"data\":\""
+    private const val AUDIO_CHUNK_MIME_TAIL = "\",\"mimeType\":\"audio/pcm;rate="
+    private const val AUDIO_CHUNK_CLOSE = "\"}}}"
 
     // ------------------------------------------------------------------
     // Client -> server
@@ -43,35 +46,38 @@ object GeminiLiveWire {
     fun buildSetup(config: GeminiSessionConfig): String {
         val setup = buildJsonObject {
             put("model", "models/${config.model}")
-            put(
-                "generationConfig",
-                buildJsonObject {
-                    put(
-                        "responseModalities",
-                        kotlinx.serialization.json.buildJsonArray {
-                            config.responseModalities.forEach { add(JsonPrimitive(it)) }
-                        },
-                    )
-                    // 0.6.2: explicit output budget so a long spoken reply cannot
-                    // be truncated by an unknown server-side cap.
-                    config.maxOutputTokens?.let { put("maxOutputTokens", it) }
-                },
-            )
-            // Voice-to-text: enable transcription of the user's speech so the
-            // server returns serverContent.inputTranscription.text (the dictation
-            // source). The model's own output stays audio and is never read.
-            // NOTE: the Live API rejects a languageCode field on this config
-            // ("unknown name language code"), so no language is sent here; the
-            // Hinglish Latin-script bias comes from the systemInstruction instead.
-            if (config.inputAudioTranscription) {
-                put("inputAudioTranscription", buildJsonObject {})
+            if (!config.omitGenerationConfig) {
+                put(
+                    "generationConfig",
+                    buildJsonObject {
+                        put(
+                            "responseModalities",
+                            kotlinx.serialization.json.buildJsonArray {
+                                config.responseModalities.forEach { add(JsonPrimitive(it)) }
+                            },
+                        )
+                        config.maxOutputTokens?.let { put("maxOutputTokens", it) }
+                    },
+                )
             }
-            // Echo fallback: outputAudioTranscription transcribes the model's own
-            // audio reply. When the model is instructed to repeat the user's words
-            // verbatim, outputTranscription.text is the dictation text — used as a
-            // fallback because the server does not always deliver inputTranscription.
-            if (config.outputAudioTranscription) {
-                put("outputAudioTranscription", buildJsonObject {})
+            // Transcription of the user's speech: the server returns
+            // serverContent.interimInputTranscription (partials) and
+            // serverContent.inputTranscription (final segments) — the ONLY
+            // dictation source. `mode` selects server-side shaping ("smart" or
+            // "verbatim"); `languageCodes` is an optional BCP-47 hint.
+            if (config.inputAudioTranscription) {
+                put(
+                    "inputAudioTranscription",
+                    buildJsonObject {
+                        put("mode", config.transcriptionMode)
+                        config.transcriptionLanguageCode?.let {
+                            put(
+                                "languageCodes",
+                                kotlinx.serialization.json.buildJsonArray { add(JsonPrimitive(it)) },
+                            )
+                        }
+                    },
+                )
             }
             // Push-to-talk manual activity signaling (Release A experiment): with
             // automatic detection disabled, the client delimits each utterance
@@ -85,23 +91,10 @@ object GeminiLiveWire {
                             buildJsonObject { put("disabled", true) },
                         )
                         // 0.6.0 experimental segmentation: a new activity must
-                        // not interrupt the model echoing the previous segment.
+                        // not interrupt the previous segment's transcription.
                         if (config.activityHandlingNoInterruption) {
                             put("activityHandling", "NO_INTERRUPTION")
                         }
-                    },
-                )
-            }
-            config.systemInstruction?.let { instruction ->
-                put(
-                    "systemInstruction",
-                    buildJsonObject {
-                        put(
-                            "parts",
-                            kotlinx.serialization.json.buildJsonArray {
-                                add(buildJsonObject { put("text", instruction) })
-                            },
-                        )
                     },
                 )
             }
@@ -109,25 +102,26 @@ object GeminiLiveWire {
         return buildJsonObject { put("setup", setup) }.toString()
     }
 
-    /** One realtime audio chunk. [dataBase64] is base64 of raw PCM16 bytes. */
+    /**
+     * One realtime audio chunk. [dataBase64] is base64 of raw PCM16 bytes.
+     *
+     * Hot path (one frame per ~20 ms at 50 fps): the byte-identical JSON string
+     * is assembled directly instead of through [buildJsonObject]. This is safe
+     * without an escaper — the base64 alphabet (`A-Z a-z 0-9 + / =`) contains no
+     * characters that need JSON escaping, and the mime type is a fixed
+     * template around an integer.
+     */
     fun buildAudioChunk(dataBase64: String, sampleRateHz: Int): String =
-        buildJsonObject {
-            put(
-                "realtimeInput",
-                buildJsonObject {
-                    put(
-                        "audio",
-                        buildJsonObject {
-                            put("data", dataBase64)
-                            put("mimeType", "audio/pcm;rate=$sampleRateHz")
-                        },
-                    )
-                },
-            )
-        }.toString()
+        StringBuilder(AUDIO_CHUNK_HEAD.length + dataBase64.length + 32)
+            .append(AUDIO_CHUNK_HEAD)
+            .append(dataBase64)
+            .append(AUDIO_CHUNK_MIME_TAIL)
+            .append(sampleRateHz)
+            .append(AUDIO_CHUNK_CLOSE)
+            .toString()
 
     /**
-     * Sends ongoing text through the Gemini 3.1 realtime-input channel. With
+     * Sends ongoing text through the Gemini realtime-input channel. With
      * manual activity detection, callers must surround this message with
      * [buildActivityStart] and [buildActivityEnd].
      */
@@ -136,7 +130,7 @@ object GeminiLiveWire {
             put("realtimeInput", buildJsonObject { put("text", text) })
         }.toString()
 
-    /** Builds a client-content turn boundary; not valid for ongoing Gemini 3.1 realtime text. */
+    /** Builds a client-content turn boundary; not valid for ongoing realtime text. */
     fun buildTurnComplete(): String =
         buildJsonObject {
             put("clientContent", buildJsonObject { put("turnComplete", true) })
@@ -237,6 +231,12 @@ object GeminiLiveWire {
             ?.get("parts")
             ?.let { parts -> extractTextParts(parts) }
             ?: emptyList()
+        val interimInputTranscription = content
+            ?.get("interimInputTranscription")
+            ?.jsonObject
+            ?.get("text")
+            ?.jsonPrimitive
+            ?.contentOrNull
         val inputTranscription = content
             ?.get("inputTranscription")
             ?.jsonObject
@@ -258,6 +258,7 @@ object GeminiLiveWire {
         val interrupted = content?.get("interrupted")?.jsonPrimitive?.booleanOrNull ?: false
         return ServerMessage.ServerContent(
             textParts = textParts,
+            interimInputTranscription = interimInputTranscription,
             inputTranscription = inputTranscription,
             outputTranscription = outputTranscription,
             generationComplete = generationComplete,
@@ -290,14 +291,15 @@ object GeminiLiveWire {
         data class SetupError(val message: String) : ServerMessage
 
         /**
-         * A `serverContent` frame. [textParts] are model text parts (empty for
-         * a pure input-transcription echo), [inputTranscription] is the
-         * recognized user speech for that frame, [outputTranscription] is the
-         * model's own audio reply transcribed (the echo fallback), and the
-         * flags describe the turn lifecycle.
+         * A `serverContent` frame. [interimInputTranscription] is the current
+         * revisable partial of the recognized user speech (0.10.0 transcribe
+         * model), [inputTranscription] is the committed final segment text,
+         * [outputTranscription] is never populated (no audio output on the
+         * transcribe model) and the flags describe the turn lifecycle.
          */
         data class ServerContent(
             val textParts: List<String>,
+            val interimInputTranscription: String?,
             val inputTranscription: String?,
             val outputTranscription: String?,
             val turnComplete: Boolean,

@@ -4,18 +4,12 @@ package com.whispertype.android.core.transcript
  * Session-local accumulator for streamed transcript messages.
  *
  * A stream may mix cumulative revisions with independent deltas. Cumulative
- * extensions and related corrections replace the provisional value. In
- * [appendDeltas] mode, all other messages are joined using the maximal
- * normalized-token overlap between the current suffix and the message prefix.
- * This makes repeated connector words deterministic and prevents an overlap
- * from being either duplicated or dropped.
+ * extensions and related corrections replace the provisional value; shorter
+ * non-prefix messages are ignored so the settled text never shrinks.
  *
  * Every actual text change bumps [revisionCount].
  */
-class TranscriptAccumulator(
-    /** True for a source that can emit independent delta messages. */
-    private val appendDeltas: Boolean = false,
-) {
+class TranscriptAccumulator {
     /** Result for callers that need to distinguish a duplicate from a revision. */
     data class AcceptResult(
         val text: String?,
@@ -85,27 +79,7 @@ class TranscriptAccumulator(
             return unchanged()
         }
 
-        val likelyRevision = isLikelyRevision(existingTokens, messageTokens)
-        if (appendDeltas) {
-            // A cumulative correction can happen to begin with a token repeated
-            // at the current tail. Prefer the well-supported revision before
-            // interpreting that repeated token as a delta overlap.
-            if (likelyRevision && commonPrefixLength(existingTokens, messageTokens) > 0) {
-                return update(message)
-            }
-
-            val overlap = maximalSuffixPrefixOverlap(existingTokens, messageTokens)
-            if (overlap > 0) {
-                return update(mergeOverlap(existing, message, existingTokens, overlap))
-            }
-
-            if (likelyRevision) {
-                return update(message)
-            }
-            return update(join(existing, message))
-        }
-
-        if (likelyRevision) {
+        if (isLikelyRevision(existingTokens, messageTokens)) {
             return update(message)
         }
         if (messageTokens.size < existingTokens.size) return unchanged()
@@ -130,44 +104,6 @@ class TranscriptAccumulator(
     }
 
     private fun unchanged(): AcceptResult = AcceptResult(text = current, changed = false)
-
-    /**
-     * Replaces the overlapping suffix with the incoming spelling/punctuation
-     * and keeps only the non-overlapping continuation.
-     */
-    private fun mergeOverlap(
-        existing: String,
-        message: String,
-        existingTokens: List<Token>,
-        overlap: Int,
-    ): String {
-        val overlapStart = existingTokens[existingTokens.size - overlap].start
-        return join(existing.substring(0, overlapStart), message)
-    }
-
-    /**
-     * Largest `k` for which the final `k` tokens of [existing] equal the first
-     * `k` tokens of [message]. Looking at the complete suffix removes any
-     * arbitrary tail window and remains deterministic for repeated words.
-     */
-    private fun maximalSuffixPrefixOverlap(
-        existing: List<Token>,
-        message: List<Token>,
-    ): Int {
-        val limit = minOf(existing.size, message.size)
-        for (size in limit downTo 1) {
-            val existingStart = existing.size - size
-            var matches = true
-            for (offset in 0 until size) {
-                if (existing[existingStart + offset].normalized != message[offset].normalized) {
-                    matches = false
-                    break
-                }
-            }
-            if (matches) return size
-        }
-        return 0
-    }
 
     /**
      * Related, similarly sized messages are revisions rather than independent
@@ -281,20 +217,6 @@ class TranscriptAccumulator(
         return consumed
     }
 
-    /** Joins a delta on a natural text boundary. */
-    private fun join(existing: String, message: String): String {
-        val continuation = message.trim()
-        if (continuation.isEmpty()) return existing
-        if (existing.isEmpty()) return continuation
-        if (continuation.first() in ATTACHED_PUNCTUATION) {
-            return existing.trimEnd() + continuation
-        }
-        if (existing.last().isWhitespace()) {
-            return existing + continuation
-        }
-        return "$existing $continuation"
-    }
-
     private fun tokens(text: String): List<Token> {
         val result = ArrayList<Token>()
         var tokenStart = -1
@@ -313,14 +235,18 @@ class TranscriptAccumulator(
             }
         }
 
-        for (index in text.indices) {
-            val character = text[index]
-            if (character.isLetterOrDigit()) {
+        // Code-point iteration: surrogate pairs (astral-plane letters/digits)
+        // must tokenize as one character, not as two lone surrogates.
+        var index = 0
+        while (index < text.length) {
+            val codePoint = text.codePointAt(index)
+            if (Character.isLetterOrDigit(codePoint)) {
                 if (tokenStart < 0) tokenStart = index
-                normalized.append(character.lowercaseChar())
+                normalized.appendCodePoint(Character.toLowerCase(codePoint))
             } else {
                 flush()
             }
+            index += Character.charCount(codePoint)
         }
         flush()
         return result
@@ -335,6 +261,5 @@ class TranscriptAccumulator(
         const val MIN_REVISION_SHARED_TOKENS: Int = 2
         const val MIN_REVISION_SIMILARITY: Double = 0.5
         const val MIN_CORRECTABLE_FRAGMENT_LENGTH: Int = 3
-        val ATTACHED_PUNCTUATION: Set<Char> = setOf('.', ',', '!', '?', ';', ':', '%', ')', ']', '}')
     }
 }

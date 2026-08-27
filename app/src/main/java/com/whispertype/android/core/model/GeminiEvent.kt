@@ -17,10 +17,14 @@ sealed interface GeminiEvent {
      */
     enum class TranscriptSource { INPUT, ECHO }
 
-    /** Transcript candidates for one frame, tagged by their source channel. */
+    /** Transcript candidates for one frame, tagged by their source channel.
+     *  [isFinal] is true only for a committed final segment
+     *  (`inputTranscription`); revisable partials (`interimInputTranscription`)
+     *  are false. The coordinator never settles on a partial. */
     data class TranscriptCandidates(
         val candidates: List<ResultCandidate>,
         val source: TranscriptSource = TranscriptSource.INPUT,
+        val isFinal: Boolean = false,
     ) : GeminiEvent
 
     /** Activity end acknowledged by the server. */

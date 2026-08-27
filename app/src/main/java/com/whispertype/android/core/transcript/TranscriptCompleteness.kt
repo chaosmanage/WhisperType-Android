@@ -35,22 +35,6 @@ object TranscriptCompleteness {
         val preservedAnchorCount: Int,
     )
 
-    /** Aggregate reason for an echo-only duration plausibility decision. */
-    enum class DurationDiagnosis {
-        PLAUSIBLE,
-        BLANK_TRANSCRIPT,
-        TOO_FEW_WORDS,
-    }
-
-    /** Content-free diagnostic returned by [assessDuration]. */
-    data class DurationAssessment(
-        val isPlausible: Boolean,
-        val diagnosis: DurationDiagnosis,
-        val transcriptWordCount: Int,
-        val expectedWordCount: Double,
-        val coverageRatio: Double,
-    )
-
     /**
      * Backwards-compatible boolean completeness API. See [assess] for the
      * aggregate decision details.
@@ -121,57 +105,6 @@ object TranscriptCompleteness {
         wordsPerSecond: Double = DEFAULT_WORDS_PER_SECOND,
     ): Double = durationMs / 1000.0 * wordsPerSecond
 
-    /**
-     * Boolean helper for an echo that has no raw transcript to compare against.
-     * Short recordings receive a grace period; long recordings must contain at
-     * least [minCoverageRatio] of the duration-based word expectation.
-     */
-    fun isPlausibleForDuration(
-        transcript: String,
-        durationMs: Long,
-        minCoverageRatio: Double = DEFAULT_DURATION_MIN_COVERAGE,
-        wordsPerSecond: Double = DEFAULT_WORDS_PER_SECOND,
-        longDurationMs: Long = DEFAULT_LONG_DURATION_MS,
-    ): Boolean = assessDuration(
-        transcript = transcript,
-        durationMs = durationMs,
-        minCoverageRatio = minCoverageRatio,
-        wordsPerSecond = wordsPerSecond,
-        longDurationMs = longDurationMs,
-    ).isPlausible
-
-    /** Aggregate diagnostic form of [isPlausibleForDuration]. */
-    fun assessDuration(
-        transcript: String,
-        durationMs: Long,
-        minCoverageRatio: Double = DEFAULT_DURATION_MIN_COVERAGE,
-        wordsPerSecond: Double = DEFAULT_WORDS_PER_SECOND,
-        longDurationMs: Long = DEFAULT_LONG_DURATION_MS,
-    ): DurationAssessment {
-        val wordCount = contentWords(transcript).size
-        val expected = expectedWords(durationMs.coerceAtLeast(0L), wordsPerSecond)
-            .coerceAtLeast(0.0)
-        val coverage = if (expected == 0.0) {
-            if (wordCount == 0) 0.0 else 1.0
-        } else {
-            wordCount / expected
-        }
-        val plausible = wordCount > 0 &&
-            (durationMs < longDurationMs || coverage >= minCoverageRatio)
-        val diagnosis = when {
-            wordCount == 0 -> DurationDiagnosis.BLANK_TRANSCRIPT
-            plausible -> DurationDiagnosis.PLAUSIBLE
-            else -> DurationDiagnosis.TOO_FEW_WORDS
-        }
-        return DurationAssessment(
-            isPlausible = plausible,
-            diagnosis = diagnosis,
-            transcriptWordCount = wordCount,
-            expectedWordCount = expected,
-            coverageRatio = coverage,
-        )
-    }
-
     /** Lower-cased letter/digit runs, matching the selector's tokenization. */
     fun contentWords(text: String): List<String> {
         val result = ArrayList<String>()
@@ -182,12 +115,17 @@ object TranscriptCompleteness {
                 current.setLength(0)
             }
         }
-        for (ch in text) {
-            if (ch.isLetterOrDigit()) {
-                current.append(ch.lowercaseChar())
+        // Code-point iteration: surrogate pairs (astral-plane letters/digits)
+        // must tokenize as one character, not as two lone surrogates.
+        var index = 0
+        while (index < text.length) {
+            val codePoint = text.codePointAt(index)
+            if (Character.isLetterOrDigit(codePoint)) {
+                current.appendCodePoint(Character.toLowerCase(codePoint))
             } else {
                 flush()
             }
+            index += Character.charCount(codePoint)
         }
         flush()
         return result
@@ -195,7 +133,16 @@ object TranscriptCompleteness {
 
     private fun coverageWords(text: String): List<String> =
         contentWords(NUMERIC_GROUPING_SEPARATOR_REGEX.replace(text, ""))
+            .map(::normalizeOrdinalSuffix)
             .filterNot { it in OPTIONAL_FILLERS }
+
+    /**
+     * Strips an ordinal suffix (`st|nd|rd|th`) from a token that ends in one
+     * *and* whose remaining prefix ends in a digit, so "15th" and "15" compare
+     * as the same content token ("bath", "trust" are untouched).
+     */
+    private fun normalizeOrdinalSuffix(token: String): String =
+        ORDINAL_SUFFIX_REGEX.replace(token, "")
 
     private fun sharedTokenCount(required: List<String>, available: List<String>): Int {
         val remaining = available.groupingBy { it }.eachCount().toMutableMap()
@@ -256,16 +203,19 @@ object TranscriptCompleteness {
             )
         }
         NUMBER_REGEX.findAll(text).forEach {
+            // Ordinal spellings ("15th") normalize to the bare number so a
+            // polish that drops the suffix keeps the anchor.
             result.add(
                 Anchor(
                     kind = AnchorKind.NUMBER,
-                    normalized = it.value.replace(",", ""),
+                    normalized = it.groupValues[1].replace(",", ""),
                     position = it.range.first,
                 ),
             )
         }
         IDENTIFIER_CANDIDATE_REGEX.findAll(text).forEach {
             val candidate = it.value
+            if (ORDINAL_NUMBER_REGEX.matches(candidate)) return@forEach
             if (includePotentialIdentifiers || isIdentifierLike(candidate)) {
                 result.add(
                     Anchor(
@@ -406,12 +356,6 @@ object TranscriptCompleteness {
     /** Default speaking rate used to derive expected words from duration. */
     const val DEFAULT_WORDS_PER_SECOND: Double = 2.2
 
-    /** Conservative minimum word expectation used only for long recordings. */
-    const val DEFAULT_DURATION_MIN_COVERAGE: Double = 0.1
-
-    /** Durations below this threshold are not rejected by the duration helper. */
-    const val DEFAULT_LONG_DURATION_MS: Long = 30_000L
-
     private val OPTIONAL_FILLERS: Set<String> = setOf(
         "ah",
         "eh",
@@ -493,7 +437,15 @@ object TranscriptCompleteness {
     )
 
     private val NUMBER_REGEX: Regex =
-        Regex("""(?<![\p{L}\p{N}])\d[\d,]*(?:\.\d+)?(?![\p{L}\p{N}])""")
+        Regex(
+            """(?i)(?<![\p{L}\p{N}])(\d[\d,]*(?:\.\d+)?)(?:st|nd|rd|th)?(?![\p{L}\p{N}])""",
+        )
+
+    /** An ordinal-spelled number ("15th"); owned by [NUMBER_REGEX], not identifiers. */
+    private val ORDINAL_NUMBER_REGEX: Regex = Regex("""(?i)\d+(?:st|nd|rd|th)""")
+
+    /** Trailing ordinal suffix preceded by a digit, for token normalization. */
+    private val ORDINAL_SUFFIX_REGEX: Regex = Regex("""(?<=\d)(?i:st|nd|rd|th)$""")
 
     private val NUMERIC_GROUPING_SEPARATOR_REGEX: Regex =
         Regex("""(?<=\d),(?=\d{3}(?:\D|$))""")

@@ -1,71 +1,81 @@
 # Gemini Live Voice Engine — Transcription & Wire Reference
 
+> **0.10.0 status (read first).** The engine now runs on the dedicated streaming
+> transcription model **`gemini-3.5-transcribe-live`** (Live API public preview).
+> The **echo channel is deleted**: no `outputAudioTranscription`, no
+> `systemInstruction`, no polish levels, no echo barrier stack. Dictation is the
+> server's `inputTranscription` (committed final segments) plus
+> `interimInputTranscription` (revisable partials); text shaping runs server-side
+> in the model's `smart` transcription mode; a BCP-47 hint (`en-US` / `hi-IN`)
+> matches the speech mode. The historical narrative below (echo discovery,
+> polish levels, 0.6.2 barrier stack) describes how earlier versions worked —
+> the code no longer contains any of it.
+
 > **Version status.** This document was consolidated at `0.4.2`; the app is now
-> `0.6.0`. The wire reference (Part 2) remains accurate. Since 0.4.2 the
+> `0.10.0`. The wire reference (Part 2) remains accurate. Since 0.4.2 the
 > following changed:
 > - **The echo is the primary dictation source.** `outputTranscription` is **on
 >   by default** and `inputTranscription` is the fast fallback — the exact
 >   reverse of the 0.4.2-era "output is never a candidate source" note. See the
->   "0.4.1 echo" section.
+>   "0.4.1 echo" section. **(Removed in 0.10.0 — echo channel deleted.)**
 > - **Hard deadline is 20 s, settle debounce is 250 ms** (not 3 s / 250 ms as
 >   some 0.4.2 sections state; the doc later self-corrects to 20 s / 600 ms).
+>   **(0.10.0: the barrier stack is a single 250 ms quiet window + one 2.5 s
+>   tail backstop.)**
 > - **0.6.0**: NONE/LOW polish turns `outputAudioTranscription` **off** and
 >   settles on the raw ASR in ~0.7 s flat (no echo wait). The warm pool is
 >   profile-aware (a changed polish/language/echo setting never reuses a stale
 >   session). Experimental segmented activities (Settings → "Segment at pauses")
 >   split the recording at silence with `activityHandling = NO_INTERRUPTION`;
->   device-pending.
+>   device-pending. **(0.10.0: polish levels and the echo setting are gone;
+>   the warm profile is language + activity flags only.)**
 
 This document is the consolidated reference for the **Gemini Live dictation
-engine** as it exists at `0.4.2`: how it was built, what is sent and read on the
-wire, the exact prompt, how the modules connect, the session/settlement state
-machines, and the failsafes. **Part 1** describes the transcription engine
-(formerly `docs/GEMINI_LIVE_TRANSCRIPTION.md`); **Part 2** is the exhaustive,
-code-verified wire reference (formerly `docs/GEMINI_LIVE_WIRE_REFERENCE.md`).
-Where a behavior is observed-on-device rather than proven in code, it is labeled
-as such.
+engine**: how it was built, what is sent and read on the wire, the exact
+mechanism, how the modules connect, the session/settlement state machines, and
+the failsafes. **Part 1** describes the transcription engine (formerly
+`docs/GEMINI_LIVE_TRANSCRIPTION.md`); **Part 2** is the exhaustive, code-verified
+wire reference (formerly `docs/GEMINI_LIVE_WIRE_REFERENCE.md`). Where a behavior
+is observed-on-device rather than proven in code, it is labeled as such.
 
 ---
 
 ## Part 1 — Transcription engine
 
-> **0.4.0 updates** — **Output polish** maps None/Low/Medium/High (default
-> Medium) to a `systemInstruction`; **auto-stop** adds a silence threshold plus a
-> hard session cap (15/30/60/120/300 s, default 60); `SESSION DONE` keeps the
-> documented shape with optional `reject=<rule>` / `lenient=true`.
+> **0.10.0 — the transcribe engine (current):** audio streams over the Live
+> WebSocket to `gemini-3.5-transcribe-live` (TEXT modality, `smart` mode,
+> optional `languageCodes` hint, manual activity signaling). The server returns
+> revisable partials on `interimInputTranscription` and committed final segments
+> on `inputTranscription`; both feed the session accumulator as INPUT candidates.
+> Settlement waits one 250 ms quiet window plus one 2.5 s tail backstop from the
+> activity-end boundary, then inserts the accumulated text verbatim (a fragment
+> guard refuses truncated long dictations). Hinglish code-mixing is native to the
+> model; whatever text it returns is inserted as-is.
 
-> **0.4.1 — the echo discovery (verified by host probes against
+> **0.4.1 — the echo discovery (historical, verified by host probes against
 > `gemini-3.1-flash-live-preview`):** `inputTranscription` is pure ASR and is
 > **not** influenced by the `systemInstruction`. The model's *spoken reply*
-> (`outputTranscription`) IS controlled by the instruction, so the engine now
-> instructs the model to **repeat the user's speech back verbatim** (a styled
-> echo: per-level polish, and Hinglish forced to Roman/Latin script) and reads
-> `outputTranscription` as the **primary dictation source**. `inputTranscription`
-> is the fast raw fallback. Verified facts: `outputTranscription` works *with* a
-> `systemInstruction` (the old "suppression" finding was model-version-specific);
-> the echo latency is ~0.6 s (sentence), ~3 s (30 words), ~8 s (100 words);
-> Devanagari text echoes back in Latin; HIGH polish removes um/uh/like and adds
-> punctuation. Native audio Live models are **AUDIO-output only** (TEXT modality
-> is not available), and `AudioTranscriptionConfig` has **no fields** (no
-> `languageCode` exists). See §8.
+> (`outputTranscription`) IS controlled by the instruction, so the engine
+> instructed the model to **repeat the user's speech back verbatim** (a styled
+> echo) and read `outputTranscription` as the **primary dictation source**.
+> This whole architecture was deleted in 0.10.0. See §8.
 
 ---
 
 ### 1. TL;DR — what the engine is
 
-WhisperType captures 16 kHz mono PCM16 from the microphone, streams it over one
-WebSocket to Google's **Gemini Live** API (`BidiGenerateContent`), and reads the
-**echo** — the model's instructed spoken reply (`serverContent.outputTranscription`)
-— as the dictation. The app is **push-to-talk**: it manually delimits each
+WhisperType captures 16 kHz mono PCM16 from the microphone and streams it over
+one WebSocket to Google's **Gemini Live** API (`BidiGenerateContent`) using the
+**`gemini-3.5-transcribe-live`** model — Google's dedicated streaming
+transcription model. The app is **push-to-talk**: it manually delimits each
 utterance with `realtimeInput.activityStart` / `realtimeInput.activityEnd`
-(automatic VAD is disabled). The `systemInstruction` tells the model to repeat
-the user's speech verbatim with the selected polish level (and, for Hinglish, in
-Roman/Latin script). `inputTranscription` (raw ASR) is the fast fallback when no
-echo arrives; `modelTurn` text is never used (native audio models emit none).
-
-Device-verified behavior (Samsung S25): `inputTranscription` arrives in
-essentially every session; Hinglish is inserted in **Latin script**; polish
-levels clean filler words and punctuation; short dictations settle in ~1–3 s.
+(automatic VAD is disabled). The server streams the recognized speech as
+revisable partials (`serverContent.interimInputTranscription`) and committed
+final segments (`serverContent.inputTranscription`) — the only dictation source.
+Text shaping (disfluency removal, self-corrections, formatting, casing) runs
+server-side in the model's `smart` mode; a `languageCodes` hint (`en-US` /
+`hi-IN`) biases language detection and code-mixing. `modelTurn` text is never
+used.
 
 ---
 
@@ -381,11 +391,11 @@ Part 2 §18.
 6. **Otherwise** (correction/replacement of a prior provisional value) →
    replaced.
 
-The coordinator keeps **two** accumulators: `echoAccumulator` for ECHO
-(`outputTranscription`) and `accumulator` for INPUT (`inputTranscription`). The
-echo accumulator is created with the delta-append rule
-(`TranscriptAccumulator(appendDeltas = true)`) because the echo streams as
-per-word deltas (see §9).
+The coordinator keeps **one** accumulator, fed by both the transcribe model's
+revisable partials (`interimInputTranscription`) and committed finals
+(`inputTranscription`) — each arrives as a cumulative revision of the current
+utterance, which the rules above handle. (The 0.4.1-era delta-append echo
+accumulator was deleted in 0.10.0.)
 
 #### 7.2 `TranscriptSelector` trust policy + `RejectionRule`
 
@@ -414,40 +424,51 @@ also rejected when implausibly expanded (`cleanedWords > 10 * rawWords`, the one
 remaining model-output heuristic). URLs, emails, identifiers, numbers, natural
 punctuation, and code-switching survive because only the four rules above fire.
 
-#### 7.3 Settlement timing and failsafes (`DictationCoordinator`)
+#### 7.3 Settlement timing and failsafes (`DictationCoordinator`, 0.10.0)
 
-- **Echo is the primary source.** Settlement prefers the echo; only when it is
-  empty does it fall back to the raw input — except in Hinglish, which settles
-  **echo-only** (see §9.2).
-- **20 s absolute hard deadline** (`Config.hardDeadlineMs`) — a single monotonic
-  timer from STOP (`deadlineJob`); at fire, if still `Finalizing`, sets
-  `metrics.usedHardDeadline = true` and settles. **It is never extended.**
-- **250 ms settle debounce** (`Config.settleDebounceMs`) — reset by every **echo**
-  revision while finalizing, by `turnComplete` (when a valid echo/transcript
-  exists), and by `afterActivityEnd` when `turnCompleteSeen` + valid transcript
-  are both present. Raw INPUT revisions do **not** reset the debounce (they never
-  cut a pending echo short). Settlement happens on: the echo debounce,
-  `turnComplete` (model finished speaking), or the hard deadline.
-- **Echo-absent fast fallback** (`Config.echoFallbackWaitMs = 2_000`) — if no
-  echo chunk has arrived within 2 s of STOP and a raw `inputTranscription`
-  exists, the session settles on the raw text instead of waiting the full 20 s.
-- **Provisional-fragment rule** — at the hard deadline, a selection shorter
-  than 2 trimmed characters (`isClearlyProvisional: text.trim().length < 2`,
-  e.g. `"t"` from `"the"`) is rejected with `gemini_no_transcript` rather than
+- **One source, no echo.** The accumulator text (from `interimInputTranscription`
+  / `inputTranscription`) is the only dictation source; there is no echo channel
+  to prefer or wait for.
+- **250 ms quiet window** (`Config.settleDebounceMs`) — reset by every accepted
+  ASR revision while finalizing; when it elapses with text present, settlement
+  fires (`RAW_FALLBACK_TIMEOUT`, or `TURN_COMPLETE_QUIET` when the server's
+  `turnComplete` was seen).
+- **1.0.0: settlement waits for the tail final.** The transcribe model commits
+  final `inputTranscription` segments *incrementally during speech*, and the
+  tail segment's final arrives only **after** `activityEnd`. Quiet alone is
+  therefore never enough: the quiet path settles only once a **post-boundary
+  final segment** (`tailFinalSeen`) or a server done-hint (`turnComplete` /
+  `generationComplete`) has arrived. This fixed on-device cut-off dictations
+  where the session settled ~300 ms after stop on a provisional partial.
+- **2.5 s tail backstop** (`Config.asrTailTimeoutMs`) — one absolute timer from
+  the activity-end boundary. If the ASR tail never goes quiet (or never arrives),
+  settlement proceeds on whatever text exists once it elapses; with no text at
+  all it fails explicitly with `gemini_no_transcript`. This replaces the 0.6.2
+  stack of echo-quiet (900 ms), echo-stall (2.5 s), source-missing grace (2 s)
+  and hard deadline (20 s) barriers.
+- **Lifecycle hints** (`turnComplete` / `generationComplete`) only re-evaluate
+  settlement early; they are never transcript finality by themselves.
+- **Provisional-fragment rule** — a selection shorter than 2 trimmed characters
+  at the tail backstop (`isClearlyProvisional: text.trim().length < 2`, e.g.
+  `"t"` from `"the"`) is rejected with `gemini_no_transcript` rather than
   inserted.
+- **Fragment guard** (`isFragmentForDuration`) — a recording over 5 s that
+  settles on a transcript below 30% of the duration's expected words is a
+  truncated dictation and fails retryable (`gemini_transcript_fragment`) instead
+  of inserting a fragment.
 - **Lenient fallback** (`lenientAccept`) — when strict selection returns
   `None`, the source is still the user's own speech, so it is inserted unless:
   blank / no letter-or-digit, `diagnosis.rule == GARBLED`, or a fragment < 2
-  chars at the hard deadline. `metrics.usedLenientFallback = true` when it
+  chars at the tail backstop. `metrics.usedLenientFallback = true` when it
   fires.
-- Settlement path: `preferredSettledText()` (echo → input) →
+- Settlement path: `accumulator.settledText()` →
   `ResultCandidate(raw, null, language)` → `selector.select` → `Cleaned`/`Raw` →
   insert (or provisional reject), or `None` → lenient fallback → insert, else
   `failNoTranscript` (`gemini_no_transcript`, retryable).
 
 ---
 
-### 8. The echo architecture (0.4.1) — verified
+### 8. The echo architecture (0.4.1) — historical (deleted in 0.10.0)
 
 #### 8.1 Why the echo
 `inputTranscription` is produced by the server's ASR and is **not** influenced by
@@ -646,19 +667,18 @@ keys are built in this exact order by `buildJsonObject` (insertion-ordered):
 ```json
 {
   "setup": {
-    "model": "models/<config.model>",
+    "model": "models/gemini-3.5-transcribe-live",
     "generationConfig": {
-      "responseModalities": ["AUDIO"]
+      "responseModalities": ["TEXT"]
     },
-    "inputAudioTranscription": {},
-    "outputAudioTranscription": {},
+    "inputAudioTranscription": {
+      "mode": "smart",
+      "languageCodes": ["en-US"]
+    },
     "realtimeInputConfig": {
       "automaticActivityDetection": {
         "disabled": true
       }
-    },
-    "systemInstruction": {
-      "parts": [ { "text": "<text>" } ]
     }
   }
 }
@@ -669,28 +689,33 @@ Per-key detail (from `GeminiLiveWire.buildSetup` and
 
 | Key | Value | Condition |
 | --- | --- | --- |
-| `model` | `"models/${config.model}"` — e.g. `"models/gemini-3.1-flash-live-preview"` (the factory `DEFAULT_MODEL`) | always |
-| `generationConfig.responseModalities` | `["AUDIO"]` (the config default `responseModalities = listOf("AUDIO")`) | always |
-| `inputAudioTranscription` | `{}` — empty object | only when `config.inputAudioTranscription` (default `true`) |
-| `outputAudioTranscription` | `{}` — empty object | only when `config.outputAudioTranscription` (default **`true` since 0.4.1** — the echo channel) |
+| `model` | `"models/${config.model}"` — `"models/gemini-3.5-transcribe-live"` (the pinned `GeminiSessionFactory.LIVE_MODEL`) | always |
+| `generationConfig.responseModalities` | `["TEXT"]` (the config default `responseModalities = listOf("TEXT")`) | always, unless `config.omitGenerationConfig` |
+| `inputAudioTranscription.mode` | `"smart"` (default) or `"verbatim"` | only when `config.inputAudioTranscription` (default `true`) |
+| `inputAudioTranscription.languageCodes` | `["en-US"]` / `["hi-IN"]` from the speech mode | only when `config.transcriptionLanguageCode != null` |
 | `realtimeInputConfig.automaticActivityDetection.disabled` | `true` | only when `config.automaticActivityDetectionDisabled` (default `true`) |
-| `systemInstruction.parts[].text` | the instruction text | only when `config.systemInstruction != null` |
+| `realtimeInputConfig.activityHandling` | `"NO_INTERRUPTION"` | only when `config.activityHandlingNoInterruption` (segmentation) |
 
-> **0.4.1 — the echo channel.** `outputAudioTranscription` is now enabled by
-> default because the dictation source is the model's *spoken reply*
-> (`outputTranscription`): the `systemInstruction` tells the model to repeat the
-> user's speech verbatim with the selected polish level (and, for Hinglish, in
-> Roman/Latin script). `inputTranscription` (raw ASR) remains the fast fallback.
-> Both `inputAudioTranscription` and `outputAudioTranscription` are of type
-> `AudioTranscriptionConfig`, which is an **empty protobuf message** — it has no
-> fields, so no `languageCode` can be sent.
+> **0.10.0 — the transcribe wire.** `outputAudioTranscription` and
+> `systemInstruction` are **never** sent (the echo channel and its instruction
+> were deleted). `maxOutputTokens` is omitted by default so no server-side cap
+> can truncate a long transcript. The `mode` field selects server-side shaping
+> (`smart` = disfluency removal, self-corrections, formatting, casing polish;
+> `verbatim` = literal). `languageCodes` is the documented BCP-47 hint for
+> language detection / code-mixing (accepted by the transcribe model — the old
+> 3.1-era rejection of a `languageCode` field applied to a different wire).
 
-**No `languageCode`.** The Live API rejects a `languageCode` field on
-`inputAudioTranscription` with the verbatim error `"unknown name language code"`
-(recorded during development and repeated in `GeminiLiveWire` and
-`LanguageMode` doc comments). Language and script bias therefore travel in the
-`systemInstruction`, never in a structured field. The full `systemInstruction`
-mapping (style texts, `LanguageMode` table, Hinglish rule) is in Part 1 §4.
+> **Preview caveat — resolved by live wire probe (2026-08-27).** The reported
+> quirk where a generationConfig carrying `responseModalities: ["TEXT"]`
+> suppresses final `inputTranscription` segments **did not reproduce**: a probe
+> against the real endpoint using exactly the app's setup (TEXT modality +
+> `smart` mode + `languageCodes` + manual activity signaling) streamed 10
+> interims and committed one final segment, with `generationComplete`. Manual
+> VAD (`activityStart`/`activityEnd`) works; **automatic VAD produced no
+> transcripts at all** — the app's manual signaling is the correct production
+> shape. `GeminiSessionConfig.omitGenerationConfig` remains as a one-line
+> fallback if the endpoint behavior ever regresses; the default documented
+> shape is verified working.
 
 #### 12.2 Realtime activity boundaries and audio frames
 
@@ -758,10 +783,11 @@ which is discarded by the session. `Json` is configured with
 | `setupComplete` | `ServerMessage.SetupComplete` | The **readiness gate**: `state: Connecting -> Ready`, `ready.complete(Unit)`, emits `GeminiEvent.Ready`. Only after this may audio be sent (`awaitReady`). |
 | `setupError.error.message` | `ServerMessage.SetupError(message)` | Typed **`gemini_setup`** failure — `ready.completeExceptionally`, emits `GeminiEvent.Failed`. |
 | top-level `error.message` | `ServerMessage.SetupError(message)` | Same typed `gemini_setup` failure as above. |
-| `serverContent.inputTranscription.text` | `inputTranscription: String?` | **The raw-ASR fallback.** Emits `GeminiEvent.TranscriptCandidates(..., source = INPUT)` and counts `inputTranscriptionCount`. Not influenced by the `systemInstruction`. |
-| `serverContent.outputTranscription.text` | `outputTranscription: String?` | **THE dictation source (0.4.1 echo).** Emits `GeminiEvent.TranscriptCandidates(..., source = ECHO)` and counts `outputTranscriptionCount`. This is the transcription of the model's *spoken reply*, which the `systemInstruction` controls (verbatim echo + polish + Latin script). |
-| `serverContent.modelTurn.parts[].text` | `textParts: List<String>` | Parsed **for compatibility only**; never a candidate. Native audio models run AUDIO modality so this is effectively empty. |
-| `serverContent.turnComplete` | `turnComplete: Boolean` | Lifecycle flag: sets `metrics.turnCompleteArrived = true`, emits `GeminiEvent.TurnComplete` (retained even when it precedes STOP — Release E7). With the echo, `turnComplete` arrives when the model finishes speaking, so it settles the echo. |
+| `serverContent.interimInputTranscription.text` | `interimInputTranscription: String?` | **The revisable partial (0.10.0 transcribe model).** Emits `GeminiEvent.TranscriptCandidates(..., source = INPUT)` for live display; the accumulator treats it as an evolving revision. |
+| `serverContent.inputTranscription.text` | `inputTranscription: String?` | **THE dictation source — committed final segment.** Emits `GeminiEvent.TranscriptCandidates(..., source = INPUT)` and counts `inputTranscriptionCount`. |
+| `serverContent.outputTranscription.text` | `outputTranscription: String?` | Parsed for compatibility only; the transcribe model has no audio output, so this never arrives (echo channel deleted 0.10.0). |
+| `serverContent.modelTurn.parts[].text` | `textParts: List<String>` | Parsed **for compatibility only**; never a candidate. The transcribe model is TEXT-modality and returns no modelTurn. |
+| `serverContent.turnComplete` | `turnComplete: Boolean` | Lifecycle flag: sets `metrics.turnCompleteArrived = true`, emits `GeminiEvent.TurnComplete` (retained even when it precedes STOP — Release E7). A settlement hint only — quiet is still mandatory. |
 | `serverContent.interrupted` | `interrupted: Boolean` | Lifecycle flag, parsed and carried on `ServerContent`; no dedicated action. |
 | `goAway` | `ServerMessage.GoAway` | Emits `GeminiEvent.SessionEnd`. |
 | anything else | `ServerMessage.Unknown(raw)` | Ignored. |

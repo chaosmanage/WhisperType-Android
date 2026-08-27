@@ -1,5 +1,12 @@
 # WhisperType Android — Architecture
 
+> **MODEL POLICY (non-negotiable):** the app may call **exactly one** Gemini
+> model — the Gemini Live transcription model `gemini-3.5-transcribe-live` over
+> `BidiGenerateContent`, pinned as `GeminiSessionFactory.LIVE_MODEL`. No
+> `generateContent`, no Flash/Pro/TTS variants, no non-live transcribe endpoint.
+> Audio goes only to Gemini Live; text shaping runs server-side in the model's
+> `smart` mode. Enforced by `ModelPolicyTest`.
+
 This document describes the current runtime architecture of WhisperType Android
 (`app/src/main/java/com/whispertype/android`): the two processes, the module map,
 and where to go for the voice engine and the 0.4.0 evolution.
@@ -56,7 +63,7 @@ All paths are under `app/src/main/java/com/whispertype/android/`.
 | `platform/accessibility/` | `WhisperTypeAccessibilityService.kt`, `EditorTracker.kt`, `SecurityClassifier.kt`, `EligibilityMapper.kt`, `EligibilityExplanation.kt`, `AccessibilityTargetGateway.kt`, `InsertionDecision.kt`, `InsertionVerifier.kt` | The `:accessibility` process: focus/keyboard tracking, secure-field classification, typed eligibility, target capture, and validated insertion. |
 | `platform/ipc/` | `RuntimeIpc.kt` | Typed cross-process message contract (see above). |
 | `core/` | `core/state/`, `core/model/`, `core/transcript/`, `core/audio/`, `core/privacy/`, `core/dictionary/`, `core/overlay/`, `core/contracts/` | Pure, framework-free logic: the dictation reducer, typed domain models, the transcript accumulator/completeness/selector, PCM16 audio framing, log redaction, dictionary correction rules, and the contracts (`DictationBridge`, `GeminiLiveSession`, `TargetGateway`, `OverlayController`) that adapters implement. |
-| `data/` | `data/settings/SettingsRepository.kt`, `data/secrets/`, `data/history/EncryptedHistoryRepository.kt` | DataStore-backed settings (language, polish level, auto-stop, dictionary, bubble position, history), Keystore+AES-GCM secrets, and the encrypted, viewable history store. |
+| `data/` | `data/settings/SettingsRepository.kt`, `data/secrets/`, `data/history/EncryptedHistoryRepository.kt` | DataStore-backed settings (language, auto-stop, dictionary, bubble position, history), Keystore+AES-GCM secrets, and the encrypted, viewable history store. |
 | `audio/` | `audio/AudioCapture.kt`, `audio/AudioPipeline.kt`, `audio/BoundedAudioQueue.kt`, `audio/Chunker.kt`, `audio/PreReadyAudioBuffer.kt` | Device microphone capture and the bounded realtime pipeline feeding the Gemini session. |
 | `ui/` | `ui/theme/`, `ui/settings/SettingsScreen.kt`, `ui/history/HistoryScreen.kt`, `ui/dictionary/DictionaryScreen.kt`, `ui/waveform/RealTimeWaveform.kt` | Compose theme (emerald-teal, light + dark), the Settings screen, the History screen (list + history settings), the Dictionary screen, and the real-time waveform used by the recording pill. |
 
@@ -71,16 +78,16 @@ All paths are under `app/src/main/java/com/whispertype/android/`.
 3. PCM16 16 kHz audio streams to Gemini Live over the shared OkHttp WebSocket;
    the coordinator applies the auto-stop watcher (silence + hard cap, whichever
    fires first) and publishes overlay state.
-4. On stop/finalize, the coordinator settles the transcript via the accumulator,
-   completeness gate, and selector: the polished echo is accepted only when its
-   content covers the raw ASR, otherwise the complete raw is salvaged — a
-   truncated echo never triggers a retry. (The audio-recovery backstop that
-   re-transcribed a retained recording was removed: the app uses only the
-   `gemini-3.1-flash-live-preview` live model.) It then applies
-   `DictionaryCorrections` and sends an insert request over IPC. The
-   accessibility process re-validates the target and commits text at the cursor;
-   a typed result flows back. When history is enabled, the settled transcript is
-   recorded encrypted.
+4. On stop/finalize, the coordinator settles the transcript from the session
+   accumulator: the transcribe model's committed final segments
+   (`inputTranscription`) and revisable partials (`interimInputTranscription`)
+   are the only dictation source (0.10.0 — the echo channel is gone), a 250 ms
+   quiet window plus one 2.5 s tail backstop end settlement, and a fragment
+   guard refuses a truncated transcript. Text shaping runs server-side in the
+   model's `smart` mode. It then applies `DictionaryCorrections` and sends an
+   insert request over IPC. The accessibility process re-validates the target
+   and commits text at the cursor; a typed result flows back. When history is
+   enabled, the settled transcript is recorded encrypted.
 5. Failures surface as typed `DictationFailure`s with a Retry/Dismiss panel; a
    failed insertion offers an explicit Copy fallback.
 

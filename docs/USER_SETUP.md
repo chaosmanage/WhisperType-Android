@@ -130,7 +130,9 @@ Choose:
 - `English`
 - `Hinglish`
 
-Hinglish supports natural English/Hindi code-switching but always produces Latin-script output. Devanagari is rejected.
+Hinglish supports natural English/Hindi code-switching; the transcribe model's
+automatic code-mixing (with a `hi-IN` language hint) produces romanized Latin
+output natively, and whatever it returns is inserted verbatim.
 
 ## Customize the bubble
 
@@ -158,15 +160,14 @@ Choose 15, 30, 60, 120, or 300 seconds. The default is 60.
 
 Recording stops automatically after you have been silent for the chosen interval. A hard cap also stops any session that reaches the maximum duration, even if you are still speaking.
 
-## Choose the output polish
+## How the transcript is shaped
 
-Open:
-
-`WhisperType → Settings tab → Recording → Output polish`
-
-Choose None, Low, Medium, or High. The default is Medium.
-
-Higher polish levels ask the transcription engine to clean up filler words, disfluencies, and speech quirks; None keeps the raw transcript. The level is passed to the Gemini session as a system instruction (see `docs/GEMINI_LIVE.md`).
+WhisperType runs on Google's dedicated streaming transcription model
+(`gemini-3.5-transcribe-live`) in **smart** mode: the transcription arrives with
+filler words and disfluencies removed, self-corrections resolved, and grammar,
+casing, and formatting polished — all server-side. There is no separate polish
+setting; every dictation gets the smart treatment automatically. (See
+`docs/GEMINI_LIVE.md` for the engine.)
 
 ## Choose the recording source
 
@@ -221,6 +222,20 @@ not let apps disable a system accessibility service) but becomes fully inert
 until re-enabled. Turning it back **on** restarts the runtime and restores the
 bubble. Leave it on for normal use; turn it off to completely stop WhisperType
 without touching any permissions.
+
+### Quick Settings tile
+
+Android's Quick Settings panel can control the same kill switch (the tile icon
+is the app logo):
+
+1. Pull down the notification shade and tap the pencil/Edit button.
+2. Find **WhisperType bubble** in the available tiles.
+3. Drag it into the active Quick Settings area.
+4. Tap the tile to turn the bubble on or off. The tile state and
+   `Settings → General → App enabled` stay synchronized.
+
+If overlay permission has not been granted, enabling the tile opens the system
+overlay-permission screen instead of starting a bubble that cannot appear.
 
 ## Set up the custom dictionary
 

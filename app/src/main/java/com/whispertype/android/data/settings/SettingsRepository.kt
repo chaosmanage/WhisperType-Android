@@ -12,7 +12,6 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.whispertype.android.core.dictionary.DictionaryEntry
 import com.whispertype.android.core.model.AudioSourcePreference
 import com.whispertype.android.core.model.LanguageMode
-import com.whispertype.android.core.model.TranscriptionStyle
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
@@ -41,7 +40,6 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         val appEnabled = booleanPreferencesKey(SettingsRepository.KEY_APP_ENABLED)
         val onboardingCompleted = booleanPreferencesKey("onboarding_completed")
         val autoStopSeconds = intPreferencesKey("auto_stop_seconds")
-        val polishLevel = stringPreferencesKey("polish_level")
         val audioSourcePreference = stringPreferencesKey("audio_source_preference")
         val dictionary = stringPreferencesKey("dictionary")
         val bubbleX = floatPreferencesKey("bubble_x")
@@ -77,12 +75,6 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     override val autoStopSeconds: Flow<Int> =
         dataStore.data.map { it[Keys.autoStopSeconds] ?: DEFAULT_AUTO_STOP_SECONDS }
-
-    override val polishLevel: Flow<TranscriptionStyle> =
-        dataStore.data.map { prefs ->
-            val stored = prefs[Keys.polishLevel]
-            TranscriptionStyle.entries.firstOrNull { it.name == stored } ?: DEFAULT_POLISH_LEVEL
-        }
 
     override val audioSourcePreference: Flow<AudioSourcePreference> =
         dataStore.data.map { prefs ->
@@ -152,10 +144,6 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     suspend fun setAutoStopSeconds(seconds: Int) {
         dataStore.edit { it[Keys.autoStopSeconds] = seconds }
-    }
-
-    suspend fun setPolishLevel(style: TranscriptionStyle) {
-        dataStore.edit { it[Keys.polishLevel] = style.name }
     }
 
     suspend fun setAudioSourcePreference(preference: AudioSourcePreference) {
@@ -270,7 +258,6 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         const val DEFAULT_MINI_DOT_DELAY_SECONDS = 5
         const val MIN_MINI_DOT_DELAY_SECONDS = 1
         const val MAX_MINI_DOT_DELAY_SECONDS = 15
-        val DEFAULT_POLISH_LEVEL = TranscriptionStyle.MEDIUM
         val DEFAULT_AUDIO_SOURCE_PREFERENCE = AudioSourcePreference.DEFAULT
     }
 }
