@@ -29,6 +29,24 @@ object HistoryStats {
             .sumOf { contentWords(it.text).size }
     }
 
+    /** Word counts for each of the trailing [days] local calendar days, oldest
+     *  first. Index 0 is (now − days + 1) at local midnight; index last is today. */
+    fun dailyWords(
+        entries: List<HistoryRepository.HistoryEntry>,
+        nowMillis: Long,
+        days: Int = 7,
+    ): List<Int> {
+        require(days >= 1)
+        val startOfToday = startOfTodayMillis(nowMillis)
+        return (days - 1 downTo 0).map { dayOffset ->
+            val dayStart = startOfToday - dayOffset * MILLIS_PER_DAY
+            val dayEnd = dayStart + MILLIS_PER_DAY
+            entries
+                .filter { it.timestampMillis in dayStart until dayEnd }
+                .sumOf { contentWords(it.text).size }
+        }
+    }
+
     /** Sessions recorded today (local wall clock). */
     fun todaySessions(entries: List<HistoryRepository.HistoryEntry>, nowMillis: Long): Int {
         val startOfToday = startOfTodayMillis(nowMillis)

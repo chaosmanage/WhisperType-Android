@@ -4,6 +4,57 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.5] - 2026-09-05
+
+### Changed
+
+- **Studio typography (`ui`)** — bump body, label, settings-row, metric-chip,
+  tab, and snippet sizes across Home, History, Dictionary, Settings, and
+  onboarding; hero numeral size unchanged.
+- **Recording pill (`overlay`)** — taller waveform bars that fill more of the
+  expanded pill height.
+
+## [1.1.4] - 2026-09-05
+
+### Fixed
+
+- **Launch crash (`ui`)** — Home and onboarding no longer load the adaptive
+  launcher icon through Compose; they use the `ic_bubble_logo` PNG instead.
+
+## [1.1.3] - 2026-09-05
+
+### Changed
+
+- **Onboarding (`ui`)** — Gemini key step links to Google AI Studio API keys
+  and notes the free-tier allowance for Gemini 3.5 Transcribe Live; overlay,
+  microphone, and notification steps auto-advance again after you grant them.
+
+## [1.1.2] - 2026-09-05
+
+### Changed
+
+- **Studio UI polish (`ui`)** — drop display serif for Instrument Sans on
+  greetings and headlines; use the real app icon on Home and onboarding;
+  center onboarding content vertically with actions pinned to the bottom.
+
+## [1.1.1] - 2026-09-05
+
+### Changed
+
+- **Studio visual fidelity (`ui`)** — Instrument Serif/Sans, 72sp hero numeral,
+  hairline cards, grouped Settings drill-downs, editorial onboarding, and a
+  P1+P3 hairline pill. The in-app shell now follows the locked HTML phones.
+
+## [1.1.0] - 2026-09-05
+
+### Changed
+
+- **Studio in-app UI (`ui`)** — dark shell by default (no theme toggle), four-tab
+  navigation (Home / History / Dictionary / Settings), week hero with sparkline,
+  setup-only Home banner, grouped Settings with System and Privacy pages,
+  pager onboarding including Restricted settings guidance, and a hairline glass
+  recording pill with centered teal soundwave.
+
 ## [1.0.8] - 2026-09-05
 
 ### Fixed

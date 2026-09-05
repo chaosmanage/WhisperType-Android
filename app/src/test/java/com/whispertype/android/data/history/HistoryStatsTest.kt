@@ -96,4 +96,17 @@ class HistoryStatsTest {
         )
         assertEquals(3, HistoryStats.wordsPerSession(entries))
     }
+
+    @Test
+    fun `daily words returns trailing local calendar days oldest first`() {
+        val now = System.currentTimeMillis()
+        val startOfToday = HistoryStats.startOfTodayMillis(now)
+        val yesterday = entry("two words", startOfToday - 60_000L, 0L)
+        val today = entry("three words here", now, 0L)
+        val counts = HistoryStats.dailyWords(listOf(yesterday, today), now, days = 7)
+        assertEquals(7, counts.size)
+        assertEquals(0, counts.dropLast(2).sum())
+        assertEquals(2, counts[counts.size - 2])
+        assertEquals(3, counts.last())
+    }
 }

@@ -92,6 +92,19 @@ WhisperType does not use this permission to read or store unrelated screen conte
 
 The exact labels may vary slightly by Android or One UI version.
 
+### Sideloaded APK: “Restricted setting” (Android 13+)
+
+If you installed WhisperType from an APK (not the Play Store), some phones grey
+out the accessibility toggle until you allow restricted settings:
+
+1. Open `Settings → Apps → WhisperType` (App info).
+2. Tap the **⋮** menu → **Allow restricted settings**.
+3. Confirm with your PIN or fingerprint.
+4. Return to `Settings → Accessibility`, enable WhisperType, and come back to the app.
+
+The in-app onboarding wizard walks through this path if accessibility still
+will not stay on after your first attempt.
+
 ## Keep your normal keyboard selected
 
 WhisperType does not need to become your default keyboard.

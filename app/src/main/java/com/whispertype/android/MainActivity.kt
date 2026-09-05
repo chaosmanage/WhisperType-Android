@@ -3,6 +3,7 @@ package com.whispertype.android
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
@@ -12,56 +13,32 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Book
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.outlined.AutoStories
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
@@ -69,33 +46,27 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.whispertype.android.data.history.EncryptedHistoryRepository
-import com.whispertype.android.data.history.HistoryStats
 import com.whispertype.android.data.secrets.AndroidKeystoreKeyStore
 import com.whispertype.android.data.secrets.FileBlobStore
 import com.whispertype.android.data.secrets.JavaxAesGcmCipher
 import com.whispertype.android.data.secrets.KeystoreKeyProvider
 import com.whispertype.android.data.secrets.KeyProvider
 import com.whispertype.android.data.settings.SettingsRepository
-import com.whispertype.android.platform.accessibility.EligibilityExplanation
+import com.whispertype.android.platform.accessibility.SetupStatus
 import com.whispertype.android.platform.accessibility.WhisperTypeAccessibilityService
 import com.whispertype.android.platform.runtime.FlowRuntimeService
 import com.whispertype.android.ui.dictionary.DictionaryScreen
 import com.whispertype.android.ui.history.HistoryScreen
-import com.whispertype.android.ui.onboarding.OnboardingScreen
+import com.whispertype.android.ui.home.HomeScreen
+import com.whispertype.android.ui.onboarding.OnboardingWizard
 import com.whispertype.android.ui.settings.SettingsScreen
+import com.whispertype.android.ui.theme.StudioColors
+import com.whispertype.android.ui.theme.StudioType
 import com.whispertype.android.ui.theme.WhisperTypeTheme
-import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-/**
- * Feature host. Shows the overlay-permission onboarding when it is missing,
- * otherwise a home/status screen that links to [SettingsScreen] (runtime
- * toggles + Gemini API key). The runtime foreground service is started only
- * after the `Settings.canDrawOverlays()` gate passes, per §4.1 and the Phase 1
- * Samsung gate.
- */
 class MainActivity : ComponentActivity() {
 
     private val settingsRepository by lazy { SettingsRepository(applicationContext) }
@@ -115,11 +86,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val darkMode by settingsRepository.darkMode.collectAsState(initial = false)
-            WhisperTypeTheme(darkTheme = darkMode) {
-                // Re-evaluate the overlay gate on every resume so returning from
-                // the overlay settings screen immediately updates the checklist
-                // (0.4.2). Onboarding stays until the user explicitly continues.
+            WhisperTypeTheme {
                 var overlayGranted by remember { mutableStateOf(canDrawOverlays()) }
                 val onboardingDone by settingsRepository.onboardingCompleted.collectAsState(initial = false)
                 val lifecycleOwner = LocalLifecycleOwner.current
@@ -134,16 +101,28 @@ class MainActivity : ComponentActivity() {
                 }
                 val permissionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestMultiplePermissions(),
-                ) { /* result handled on the next ON_RESUME refresh */ }
+                ) { }
                 val scope = rememberCoroutineScope()
                 if (overlayGranted && onboardingDone) {
-                    HomeScreen(
+                    AppShell(
                         settings = settingsRepository,
                         keyProvider = keyProvider,
+                        historyRepository = historyRepository,
                         isAccessibilityEnabled = ::isAccessibilityEnabled,
+                        onRequestOverlay = ::requestOverlayPermission,
+                        onRequestMic = {
+                            permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+                        },
+                        onRequestNotifications = {
+                            permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+                        },
+                        onOpenAccessibility = {
+                            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        },
+                        onOpenAppInfo = { openAppInfo() },
                     )
                 } else {
-                    OnboardingScreen(
+                    OnboardingWizard(
                         overlayGranted = overlayGranted,
                         keyProvider = keyProvider,
                         hasMic = ::hasMicPermission,
@@ -161,6 +140,7 @@ class MainActivity : ComponentActivity() {
                         onOpenAccessibility = {
                             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                         },
+                        onOpenAppInfo = { openAppInfo() },
                         onContinue = {
                             scope.launch { settingsRepository.setOnboardingCompleted(true) }
                         },
@@ -171,9 +151,6 @@ class MainActivity : ComponentActivity() {
         if (canDrawOverlays()) {
             startRuntime()
         }
-        // 0.5.4: re-enabling the app from the kill switch restarts the runtime.
-        // The gate inside startRuntime() keeps every other start path (onResume,
-        // the Home Runtime tile) from fighting the kill switch while disabled.
         lifecycleScope.launch {
             settingsRepository.appEnabled.collect { enabled ->
                 if (enabled && canDrawOverlays() && !FlowRuntimeService.isRunning) {
@@ -204,9 +181,16 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private fun openAppInfo() {
+        startActivity(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", packageName, null),
+            ),
+        )
+    }
+
     private fun startRuntime() {
-        // 0.5.4: never start the runtime while the app is disabled — the kill
-        // switch is a full stop until the user re-enables it.
         lifecycleScope.launch {
             if (settingsRepository.appEnabled.first()) {
                 startForegroundService(Intent(this@MainActivity, FlowRuntimeService::class.java))
@@ -223,95 +207,118 @@ class MainActivity : ComponentActivity() {
         return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
     }
 
-    /** Runtime permissions required for dictation on Android 13+ (minSdk 33). */
-    private fun runtimePermissionsNeeded(): List<String> = buildList {
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            add(Manifest.permission.RECORD_AUDIO)
-        }
-        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-    }
-
     private fun hasMicPermission(): Boolean =
         checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     private fun hasNotificationPermission(): Boolean =
         checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    // ------------------------------------------------------------------
-    // Screens
-    // ------------------------------------------------------------------
-
     @Composable
-    private fun HomeScreen(
+    private fun AppShell(
         settings: SettingsRepository,
         keyProvider: KeyProvider,
+        historyRepository: EncryptedHistoryRepository,
         isAccessibilityEnabled: () -> Boolean,
+        onRequestOverlay: () -> Unit,
+        onRequestMic: () -> Unit,
+        onRequestNotifications: () -> Unit,
+        onOpenAccessibility: () -> Unit,
+        onOpenAppInfo: () -> Unit,
     ) {
-        var selectedTab by remember { mutableStateOf(0) }
+        var selectedTab by remember { mutableIntStateOf(0) }
+        var openSystemPage by remember { mutableStateOf(false) }
         var settingsScrollToGemini by remember { mutableStateOf(false) }
-        var neededPermissions by remember { mutableStateOf(runtimePermissionsNeeded()) }
         val historyEntries by historyRepository.events().collectAsState(initial = emptyList())
-        val historyEnabled by settings.historyEnabled.collectAsState(initial = false)
+        val historyEnabled by settings.historyEnabled.collectAsState(initial = true)
         val appEnabled by settings.appEnabled.collectAsState(initial = true)
-        // 0.5.2: live eligibility mirror so the "why is the bubble hidden" card
-        // stays current while the user sits on Home (the runtime updates it via
-        // IPC from the accessibility process).
         val eligibility by produceState(initialValue = FlowRuntimeService.currentEligibility) {
             while (true) {
                 value = FlowRuntimeService.currentEligibility
                 delay(1000)
             }
         }
-        val blockingReasons = remember(eligibility, appEnabled) {
-            buildList {
-                addAll(EligibilityExplanation.blockingReasons(eligibility))
-                // A live dictation intentionally hides the idle bubble; it is
-                // not a fault worth showing on Home.
-                remove(EligibilityExplanation.REASON_SESSION_ACTIVE)
-                // Surface the kill switch even when the accessibility process is
-                // down (its eligibility push would not be reaching us).
-                if (!appEnabled && !contains(EligibilityExplanation.REASON_APP_DISABLED)) {
-                    add(EligibilityExplanation.REASON_APP_DISABLED)
+        val overlayGrantedNow = canDrawOverlays()
+        val runtimeRunning = FlowRuntimeService.isRunning
+        val notificationsGranted = hasNotificationPermission()
+        val setupBannerReasons = remember(
+            eligibility,
+            appEnabled,
+            overlayGrantedNow,
+            runtimeRunning,
+            notificationsGranted,
+        ) {
+            SetupStatus.homeBannerReasons(
+                eligibility = eligibility,
+                overlayGranted = overlayGrantedNow,
+                runtimeRunning = runtimeRunning,
+                notificationsGranted = notificationsGranted,
+            ).toMutableList().apply {
+                if (!appEnabled && !contains(com.whispertype.android.platform.accessibility.EligibilityExplanation.REASON_APP_DISABLED)) {
+                    add(com.whispertype.android.platform.accessibility.EligibilityExplanation.REASON_APP_DISABLED)
                 }
             }
         }
-        val permissionLauncher = rememberLauncherForActivityResult(
-            ActivityResultContracts.RequestMultiplePermissions(),
+        val apiKeyConfigured = keyProvider.hasKey()
+        val systemGates = remember(
+            eligibility,
+            overlayGrantedNow,
+            runtimeRunning,
+            notificationsGranted,
+            apiKeyConfigured,
         ) {
-            neededPermissions = runtimePermissionsNeeded()
+            SetupStatus.systemGateReasons(
+                eligibility = eligibility,
+                overlayGranted = overlayGrantedNow,
+                runtimeRunning = runtimeRunning,
+                notificationsGranted = notificationsGranted,
+                apiKeyConfigured = apiKeyConfigured,
+            )
         }
-        // 0.4.2: back returns Home from any other tab instead of closing the app.
         if (selectedTab != 0) {
             BackHandler { selectedTab = 0 }
         }
+        val tabColors = NavigationBarItemDefaults.colors(
+            selectedIconColor = StudioColors.Accent,
+            selectedTextColor = StudioColors.Accent,
+            unselectedIconColor = StudioColors.OnSurfaceVariant.copy(alpha = 0.45f),
+            unselectedTextColor = StudioColors.OnSurfaceVariant.copy(alpha = 0.45f),
+            indicatorColor = StudioColors.AccentSoft,
+        )
         Scaffold(
+            containerColor = StudioColors.Background,
             bottomBar = {
-                NavigationBar {
+                NavigationBar(
+                    containerColor = StudioColors.Surface,
+                    tonalElevation = 0.dp,
+                    windowInsets = NavigationBarDefaults.windowInsets,
+                ) {
                     NavigationBarItem(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
-                        icon = { Icon(Icons.Filled.Home, contentDescription = null) },
-                        label = { Text(stringResource(R.string.nav_home)) },
+                        icon = { Icon(Icons.Outlined.Home, contentDescription = null) },
+                        label = { Text(stringResource(R.string.nav_home), style = StudioType.tabLabel) },
+                        colors = tabColors,
                     )
                     NavigationBarItem(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
-                        icon = { Icon(Icons.Filled.History, contentDescription = null) },
-                        label = { Text(stringResource(R.string.nav_history)) },
+                        icon = { Icon(Icons.Outlined.History, contentDescription = null) },
+                        label = { Text(stringResource(R.string.nav_history), style = StudioType.tabLabel) },
+                        colors = tabColors,
                     )
                     NavigationBarItem(
                         selected = selectedTab == 2,
                         onClick = { selectedTab = 2 },
-                        icon = { Icon(Icons.Filled.Book, contentDescription = null) },
-                        label = { Text(stringResource(R.string.nav_dictionary)) },
+                        icon = { Icon(Icons.Outlined.AutoStories, contentDescription = null) },
+                        label = { Text(stringResource(R.string.nav_dictionary), style = StudioType.tabLabel) },
+                        colors = tabColors,
                     )
                     NavigationBarItem(
                         selected = selectedTab == 3,
                         onClick = { selectedTab = 3 },
-                        icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-                        label = { Text(stringResource(R.string.nav_settings)) },
+                        icon = { Icon(Icons.Outlined.Settings, contentDescription = null) },
+                        label = { Text(stringResource(R.string.nav_settings), style = StudioType.tabLabel) },
+                        colors = tabColors,
                     )
                 }
             },
@@ -320,403 +327,39 @@ class MainActivity : ComponentActivity() {
                 when (selectedTab) {
                     1 -> HistoryScreen(
                         historyRepository = historyRepository,
-                        settings = settings,
-                        onBack = { selectedTab = 0 },
                         onCopied = { msg -> Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show() },
                     )
-
-                    2 -> DictionaryScreen(
-                        settings = settings,
-                        onBack = { selectedTab = 0 },
-                    )
-
+                    2 -> DictionaryScreen(settings = settings)
                     3 -> SettingsScreen(
                         settings = settings,
                         keyProvider = keyProvider,
-                        onBack = { selectedTab = 0 },
                         scrollToGemini = settingsScrollToGemini,
                         onGeminiScrollDone = { settingsScrollToGemini = false },
-                    )
-
-                    else -> Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.background,
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState())
-                                .padding(24.dp)
-                                .widthIn(max = 420.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Spacer(Modifier.height(8.dp))
-                            HomeHeader()
-                            Spacer(Modifier.height(24.dp))
-                            StatsSection(
-                                historyEnabled = historyEnabled,
-                                entries = historyEntries,
-                            )
-                            Spacer(Modifier.height(24.dp))
-                            Card(modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.padding(8.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        StatusTile(
-                                            label = stringResource(R.string.home_status_overlay),
-                                            on = canDrawOverlays(),
-                                            onFix = { requestOverlayPermission() },
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        StatusTile(
-                                            label = stringResource(R.string.home_status_runtime),
-                                            on = FlowRuntimeService.isRunning,
-                                            onFix = { startRuntime() },
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                    }
-                                    Spacer(Modifier.height(8.dp))
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        StatusTile(
-                                            label = stringResource(R.string.home_status_accessibility),
-                                            on = isAccessibilityEnabled(),
-                                            onFix = {
-                                                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                                            },
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        StatusTile(
-                                            label = stringResource(R.string.home_status_key),
-                                            on = keyProvider.hasKey(),
-                                            onFix = {
-                                                settingsScrollToGemini = true
-                                                selectedTab = 3
-                                            },
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                    }
-                                    Spacer(Modifier.height(8.dp))
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        StatusTile(
-                                            label = stringResource(R.string.home_status_mic),
-                                            on = hasMicPermission(),
-                                            onFix = {
-                                                permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
-                                            },
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        StatusTile(
-                                            label = stringResource(R.string.home_status_notifications),
-                                            on = hasNotificationPermission(),
-                                            onFix = {
-                                                permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
-                                            },
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                    }
+                        openSystemPage = openSystemPage,
+                        onSystemPageOpened = { openSystemPage = false },
+                        systemGates = systemGates,
+                        onFixGate = { gateId ->
+                            when (gateId) {
+                                "overlay" -> onRequestOverlay()
+                                "runtime" -> startRuntime()
+                                "accessibility" -> onOpenAccessibility()
+                                "gemini_key" -> {
+                                    settingsScrollToGemini = true
+                                    selectedTab = 3
                                 }
+                                "microphone" -> onRequestMic()
+                                "notifications" -> onRequestNotifications()
                             }
-                            if (blockingReasons.isNotEmpty()) {
-                                Spacer(Modifier.height(12.dp))
-                                BubbleHiddenCard(
-                                    reasons = blockingReasons,
-                                    onOpenAccessibility = {
-                                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                                    },
-                                )
-                            }
-                            if (neededPermissions.isNotEmpty()) {
-                                Spacer(Modifier.height(12.dp))
-                                Button(
-                                    onClick = { permissionLauncher.launch(neededPermissions.toTypedArray()) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text(stringResource(R.string.home_grant_permissions))
-                                }
-                            }
-                            Spacer(Modifier.height(24.dp))
-                            Text(
-                                text = stringResource(
-                                    R.string.home_version,
-                                    BuildConfig.VERSION_NAME,
-                                    BuildConfig.VERSION_CODE,
-                                    BuildConfig.GIT_COMMIT,
-                                ),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Spacer(Modifier.height(16.dp))
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /** 0.4.2 friendly home header: the app logo, title, and a one-line invite. */
-    @Composable
-    private fun HomeHeader() {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Image(
-                painter = painterResource(R.drawable.ic_bubble_logo),
-                contentDescription = null,
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(RoundedCornerShape(16.dp)),
-                contentScale = ContentScale.Crop,
-            )
-            Column {
-                Text(
-                    text = stringResource(R.string.home_title),
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = MaterialTheme.colorScheme.onBackground,
-                )
-                Text(
-                    text = stringResource(R.string.home_subtitle),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-
-    /** A compact status tile for the 2-column permissions grid. When off and
-     *  [onFix] is provided, tapping the tile runs the fix. */
-    @Composable
-    private fun StatusTile(
-        label: String,
-        on: Boolean,
-        modifier: Modifier = Modifier,
-        onFix: (() -> Unit)? = null,
-    ) {
-        val fixable = !on && onFix != null
-        Surface(
-            modifier = modifier
-                .height(60.dp)
-                .then(if (fixable) Modifier.clickable { onFix() } else Modifier),
-            shape = RoundedCornerShape(12.dp),
-            color = when {
-                on -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-                else -> MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
-            },
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = stringResource(
-                            when {
-                                on -> R.string.status_on
-                                fixable -> R.string.status_fix
-                                else -> R.string.status_off
-                            },
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (on) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.error
                         },
-                        maxLines = 1,
                     )
-                }
-                if (fixable) {
-                    Icon(
-                        Icons.Filled.ChevronRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
-        }
-    }
-
-    /** 0.5.2: explains exactly which conditions are currently hiding the bubble,
-     *  so a silent drop (e.g. Android clearing the accessibility service after a
-     *  force-stop) is diagnosable and recoverable from the app itself. */
-    @Composable
-    private fun BubbleHiddenCard(reasons: List<String>, onOpenAccessibility: () -> Unit) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
-            ),
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = stringResource(R.string.diag_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                Spacer(Modifier.height(8.dp))
-                reasons.forEach { code ->
-                    val res = reasonRes(code)
-                    if (res != 0) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "•",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = stringResource(res),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                        Spacer(Modifier.height(4.dp))
-                    }
-                }
-                if (reasons.contains(EligibilityExplanation.REASON_SERVICE_NOT_CONNECTED)) {
-                    Spacer(Modifier.height(8.dp))
-                    Button(
-                        onClick = onOpenAccessibility,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(R.string.diag_open_accessibility))
-                    }
-                }
-            }
-        }
-    }
-
-    /** Maps an [EligibilityExplanation] reason code to its user-facing string. */
-    private fun reasonRes(code: String): Int = when (code) {
-        EligibilityExplanation.REASON_SERVICE_NOT_CONNECTED -> R.string.diag_reason_service
-        EligibilityExplanation.REASON_NO_EDITOR_FOCUS -> R.string.diag_reason_focus
-        EligibilityExplanation.REASON_SECURE_FIELD -> R.string.diag_reason_secure
-        EligibilityExplanation.REASON_UNCERTAIN_FIELD -> R.string.diag_reason_uncertain
-        EligibilityExplanation.REASON_KEYBOARD_HIDDEN -> R.string.diag_reason_keyboard
-        EligibilityExplanation.REASON_MICROPHONE_NOT_GRANTED -> R.string.diag_reason_mic
-        EligibilityExplanation.REASON_API_KEY_MISSING -> R.string.diag_reason_key
-        EligibilityExplanation.REASON_APP_DISABLED -> R.string.diag_reason_app_disabled
-        EligibilityExplanation.REASON_SESSION_ACTIVE -> R.string.diag_reason_session
-        else -> 0
-    }
-
-    /** 0.4.2 colorful dictation stats grid (sessions, words, today, week, WPM,
-     *  per-session) derived entirely from history entries — clearing history
-     *  resets every stat. Shows an enable hint while history is off. */
-    @Composable
-    private fun StatsSection(
-        historyEnabled: Boolean,
-        entries: List<com.whispertype.android.data.history.HistoryRepository.HistoryEntry>,
-    ) {
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = stringResource(R.string.home_stats_title),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Spacer(Modifier.height(12.dp))
-                if (!historyEnabled) {
-                    Text(
-                        text = stringResource(R.string.home_stats_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    val now = System.currentTimeMillis()
-                    val stats = listOf(
-                        StatTileData(
-                            value = HistoryStats.sessions(entries).toString(),
-                            label = stringResource(R.string.home_stats_sessions),
-                            color = Color(0xFF0E9B8A),
-                        ),
-                        StatTileData(
-                            value = HistoryStats.totalWords(entries).toString(),
-                            label = stringResource(R.string.home_stats_words),
-                            color = Color(0xFF3B82F6),
-                        ),
-                        StatTileData(
-                            value = HistoryStats.todayWords(entries, now).toString(),
-                            label = stringResource(R.string.home_stats_today),
-                            color = Color(0xFFF59E0B),
-                        ),
-                        StatTileData(
-                            value = HistoryStats.weekWords(entries, now).toString(),
-                            label = stringResource(R.string.home_stats_week),
-                            color = Color(0xFF8B5CF6),
-                        ),
-                        StatTileData(
-                            value = HistoryStats.wordsPerMinute(entries)?.roundToInt()?.toString() ?: "—",
-                            label = stringResource(R.string.home_stats_wpm),
-                            color = Color(0xFFF43F5E),
-                        ),
-                        StatTileData(
-                            value = HistoryStats.wordsPerSession(entries).toString(),
-                            label = stringResource(R.string.home_stats_per_session),
-                            color = Color(0xFF22C55E),
-                        ),
-                    )
-                    stats.chunked(2).forEach { row ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            row.forEach { tile ->
-                                StatTile(
-                                    data = tile,
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
-                            if (row.size == 1) {
-                                Spacer(Modifier.weight(1f))
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                    }
-                }
-            }
-        }
-    }
-
-    private data class StatTileData(val value: String, val label: String, val color: Color)
-
-    @Composable
-    private fun StatTile(data: StatTileData, modifier: Modifier = Modifier) {
-        Surface(
-            modifier = modifier.height(72.dp),
-            shape = RoundedCornerShape(12.dp),
-            color = data.color.copy(alpha = 0.12f),
-        ) {
-            Box(
-                modifier = Modifier.padding(horizontal = 12.dp),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                Column {
-                    Text(
-                        text = data.value,
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = data.color,
-                    )
-                    Text(
-                        text = data.label,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    else -> HomeScreen(
+                        historyEnabled = historyEnabled,
+                        entries = historyEntries,
+                        setupBannerReasons = setupBannerReasons,
+                        onSetupBannerTap = {
+                            openSystemPage = true
+                            selectedTab = 3
+                        },
                     )
                 }
             }

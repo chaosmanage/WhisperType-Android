@@ -1,8 +1,10 @@
 package com.whispertype.android.ui.history
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,21 +14,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -40,44 +32,49 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.whispertype.android.R
 import com.whispertype.android.core.model.LanguageMode
 import com.whispertype.android.data.history.HistoryRepository
-import com.whispertype.android.data.settings.SettingsRepository
+import com.whispertype.android.data.history.HistoryStats
+import com.whispertype.android.ui.theme.StudioCard
+import com.whispertype.android.ui.theme.StudioColors
+import com.whispertype.android.ui.theme.StudioPageTitle
+import com.whispertype.android.ui.theme.StudioType
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-/**
- * History screen: encrypted dictation transcript list with per-entry copy and
- * delete. The 0.4.2 redesign uses a standard top app bar (back arrow + title)
- * with a subtle delete-all icon action and a confirmation dialog, and moves the
- * history-recording controls (enable + retention) here from Settings.
- */
-@OptIn(ExperimentalMaterial3Api::class)
+private data class HistoryDayGroup(
+    val label: String,
+    val entries: List<HistoryRepository.HistoryEntry>,
+)
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HistoryScreen(
     historyRepository: HistoryRepository,
-    settings: SettingsRepository,
-    onBack: () -> Unit,
     onCopied: (String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val clearedLabel = stringResource(R.string.history_cleared)
     val copiedLabel = stringResource(R.string.history_copied)
-    val historyEnabled by settings.historyEnabled.collectAsStateWithLifecycle(initialValue = false)
-    val retentionDays by settings.historyRetentionDays
-        .collectAsStateWithLifecycle(initialValue = SettingsRepository.DEFAULT_RETENTION_DAYS)
+    val fmtLocale: Locale = LocalConfiguration.current.locales[0]
+    val nowMillis = System.currentTimeMillis()
+    val todayLabel = stringResource(R.string.history_day_today)
+    val yesterdayLabel = stringResource(R.string.history_day_yesterday)
 
     var refreshKey by remember { mutableStateOf(0) }
     var entries by remember { mutableStateOf<List<HistoryRepository.HistoryEntry>>(emptyList()) }
     var showClearConfirm by remember { mutableStateOf(false) }
+    var expandedId by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(refreshKey) { entries = historyRepository.events().first() }
+
+    val dayGroups = remember(entries, nowMillis, todayLabel, yesterdayLabel) {
+        groupEntriesByDay(entries, nowMillis, fmtLocale, todayLabel, yesterdayLabel)
+    }
 
     if (showClearConfirm) {
         AlertDialog(
@@ -94,9 +91,7 @@ fun HistoryScreen(
                         }
                         onCopied(clearedLabel)
                     },
-                ) {
-                    Text(stringResource(R.string.history_clear))
-                }
+                ) { Text(stringResource(R.string.history_clear)) }
             },
             dismissButton = {
                 TextButton(onClick = { showClearConfirm = false }) {
@@ -106,104 +101,60 @@ fun HistoryScreen(
         )
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.history_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.history_back_desc),
-                        )
-                    }
-                },
-                actions = {
-                    if (entries.isNotEmpty()) {
-                        IconButton(
-                            onClick = { showClearConfirm = true },
-                        ) {
-                            Icon(
-                                Icons.Filled.Delete,
-                                contentDescription = stringResource(R.string.history_delete_all),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            // 0.4.2: history recording settings live on this page.
-            item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = stringResource(R.string.settings_history),
-                                    style = MaterialTheme.typography.titleMedium,
-                                )
-                                Text(
-                                    text = stringResource(R.string.settings_history_desc),
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                            Switch(
-                                checked = historyEnabled,
-                                onCheckedChange = { scope.launch { settings.setHistoryEnabled(it) } },
-                            )
-                        }
-                        if (historyEnabled) {
-                            Text(
-                                text = stringResource(R.string.settings_history_retention),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Text(
-                                text = "$retentionDays ${stringResource(R.string.days_unit)}",
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            Slider(
-                                value = retentionDays.toFloat(),
-                                onValueChangeFinished = { /* commit on release only */ },
-                                onValueChange = { scope.launch { settings.setHistoryRetentionDays(it.roundToInt()) } },
-                                valueRange = RETENTION_RANGE_DAYS_F,
-                            )
-                        }
-                    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StudioPageTitle(
+                    stringResource(R.string.history_title),
+                    modifier = Modifier.weight(1f).padding(top = 6.dp),
+                )
+                if (entries.isNotEmpty()) {
+                    Text(
+                        text = stringResource(R.string.history_clear),
+                        style = StudioType.rowDesc,
+                        modifier = Modifier
+                            .padding(bottom = 14.dp)
+                            .combinedClickable(onClick = { showClearConfirm = true }),
+                    )
                 }
             }
-            if (entries.isEmpty()) {
-                item {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = stringResource(R.string.history_empty),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+        }
+        if (entries.isEmpty()) {
+            item {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.history_empty),
+                        style = StudioType.why,
+                    )
                 }
-            } else {
-                items(entries, key = { it.id }) { entry ->
+            }
+        } else {
+            dayGroups.forEach { group ->
+                item(key = "header-${group.label}") {
+                    Text(
+                        text = group.label.uppercase(fmtLocale),
+                        style = StudioType.groupLabel,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
+                    )
+                }
+                items(group.entries, key = { it.id }) { entry ->
                     HistoryEntryCard(
                         entry = entry,
+                        locale = fmtLocale,
+                        expanded = expandedId == entry.id,
+                        onToggle = {
+                            expandedId = if (expandedId == entry.id) null else entry.id
+                        },
                         onCopy = {
                             val clipboard =
                                 context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -223,11 +174,41 @@ fun HistoryScreen(
     }
 }
 
-private val RETENTION_RANGE_DAYS_F: ClosedFloatingPointRange<Float> = 7f..90f
+private fun groupEntriesByDay(
+    entries: List<HistoryRepository.HistoryEntry>,
+    nowMillis: Long,
+    locale: Locale,
+    todayLabel: String,
+    yesterdayLabel: String,
+): List<HistoryDayGroup> {
+    if (entries.isEmpty()) return emptyList()
+    val startOfToday = HistoryStats.startOfTodayMillis(nowMillis)
+    val dayLabelFmt = SimpleDateFormat("EEEE", locale)
+    return entries
+        .groupBy { HistoryStats.startOfTodayMillis(it.timestampMillis) }
+        .toSortedMap(compareByDescending { it })
+        .map { (dayStart, dayEntries) ->
+            val label = when (dayStart) {
+                startOfToday -> todayLabel
+                startOfToday - MILLIS_PER_DAY -> yesterdayLabel
+                else -> dayLabelFmt.format(Date(dayStart))
+            }
+            HistoryDayGroup(
+                label = label,
+                entries = dayEntries.sortedByDescending { it.timestampMillis },
+            )
+        }
+}
 
+private const val MILLIS_PER_DAY = 86_400_000L
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HistoryEntryCard(
     entry: HistoryRepository.HistoryEntry,
+    locale: Locale,
+    expanded: Boolean,
+    onToggle: () -> Unit,
     onCopy: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -238,35 +219,55 @@ private fun HistoryEntryCard(
         }
     }
     val languageLabel = if (languageRes != null) stringResource(languageRes) else entry.language
-    val fmtLocale: Locale = LocalConfiguration.current.locales[0]
-    val formattedTime = SimpleDateFormat("MMM d, HH:mm", fmtLocale)
-        .format(Date(entry.timestampMillis))
-    Card(modifier = Modifier.fillMaxWidth()) {
+    val formattedTime = SimpleDateFormat("h:mm a", locale).format(Date(entry.timestampMillis))
+    val outcomeRes = outcomeBadgeRes(entry.outcome)
+
+    StudioCard(radius = 14) {
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier
+                .combinedClickable(onClick = onToggle, onLongClick = onCopy)
+                .padding(11.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(text = entry.text, style = MaterialTheme.typography.bodyLarge)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(text = entry.text, style = StudioType.snippet)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    text = languageLabel,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = "$formattedTime · $languageLabel",
+                    style = StudioType.metricLabel,
                 )
-                Text(
-                    text = formattedTime,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onCopy) {
-                    Text(stringResource(R.string.history_copy))
+                if (outcomeRes != null) {
+                    Surface(
+                        shape = RoundedCornerShape(99.dp),
+                        color = StudioColors.AccentSoft,
+                    ) {
+                        Text(
+                            text = stringResource(outcomeRes),
+                            style = StudioType.metricLabel.copy(color = StudioColors.Accent),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
                 }
-                TextButton(onClick = onDelete) {
-                    Text(stringResource(R.string.history_delete))
+            }
+            if (expanded) {
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    TextButton(onClick = onCopy) {
+                        Text(stringResource(R.string.history_copy), style = StudioType.rowTitle.copy(color = StudioColors.Accent))
+                    }
+                    TextButton(onClick = onDelete) {
+                        Text(stringResource(R.string.history_delete), style = StudioType.rowTitle.copy(color = StudioColors.ErrorOnBanner))
+                    }
                 }
             }
         }
     }
+}
+
+private fun outcomeBadgeRes(outcome: String): Int? = when (outcome) {
+    "Success" -> R.string.history_outcome_inserted
+    "CopiedToClipboard", "CopyAvailable" -> R.string.history_outcome_copied
+    else -> null
 }

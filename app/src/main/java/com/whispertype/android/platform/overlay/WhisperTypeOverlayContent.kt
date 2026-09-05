@@ -1,6 +1,7 @@
 package com.whispertype.android.platform.overlay
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -10,6 +11,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
@@ -211,6 +214,20 @@ private fun PanelSurface(content: @Composable () -> Unit) {
     }
 }
 
+/** Hairline glass capsule shared by recording/status pills (Studio P1+P3). */
+@Composable
+private fun HairlinePillSurface(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Surface(
+        modifier = modifier.border(1.dp, WhisperTypeColors.PillBorder, RoundedCornerShape(50)),
+        shape = RoundedCornerShape(50),
+        color = WhisperTypeColors.SurfaceRaised,
+        content = content,
+    )
+}
+
 /** 0.4.2 recording pill: a thin translucent capsule with Cancel (red X) at the
  *  bubble anchor/left, the live waveform in the center, and Done (green check)
  *  on the right. Done commits the dictation; Cancel discards it. */
@@ -219,15 +236,13 @@ private fun ListeningCapsule(
     amplitude: Float,
     onIntent: (OverlayIntent) -> Unit,
 ) {
-    Surface(
+    HairlinePillSurface(
         modifier = Modifier.testTag(stringResource(R.string.test_tag_panel)),
-        shape = RoundedCornerShape(50),
-        color = WhisperTypeColors.SurfaceRaised.copy(alpha = 0.85f),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             PillAction(
                 tag = stringResource(R.string.test_tag_cancel),
@@ -238,7 +253,10 @@ private fun ListeningCapsule(
             )
             RealTimeWaveform(
                 amplitude = amplitude,
-                modifier = Modifier.size(width = 72.dp, height = 52.dp),
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .height(44.dp),
+                lineColor = WhisperTypeColors.WaveAccent,
                 isListening = true,
             )
             PillAction(
@@ -255,15 +273,13 @@ private fun ListeningCapsule(
 /** Compact starting pill: Cancel at the bubble anchor plus the live waveform. */
 @Composable
 private fun StartingCapsule(onIntent: (OverlayIntent) -> Unit) {
-    Surface(
+    HairlinePillSurface(
         modifier = Modifier.testTag(stringResource(R.string.test_tag_panel)),
-        shape = RoundedCornerShape(50),
-        color = WhisperTypeColors.SurfaceRaised.copy(alpha = 0.85f),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             PillAction(
                 tag = stringResource(R.string.test_tag_cancel),
@@ -274,7 +290,10 @@ private fun StartingCapsule(onIntent: (OverlayIntent) -> Unit) {
             )
             RealTimeWaveform(
                 amplitude = 0f,
-                modifier = Modifier.size(width = 72.dp, height = 52.dp),
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .height(44.dp),
+                lineColor = WhisperTypeColors.WaveAccent,
                 isListening = false,
             )
         }
@@ -284,10 +303,8 @@ private fun StartingCapsule(onIntent: (OverlayIntent) -> Unit) {
 /** Compact status pill: the message text only. */
 @Composable
 private fun StatusCapsule(text: String) {
-    Surface(
+    HairlinePillSurface(
         modifier = Modifier.testTag(stringResource(R.string.test_tag_panel)),
-        shape = RoundedCornerShape(50),
-        color = WhisperTypeColors.SurfaceRaised.copy(alpha = 0.85f),
     ) {
         Text(
             text = text,
@@ -301,10 +318,8 @@ private fun StatusCapsule(text: String) {
 /** Short terminal confirmation; the coordinator's Success state bounds its duration. */
 @Composable
 private fun SuccessCapsule(text: String) {
-    Surface(
+    HairlinePillSurface(
         modifier = Modifier.testTag(stringResource(R.string.test_tag_panel)),
-        shape = RoundedCornerShape(50),
-        color = WhisperTypeColors.SurfaceRaised.copy(alpha = 0.85f),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -392,11 +407,10 @@ private fun PillAction(
     tint: Color,
     onClick: () -> Unit,
 ) {
-    val minSize = with(LocalDensity.current) { 48.dp }
     Surface(
         onClick = onClick,
         modifier = Modifier
-            .sizeIn(minWidth = minSize, minHeight = minSize)
+            .size(40.dp)
             .testTag(tag),
         shape = CircleShape,
         color = tint.copy(alpha = 0.20f),
@@ -406,7 +420,7 @@ private fun PillAction(
                 imageVector = icon,
                 contentDescription = label,
                 tint = tint,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(18.dp),
             )
         }
     }

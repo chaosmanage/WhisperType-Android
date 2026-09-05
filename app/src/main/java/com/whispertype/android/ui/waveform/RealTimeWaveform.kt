@@ -14,6 +14,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlinx.coroutines.delay
@@ -32,48 +33,30 @@ internal fun effectiveWaveformAmplitude(amplitude: Float): Float =
 internal fun shouldAnimateWaveform(amplitude: Float, isListening: Boolean): Boolean =
     isListening && effectiveWaveformAmplitude(amplitude) > 0f
 
-/** 0.6.1: low-rate phase tick (was a 60 fps infinite transition). */
 private const val PHASE_TICK_MS = 50L
-
-/** Full visual cycle duration preserved from the pre-0.6.1 animation. */
 private const val PHASE_CYCLE_MS = 550L
-
 private val FULL_TURN = (Math.PI * 2).toFloat()
 private val PHASE_STEP = FULL_TURN * PHASE_TICK_MS / PHASE_CYCLE_MS
 
 /**
- * 0.4.2 real-time waveform for the recording pill: a flat baseline on silence
- * that livens into a dancing skyline of peaks and crests as the user speaks.
- * [amplitude] is the smoothed mic level in [0, 1]. The drawing fills the
- * modifier's size.
- *
- * Sensitivity: the amplitude is boosted through a sqrt curve (low sounds still
- * jump — 0.1 -> ~0.32 of full scale), and bars reach nearly the full canvas
- * height, so speech is unmistakable even at a quiet voice.
- *
- * The rolling phase exists only while [isListening] and above the effective
- * silence threshold. At silence (and on the pre-listening Starting surface) the
- * transition leaves composition, so the static baseline consumes no frames.
+ * Centered soundwave for the Studio hairline pill: mirrored bars around the
+ * vertical midpoint, teal by default, with a longer amplitude tween for fluid
+ * motion. Phase ticks stay at ~20 Hz to avoid logcat frame-rate spam.
  */
 @Composable
 fun RealTimeWaveform(
     amplitude: Float,
     modifier: Modifier = Modifier,
-    lineColor: Color = Color.White.copy(alpha = 0.9f),
+    lineColor: Color = Color(0xFF5EE0C4),
     isListening: Boolean = true,
 ) {
     val targetAmplitude = effectiveWaveformAmplitude(amplitude)
     val animated by animateFloatAsState(
         targetValue = targetAmplitude,
-        animationSpec = tween(durationMillis = 90),
+        animationSpec = tween(durationMillis = 160),
         label = "waveformAmplitude",
     )
 
-    // 0.6.1: the rolling phase advances at ~20 Hz (50 ms ticks) instead of a
-    // 60 fps infinite transition. The mic amplitude only updates at ~16.7 Hz,
-    // so a full-rate animation both wastes battery and floods logcat with
-    // per-frame View.setRequestedFrameRate spam (which rotated our SESSION DONE
-    // diagnostics out of the buffer during recording).
     val animate = shouldAnimateWaveform(targetAmplitude, isListening)
     var phase by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(animate) {
@@ -88,44 +71,30 @@ fun RealTimeWaveform(
     }
 
     Canvas(modifier = modifier) {
-        val w = this.size.width
-        val h = this.size.height
-        val baselineY = h * 0.94f
-        val fade = Color(0xFF4A5A57)
+        if (animated <= WAVEFORM_SILENCE_THRESHOLD && !isListening) return@Canvas
 
-        // Faint baseline so the bar skyline has an origin.
-        drawLine(
-            color = fade,
-            start = Offset(0f, baselineY),
-            end = Offset(w, baselineY),
-            strokeWidth = 1.5.dp.toPx(),
-            cap = StrokeCap.Round,
-        )
-
-        if (animated <= WAVEFORM_SILENCE_THRESHOLD) return@Canvas
-
-        // Sqrt boost: quiet speech still produces a lively, full-height skyline.
+        val w = size.width
+        val h = size.height
+        val midY = h * 0.5f
         val level = sqrt(animated.coerceIn(0f, 1f))
-        val peak = (baselineY - h * 0.06f) * level
+        val idleFloor = if (isListening) 0.22f else 0f
+        val maxHalf = h * 0.48f * level.coerceAtLeast(idleFloor)
 
-        // Bar skyline: three overlapping sine components per bar for organic,
-        // non-uniform peaks and crests; height scales with the boosted level.
-        val barCount = 16
-        val barWidth = (w / barCount) * 0.7f
+        val barCount = 32
         val step = w / barCount
+        val barWidth = (step * 0.55f).coerceAtLeast(1.5f)
+
         for (i in 0 until barCount) {
             val x = step * (i + 0.5f)
-            val v1 = sin(phase * 1.0f + i * 0.9f)
-            val v2 = sin(phase * 0.6f + i * 1.9f)
-            val v3 = sin(phase * 1.7f + i * 0.4f)
-            // Normalize the three-component mix to ~[0, 1] so bars reach near the
-            // peak but keep individual variety.
-            val mix = (v1 + v2 + v3 + 3f) / 6f
-            val barH = (0.12f + 0.88f * mix.coerceIn(0f, 1f)) * peak
+            val v1 = sin(phase * 1.0f + i * 0.55f)
+            val v2 = sin(phase * 0.65f + i * 1.1f)
+            val v3 = sin(phase * 1.4f + i * 0.25f)
+            val mix = abs((v1 + v2 + v3) / 3f)
+            val half = (0.22f + 0.78f * mix) * maxHalf
             drawLine(
                 color = lineColor,
-                start = Offset(x, baselineY),
-                end = Offset(x, baselineY - barH),
+                start = Offset(x, midY - half),
+                end = Offset(x, midY + half),
                 strokeWidth = barWidth,
                 cap = StrokeCap.Round,
             )

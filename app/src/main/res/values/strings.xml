@@ -106,6 +106,22 @@
     <string name="home_stats_wpm">Words / min</string>
     <string name="home_stats_per_session">Words / session</string>
     <string name="home_stats_hint">Enable History in Settings to see your dictation stats.</string>
+    <string name="home_hero_week_label">Words this week</string>
+    <string name="home_greeting_morning">Good morning</string>
+    <string name="home_greeting_afternoon">Good afternoon</string>
+    <string name="home_greeting_evening">Good evening</string>
+    <string name="home_greeting_night">Good night</string>
+    <string name="home_empty_title">Your first words land here</string>
+    <string name="home_empty_body">Open any app, tap the bubble, and speak. WhisperType keeps a private count on this phone.</string>
+    <string name="home_recent_title">Recent</string>
+    <string name="home_banner_accessibility">Accessibility is off</string>
+    <string name="home_banner_key">Add your Gemini API key</string>
+    <string name="home_banner_mic">Microphone is off</string>
+    <string name="home_banner_disabled">WhisperType is turned off</string>
+    <string name="home_banner_overlay">Overlay permission is off</string>
+    <string name="home_banner_runtime">Runtime is not running</string>
+    <string name="home_banner_notifications">Notifications are off</string>
+    <string name="home_banner_generic">Something needs your attention in Settings</string>
     <string name="status_on">On</string>
     <string name="status_off">Off</string>
     <string name="status_fix">Fix</string>
@@ -119,16 +135,17 @@
     <string name="settings_app_enabled_desc">Kill switch. Off fully stops the runtime: bubble, notifications, and dictation end until you turn it back on.</string>
     <string name="settings_dark_mode">Dark mode</string>
     <string name="settings_dark_mode_desc">Use a dark theme for the app screens.</string>
-    <string name="settings_speech_mode">Speech mode</string>
+    <string name="settings_speech_mode">Speech</string>
     <string name="language_english">English</string>
     <string name="language_hinglish">Hinglish</string>
-    <string name="settings_history">Save dictation history</string>
+    <string name="settings_history">Save history</string>
     <string name="settings_history_desc">Keep a private local record of your dictation.</string>
     <string name="settings_history_retention">Keep history for</string>
     <string name="days_unit">days</string>
-    <string name="settings_gemini_key">Gemini API key</string>
+    <string name="settings_gemini_key">Gemini account</string>
     <string name="settings_key_configured">API key configured</string>
-    <string name="settings_key_missing">No API key set</string>
+    <string name="settings_key_on_device">Key saved on this device</string>
+    <string name="settings_key_missing">No key yet</string>
     <string name="settings_key_hint">Paste your Gemini API key</string>
     <string name="settings_key_save">Save key</string>
     <string name="settings_key_clear">Clear key</string>
@@ -137,18 +154,23 @@
     <string name="settings_key_cleared" tools:ignore="UnusedResources">Key removed</string>
 
     <!-- 0.4.0 settings: auto-stop, polish, dictionary, history, bubble -->
-    <string name="settings_auto_stop">Auto-stop timeout</string>
+    <string name="settings_auto_stop">Auto-stop</string>
+    <string name="auto_stop_after_15s">After 15 seconds of silence</string>
+    <string name="auto_stop_after_30s">After 30 seconds of silence</string>
+    <string name="auto_stop_after_60s">After 1 minute of silence</string>
+    <string name="auto_stop_after_120s">After 2 minutes of silence</string>
+    <string name="auto_stop_after_300s">After 5 minutes of silence</string>
     <string name="settings_auto_stop_desc">Stop automatically after silence or the maximum recording time.</string>
-    <string name="settings_segment_at_silence">Segment at pauses</string>
+    <string name="settings_segment_at_silence">Pause segments</string>
     <string name="settings_segment_at_silence_desc">Experimental. Ends the utterance at each pause so the model echoes that segment while you keep talking. Faster finalization for long dictations; verify on device before relying on it.</string>
     <string name="auto_stop_15s">15 seconds</string>
     <string name="auto_stop_30s">30 seconds</string>
     <string name="auto_stop_60s">60 seconds</string>
     <string name="auto_stop_120s">2 minutes</string>
     <string name="auto_stop_300s">5 minutes</string>
-    <string name="settings_audio_source">Recording source</string>
+    <string name="settings_audio_source">Microphone</string>
     <string name="settings_audio_source_desc">Which microphone dictation records from.</string>
-    <string name="audio_source_phone">Phone microphone</string>
+    <string name="audio_source_phone">This phone</string>
     <string name="audio_source_bluetooth">Bluetooth headset</string>
     <string name="settings_audio_source_bluetooth_found">Connected: %1$s</string>
     <string name="settings_audio_source_bluetooth_missing">No bluetooth headset connected — will use the phone mic.</string>
@@ -181,6 +203,37 @@
     <string name="settings_section_general">General</string>
     <string name="settings_section_recording">Recording</string>
     <string name="settings_section_bubble">Bubble</string>
+    <string name="settings_section_whispertype">WhisperType</string>
+    <string name="settings_section_dictation">Dictation</string>
+    <string name="settings_section_privacy">Privacy</string>
+    <string name="settings_section_account">Account</string>
+    <string name="settings_section_account_privacy">Account &amp; privacy</string>
+    <string name="settings_bubble_size_fade">Size &amp; fade</string>
+    <plurals name="settings_mini_dot_after">
+        <item quantity="one">After %1$d second</item>
+        <item quantity="other">After %1$d seconds</item>
+    </plurals>
+    <plurals name="settings_history_keep_days">
+        <item quantity="one">Keep %1$d day</item>
+        <item quantity="other">Keep %1$d days</item>
+    </plurals>
+    <string name="settings_about">About</string>
+    <string name="settings_system_all_set">All set</string>
+    <string name="settings_system_needs_attention">Needs attention</string>
+    <string name="settings_hotkey_capture_short">Press a key</string>
+    <string name="settings_dictionary_people_desc">Spoken words WhisperType should always write a certain way.</string>
+    <string name="settings_dictionary_add_word">+ Add a word</string>
+    <string name="history_day_today">Today</string>
+    <string name="history_day_yesterday">Yesterday</string>
+    <string name="settings_section_system">System</string>
+    <string name="settings_app_enabled_short">Off stops the bubble and all dictation until you turn it back on.</string>
+    <string name="settings_segment_experimental">Experimental — verify on device before relying on it.</string>
+    <string name="settings_bubble_size_friendly">Bubble size</string>
+    <string name="settings_bubble_opacity_friendly">Bubble opacity</string>
+    <string name="settings_system_row">Status</string>
+    <string name="settings_system_row_desc">Permissions, services, and runtime health</string>
+    <string name="settings_system_title">System</string>
+    <string name="settings_system_ok">All set</string>
     <string name="settings_section_gemini">Gemini account</string>
     <string name="settings_bubble_size">Bubble size</string>
     <string name="settings_bubble_size_value">%1$d dp</string>
@@ -204,4 +257,66 @@
     <string name="history_clear">Clear</string>
     <string name="history_cancel">Cancel</string>
     <string name="history_back_desc">Back</string>
+    <string name="history_outcome_inserted">Inserted</string>
+    <string name="history_outcome_copied">Copied</string>
+
+    <!-- Studio orientation wizard (1.1.0) -->
+    <string name="onboard_welcome_title">Speak. We type it where you already are.</string>
+    <string name="onboard_welcome_body">WhisperType keeps your keyboard. A small bubble appears over Messages, Mail, Chrome — tap, talk, tap the check.</string>
+    <string name="onboard_how_title">How it works</string>
+    <string name="onboard_how_body">Tap the bubble (or the mini-dot) to start. Speak naturally — the waveform shows you are being heard. Tap the green check when you are done.</string>
+    <string name="onboard_how_step1">1 · Tap the bubble</string>
+    <string name="onboard_how_step23">2 · Speak. 3 · Tap the green check to insert.</string>
+    <string name="onboard_overlay_title">Let the bubble sit above other apps</string>
+    <string name="onboard_overlay_body">Android calls this “Display over other apps.” Without it the mic cannot appear over your keyboard.</string>
+    <string name="onboard_overlay_required">Required · system dialog</string>
+    <string name="onboard_allow_overlay">Allow overlay</string>
+    <string name="onboard_continue">Continue</string>
+    <string name="onboard_skip_for_now">Skip for now</string>
+    <string name="onboard_mic_title">Microphone, only while you speak</string>
+    <string name="onboard_mic_body">We also show a recording notification so you always know the mic is on. Neither runs in the background when you are idle.</string>
+    <string name="onboard_allow_mic">Allow mic and notifications</string>
+    <string name="onboard_a11y_why_title">Find the field. Put the words in.</string>
+    <string name="onboard_a11y_why_body">Accessibility is how WhisperType sees the cursor and inserts text. It does not scrape the rest of your screen, and it is off in password fields.</string>
+    <string name="onboard_a11y_apk_note">Because this app arrived as an APK, Android will likely block the next screen. That is expected. The following steps walk through it.</string>
+    <string name="onboard_a11y_try_title">Turn on WhisperType</string>
+    <string name="onboard_a11y_try_body">Open Accessibility settings, find WhisperType in the list, and switch it on. Come back here when you are done.</string>
+    <string name="onboard_open_accessibility">Open accessibility settings</string>
+    <string name="onboard_restricted_title">Restricted setting?</string>
+    <string name="onboard_restricted_body">On some phones, sideloaded apps hide the accessibility toggle until you allow restricted settings for WhisperType. If the switch was greyed out, follow the next steps.</string>
+    <string name="onboard_appinfo_title">Open App info</string>
+    <string name="onboard_appinfo_body">Tap the ⋮ menu on the App info screen, choose Allow restricted settings, confirm with your PIN or fingerprint, then return here.</string>
+    <string name="onboard_open_appinfo">Open App info</string>
+    <string name="onboard_recovery_title">Don’t see the three dots?</string>
+    <string name="onboard_recovery_body">After allowing restricted settings, open Accessibility again and enable WhisperType. If it still will not stick, reboot the phone once — some OEM skins need that.</string>
+    <string name="onboard_a11y_enable_title">Enable WhisperType</string>
+    <string name="onboard_a11y_enable_body">With restricted settings allowed, turn WhisperType on in the accessibility list.</string>
+    <string name="onboard_key_title">Your Gemini key stays on this phone</string>
+    <string name="onboard_key_body">Paste once. It is encrypted in the Android Keystore. Audio goes only to Gemini Live. We never log transcripts.</string>
+    <string name="onboard_key_source">Create a key at Google AI Studio:</string>
+    <string name="onboard_key_source_url">aistudio.google.com/api-keys</string>
+    <string name="onboard_key_free_tier">Google\'s free tier works without billing setup and includes unlimited daily tokens for Gemini 3.5 Transcribe Live — the model WhisperType uses for dictation.</string>
+    <string name="onboard_open_api_keys">Open API keys page</string>
+    <string name="onboard_ready_title">You’re set</string>
+    <string name="onboard_ready_hero_sub">Open any app, tap the bubble, speak.</string>
+    <string name="onboard_ready_body">If accessibility later turns off, Home shows one banner. The full six gates live in Settings → System.</string>
+    <string name="onboard_back">Back</string>
+    <string name="onboard_next">Next</string>
+
+    <plurals name="home_hero_week_sub">
+        <item quantity="one">%1$d session · keep going</item>
+        <item quantity="other">%1$d sessions · keep going</item>
+    </plurals>
+    <plurals name="home_hero_week_wpm">
+        <item quantity="one">Across %1$d session · %2$d words/min</item>
+        <item quantity="other">Across %1$d sessions · %2$d words/min</item>
+    </plurals>
+    <plurals name="home_banner_multiple">
+        <item quantity="one">%1$d setup item needs attention</item>
+        <item quantity="other">%1$d setup items need attention</item>
+    </plurals>
+    <plurals name="settings_system_issues">
+        <item quantity="one">%1$d item needs attention</item>
+        <item quantity="other">%1$d items need attention</item>
+    </plurals>
 </resources>
