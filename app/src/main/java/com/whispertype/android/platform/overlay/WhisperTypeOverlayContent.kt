@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
@@ -59,6 +57,10 @@ import com.whispertype.android.ui.theme.WhisperTypeTheme
 import com.whispertype.android.ui.waveform.RealTimeWaveform
 import com.whispertype.android.ui.waveform.effectiveWaveformAmplitude
 import kotlinx.coroutines.delay
+
+/** Studio P1 waveform lane — fixed width; do not use Row weight (collapses to ~0). */
+private val PillWaveformWidth = 96.dp
+private val PillWaveformHeight = 44.dp
 
 /**
  * Renders the persistent overlay surface for [uiState] and forwards user
@@ -253,9 +255,7 @@ private fun ListeningCapsule(
             )
             RealTimeWaveform(
                 amplitude = amplitude,
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .height(44.dp),
+                modifier = Modifier.size(width = PillWaveformWidth, height = PillWaveformHeight),
                 lineColor = WhisperTypeColors.WaveAccent,
                 isListening = true,
             )
@@ -290,9 +290,7 @@ private fun StartingCapsule(onIntent: (OverlayIntent) -> Unit) {
             )
             RealTimeWaveform(
                 amplitude = 0f,
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .height(44.dp),
+                modifier = Modifier.size(width = PillWaveformWidth, height = PillWaveformHeight),
                 lineColor = WhisperTypeColors.WaveAccent,
                 isListening = false,
             )

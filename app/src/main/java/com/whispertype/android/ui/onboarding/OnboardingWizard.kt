@@ -390,9 +390,7 @@ private fun PreviewPill() {
             }
             RealTimeWaveform(
                 amplitude = 0.45f,
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .height(44.dp),
+                modifier = Modifier.size(width = 96.dp, height = 44.dp),
                 lineColor = StudioColors.Accent,
                 isListening = true,
             )
