@@ -135,12 +135,12 @@ adb -s <SERIAL> shell pidof com.whispertype.android
 adb -s <SERIAL> logcat --pid=<PID>
 ```
 
-## Current device reference (verified 2026-08-27)
+## Current device reference (verified 2026-09-05)
 
 - **Device:** Samsung Galaxy S25 (`SM-S921B`), Android 16 (SDK 36), 1080x2340 @ 480dpi
 - **Tailscale IP:** `100.127.110.79`
-- **ADB connect port:** `40633` — current for the 1.0.5 push; the port rotates after
-  each phone reboot (re-read it from Wireless debugging)
-- **Package:** `com.whispertype.android` (currently `versionName 1.0.5`, `versionCode 50`)
+- **ADB connect port:** `40633` — re-read after each phone reboot (Wireless debugging)
+- **Package:** `com.whispertype.android` (currently `versionName 1.0.8`, `versionCode 53`)
 - **Branch:** `main`
 - **APK:** `app/build/outputs/apk/release/app-release.apk`
+- **GitHub download:** https://github.com/chaosmanage/WhisperType-Android/releases/download/v1.0.8/app-release.apk
