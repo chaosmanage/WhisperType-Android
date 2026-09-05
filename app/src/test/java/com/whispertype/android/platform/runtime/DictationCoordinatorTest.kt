@@ -465,6 +465,58 @@ class DictationCoordinatorTest {
     }
 
     @Test
+    fun `a smart-shortened final replaces the longer interim and is what settles`() = runTest {
+        // 1.0.6: smart-mode finals can be SHORTER than the last interim (fillers
+        // removed, no shared leading edge). The final is authoritative and must
+        // replace the provisional text, not be dropped by revision heuristics.
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        coordinator.stop()
+        runCurrent()
+
+        sendInterim(host, "so um we should uh meet on thursday for the like project review at ten")
+        advanceTimeBy(300)
+        runCurrent()
+        assertTrue(host.insertions.isEmpty(), "an interim must never settle")
+
+        sendTranscript(host, "we should meet on thursday for the project review at 10")
+        advanceTimeBy(250)
+        runCurrent()
+
+        assertEquals(1, host.insertions.size)
+        assertEquals(
+            "we should meet on thursday for the project review at 10",
+            host.insertions[0].second,
+            "the committed final must replace the interim even when shorter",
+        )
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `interims are never inserted, even at the tail backstop`() = runTest {
+        // 1.0.7 invariant: the smart final is the ONLY dictation source. When
+        // only interims arrive, the session fails rather than inserting a
+        // partial — the backstop cannot fall back to provisional text.
+        val host = FakeHost()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceUntilIdle()
+        coordinator.stop()
+        runCurrent()
+
+        sendInterim(host, "so um we should uh meet on thursday for the like project review at ten")
+        advanceTimeBy(3_000)
+        runCurrent()
+
+        assertTrue(host.insertions.isEmpty(), "an interim must never be inserted")
+        val error = states(host).first { it is DictationState.Error } as DictationState.Error
+        assertEquals("gemini_no_transcript", error.failure.code)
+    }
+
+    @Test
     fun `transcript before turn completion settles via debounce and inserts the final revision`() = runTest {
         val host = FakeHost()
         val coordinator = coordinator(this, host)

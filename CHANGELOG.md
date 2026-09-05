@@ -4,6 +4,20 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.6] - 2026-08-27
+
+### Fixed
+
+- **Dictations no longer cut the last words (`runtime`, `transcript`)** — two
+  follow-up fixes after 1.0.1's tail-final gate:
+  - Committed final `inputTranscription` segments are now **authoritative**:
+    a `smart`-mode final can be shorter than the last interim (fillers removed,
+    no shared leading edge), and the revision heuristics previously dropped it —
+    settling on the partial interim instead.
+  - The tail backstop is **rearmed on every post-`activityEnd` revision**, so a
+    model still streaming the tail (or a slow final segment) is never cut off by
+    the old fixed boundary timer.
+
 ## [1.0.5] - 2026-08-27
 
 ### Fixed

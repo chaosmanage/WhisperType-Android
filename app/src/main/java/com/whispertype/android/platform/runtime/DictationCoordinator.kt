@@ -104,7 +104,13 @@ sealed interface CaptureStart {
 private class ActiveLiveSession(
     val sessionId: SessionId,
     val metrics: MutableSessionMetrics,
+    /** 1.0.7: committed final `inputTranscription` segments ONLY. Interims are
+     *  never accumulated here — the smart final is the only dictation source. */
     val accumulator: TranscriptAccumulator,
+    /** 1.0.7: revisable partials (`interimInputTranscription`) — live preview
+     *  only, never settled. Kept for the change signal that resets the quiet /
+     *  tail barriers while the model is still transcribing. */
+    val previewAccumulator: TranscriptAccumulator,
     var language: LanguageMode = LanguageMode.ENGLISH,
 ) {
     var session: GeminiLiveSession? = null
@@ -268,6 +274,7 @@ class DictationCoordinator(
             sessionId = sessionId,
             metrics = metrics,
             accumulator = TranscriptAccumulator(),
+            previewAccumulator = TranscriptAccumulator(),
         )
         active = holder
         publish(DictationState.Starting(sessionId, EMPTY_TARGET(sessionId)))
@@ -665,7 +672,16 @@ class DictationCoordinator(
                 // is ignored.
                 if (event.source == GeminiEvent.TranscriptSource.ECHO) return
                 event.candidates.forEach { candidate ->
-                    if (holder.accumulator.acceptWithResult(candidate.raw).changed) {
+                    // 1.0.7: only committed FINAL segments feed the settlement
+                    // accumulator. Interims are preview-only and are never
+                    // inserted; they still reset the quiet / tail barriers so
+                    // the model is not cut off while it is still transcribing.
+                    val accepted = if (event.isFinal) {
+                        holder.accumulator.acceptAuthoritative(candidate.raw)
+                    } else {
+                        holder.previewAccumulator.acceptWithResult(candidate.raw)
+                    }
+                    if (accepted.changed) {
                         holder.metrics.recordInputRevision()
                         onTranscriptRevision(holder)
                     }
@@ -749,7 +765,26 @@ class DictationCoordinator(
         if (active !== holder) return
         if (!isFinalizing(holder)) return
         holder.transcriptQuiet = false
-        if (holder.activityEndQueued) restartQuietDebounce(holder)
+        if (holder.activityEndQueued) {
+            // 1.0.6: the tail backstop is rearmed on every post-boundary revision
+            // so a model still streaming the tail (or a slow final segment) can
+            // never be cut off by the old fixed boundary timer.
+            restartAsrTailBackstop(holder)
+            restartQuietDebounce(holder)
+        }
+    }
+
+    /** 1.0.6: rearmable tail backstop — fires after [Config.asrTailTimeoutMs] of
+     *  no post-boundary transcription activity. */
+    private fun restartAsrTailBackstop(holder: ActiveLiveSession) {
+        holder.asrTailJob?.cancel()
+        holder.asrTailJob = scope.launch {
+            delay(config.asrTailTimeoutMs)
+            if (active === holder && isFinalizing(holder) && holder.activityEndQueued) {
+                holder.asrTailElapsed = true
+                reevaluateSettlement(holder)
+            }
+        }
     }
 
     /** Server lifecycle events are hints; transcript quiet is still mandatory. */
@@ -778,20 +813,13 @@ class DictationCoordinator(
 
     /**
      * 0.8.0: the whole post-boundary wait. One quiet debounce over ASR
-     * revisions, plus one absolute [Config.asrTailTimeoutMs] backstop from the
-     * activity-end boundary. No echo barriers, no generation gates.
+     * revisions, plus the [Config.asrTailTimeoutMs] backstop (rearmed by every
+     * revision — 1.0.6). No echo barriers, no generation gates.
      */
     private fun afterActivityEnd(holder: ActiveLiveSession) {
         if (active !== holder) return
         holder.asrTailElapsed = false
-        holder.asrTailJob?.cancel()
-        holder.asrTailJob = scope.launch {
-            delay(config.asrTailTimeoutMs)
-            if (active === holder && isFinalizing(holder) && holder.activityEndQueued) {
-                holder.asrTailElapsed = true
-                reevaluateSettlement(holder)
-            }
-        }
+        restartAsrTailBackstop(holder)
         if (hasTranscriptEvidence(holder)) {
             restartQuietDebounce(holder)
         }
@@ -845,7 +873,8 @@ class DictationCoordinator(
     }
 
     private fun hasTranscriptEvidence(holder: ActiveLiveSession): Boolean =
-        holder.accumulator.settledText()?.isNotBlank() == true
+        holder.accumulator.settledText()?.isNotBlank() == true ||
+            holder.previewAccumulator.settledText()?.isNotBlank() == true
 
     /**
      * 0.8.0 settlement: one source (the raw transcription), no text stage.

@@ -133,6 +133,27 @@ class TranscriptAccumulatorTest {
     }
 
     @Test
+    fun `authoritative final replaces a longer interim even without a shared edge`() {
+        val accumulator = TranscriptAccumulator()
+        accumulator.accept("so um we should uh meet on thursday for the like project review at ten")
+        val result = accumulator.acceptAuthoritative(
+            "we should meet on thursday for the project review at 10",
+        )
+        assertTrue(result.changed)
+        assertEquals("we should meet on thursday for the project review at 10", accumulator.current)
+        assertEquals(2, accumulator.revisionCount)
+    }
+
+    @Test
+    fun `authoritative final equal to current is unchanged`() {
+        val accumulator = TranscriptAccumulator()
+        accumulator.accept("the quick brown fox")
+        val result = accumulator.acceptAuthoritative("the quick brown fox")
+        assertFalse(result.changed)
+        assertEquals(1, accumulator.revisionCount)
+    }
+
+    @Test
     fun `same length correction still replaces the prior value`() {
         val accumulator = TranscriptAccumulator()
         accumulator.accept("schedule the meeting")

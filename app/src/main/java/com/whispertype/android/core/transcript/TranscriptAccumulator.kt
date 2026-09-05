@@ -86,6 +86,23 @@ class TranscriptAccumulator {
         return update(message)
     }
 
+    /**
+     * Adopts an authoritative committed segment verbatim, replacing any
+     * provisional text. Used for the transcribe model's final
+     * `inputTranscription` segments: they are the server's committed text, so
+     * the revision heuristics must never reject them — a `smart`-mode final can
+     * be shorter than the last interim (fillers removed) with no shared edge,
+     * and dropping it would settle the session on a partial.
+     */
+    fun acceptAuthoritative(message: String): AcceptResult {
+        if (message.isBlank()) return unchanged()
+        if (message == current) return unchanged()
+        current = message
+        replayPosition = -1
+        revisionCount += 1
+        return AcceptResult(text = current, changed = true)
+    }
+
     /** Returns the current settled transcript, or null if none exists yet. */
     fun settledText(): String? = current
 
