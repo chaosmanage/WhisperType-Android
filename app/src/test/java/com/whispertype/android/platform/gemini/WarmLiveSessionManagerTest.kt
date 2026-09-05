@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -287,6 +288,56 @@ class WarmLiveSessionManagerTest {
     }
 
     @Test
+    fun `claimOrAwait waits for connecting prewarm then hits`() = runTest {
+        val readyGate = CompletableDeferred<Unit>()
+        val connecting = FakeWarmSession { readyGate.await() }
+        val h = Harness { _, _ -> connecting }
+        val manager = h.managerFor(
+            scope = backgroundScope,
+            nowMs = { testScheduler.currentTime },
+            config = config(idleMs = 1_000L, backoffMs = listOf(10L), claimAwaitMs = 500L),
+        )
+        val expectedProfile = profile()
+
+        manager.onEligibilityChanged(isEligible = true, profile = expectedProfile)
+        runCurrent()
+        assertIs<WarmSessionState.Connecting>(manager.state.value)
+
+        val claimJob = backgroundScope.async { manager.claimOrAwait(expectedProfile) }
+        runCurrent()
+        readyGate.complete(Unit)
+        advanceUntilIdle()
+
+        val hit = assertIs<WarmSessionClaim.Hit>(claimJob.await())
+        assertEquals(expectedProfile, hit.lease.profile)
+        assertSame(connecting, h.sessions.first(), "must adopt the in-flight prewarm, not a duplicate cold socket")
+        hit.lease.session.close()
+    }
+
+    @Test
+    fun `claimOrAwait returns connecting miss when await budget elapses`() = runTest {
+        val readyGate = CompletableDeferred<Unit>()
+        val connecting = FakeWarmSession { readyGate.await() }
+        val h = Harness { _, _ -> connecting }
+        val manager = h.managerFor(
+            scope = backgroundScope,
+            nowMs = { testScheduler.currentTime },
+            config = config(idleMs = 1_000L, backoffMs = listOf(10L), claimAwaitMs = 50L),
+        )
+        val expectedProfile = profile()
+
+        manager.onEligibilityChanged(isEligible = true, profile = expectedProfile)
+        runCurrent()
+        assertIs<WarmSessionState.Connecting>(manager.state.value)
+
+        val miss = assertIs<WarmSessionClaim.Miss>(
+            manager.claimOrAwait(expectedProfile, timeoutMs = 50L),
+        )
+        assertEquals(WarmSessionClaimMissReason.CONNECTING, miss.reason)
+        assertEquals(1, h.sessions.size)
+    }
+
+    @Test
     fun `legacy claim remains nullable and does not close claimed session`() = runTest {
         val raw = FakeWarmSession()
         val manager = WarmLiveSessionManager(
@@ -324,9 +375,11 @@ class WarmLiveSessionManagerTest {
     private fun config(
         idleMs: Long,
         backoffMs: List<Long>,
+        claimAwaitMs: Long = 10_000L,
     ): WarmLiveSessionManager.Config =
         WarmLiveSessionManager.Config(
             warmIdleTimeoutMs = idleMs,
             backoffStepsMs = backoffMs,
+            claimAwaitTimeoutMs = claimAwaitMs,
         )
 }

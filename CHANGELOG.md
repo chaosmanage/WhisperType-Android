@@ -4,6 +4,20 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.8] - 2026-09-05
+
+### Fixed
+
+- **Dictation no longer dies ~3 s after tap while Gemini is still connecting
+  (`runtime`, `gemini`)** — the warm Live session was torn down on every tap
+  before it could be claimed (`Starting` made the pool ineligible), forcing a
+  cold WebSocket that often lost the 3 s pre-ready buffer race. The pool now
+  stays eligible during `Starting` and retryable `Error`; taps adopt an
+  in-flight prewarm via `claimOrAwait` instead of opening a duplicate socket;
+  capture and session resolution run in parallel; the pre-ready buffer backstop
+  is 10 s (500 frames); warm idle timeout is 180 s. `SESSION DONE` now records
+  `warmClaimResult=`.
+
 ## [1.0.7] - 2026-08-27
 
 ### Changed

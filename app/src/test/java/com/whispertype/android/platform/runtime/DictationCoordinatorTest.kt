@@ -743,6 +743,73 @@ class DictationCoordinatorTest {
     }
 
     @Test
+    fun `cold session ready after four seconds does not overflow default buffer`() = runTest {
+        val host = FakeHost()
+        val session = host.session
+        session.readyGate = kotlinx.coroutines.CompletableDeferred()
+        val coordinator = coordinator(this, host)
+        coordinator.start()
+        advanceTimeBy(1)
+
+        repeat(200) { index ->
+            host.capture.chunksChannel.send(chunk(index.toLong()))
+            advanceTimeBy(20)
+        }
+        runCurrent()
+
+        assertFalse(states(host).any { it is DictationState.Error })
+        session.readyGate!!.complete(Unit)
+        advanceUntilIdle()
+
+        assertTrue(session.audioCalls > 0)
+        coordinator.cancel()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `resolveSession runs in parallel with startCapture`() = runTest {
+        val host = FakeHost()
+        val captureGate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val resolveGate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var captureEntered = false
+        var resolveEntered = false
+        var overlapped = false
+
+        val coordinator = DictationCoordinator(
+            scope = this,
+            host = object : DictationHost by host {
+                override suspend fun startCapture(metrics: MutableSessionMetrics): CaptureStart {
+                    captureEntered = true
+                    if (resolveEntered) overlapped = true
+                    captureGate.complete(Unit)
+                    resolveGate.await()
+                    return host.startCapture(metrics)
+                }
+
+                override suspend fun resolveSession(metrics: MutableSessionMetrics): SessionResolve {
+                    resolveEntered = true
+                    if (captureEntered) overlapped = true
+                    resolveGate.complete(Unit)
+                    captureGate.await()
+                    return host.resolveSession(metrics)
+                }
+            },
+            config = DictationCoordinator.Config(insertionResultTimeoutMs = 0)
+                .withTestShutdownDispatcher(this),
+            metricsFactory = { sessionId ->
+                MutableSessionMetrics(sessionId) { testScheduler.currentTime * 1_000_000L }
+            },
+        )
+
+        coordinator.start()
+        advanceUntilIdle()
+
+        assertTrue(overlapped, "capture and resolve must overlap")
+        coordinator.cancel()
+        advanceUntilIdle()
+    }
+
+    @Test
     fun `pre-ready buffer overflow fails with connection-too-slow`() = runTest {
         val host = FakeHost()
         val session = host.session

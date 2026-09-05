@@ -41,6 +41,7 @@ import com.whispertype.android.core.model.MutableSessionMetrics
 import com.whispertype.android.core.model.OverlayIntent
 import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.TargetEligibility
+import com.whispertype.android.core.model.WarmClaimResult
 import com.whispertype.android.data.history.EncryptedHistoryRepository
 import com.whispertype.android.data.history.HistoryRepository
 import com.whispertype.android.data.secrets.AndroidKeystoreKeyStore
@@ -56,6 +57,7 @@ import com.whispertype.android.platform.gemini.GeminiSessionConfig
 import com.whispertype.android.platform.gemini.GeminiSessionFactory
 import com.whispertype.android.platform.gemini.WarmLiveSessionManager
 import com.whispertype.android.platform.gemini.WarmSessionClaim
+import com.whispertype.android.platform.gemini.WarmSessionClaimMissReason
 import com.whispertype.android.platform.gemini.WarmSessionProfile
 import com.whispertype.android.platform.ipc.RuntimeIpc
 import com.whispertype.android.platform.overlay.OverlayOwners
@@ -383,10 +385,10 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         metrics.mark(MutableSessionMetrics.Event.KeyLoadStarted)
         val profile = warmProfile()
         // Prefer a warm (preconnected) session whose exact profile matches the
-        // current settings; a stale language/activity warm session is never
-        // reused (0.6.0).
-        when (val claim = warmManager.claim(profile)) {
+        // current settings; wait for an in-flight prewarm before cold connect.
+        when (val claim = warmManager.claimOrAwait(profile)) {
             is WarmSessionClaim.Hit -> {
+                recordWarmClaim(metrics, claim)
                 metrics.mark(MutableSessionMetrics.Event.KeyLoaded)
                 metrics.mark(MutableSessionMetrics.Event.SettingsReady)
                 metrics.mark(MutableSessionMetrics.Event.SocketCreated)
@@ -399,7 +401,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                     ),
                 )
             }
-            is WarmSessionClaim.Miss -> Unit // cold connect below
+            is WarmSessionClaim.Miss -> recordWarmClaim(metrics, claim)
         }
         val key = withContext(Dispatchers.IO) { keyProvider.provideKey() }
         metrics.mark(MutableSessionMetrics.Event.KeyLoaded)
@@ -493,14 +495,35 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
 
     /** Release F2: prewarm only while every eligibility condition holds.
      *  [keyProvider.hasKey] reads the key blob from disk, so it runs last and
-     *  only when the in-memory conditions already pass — and never during an
-     *  active dictation, when prewarm is impossible anyway. */
-    private fun computeWarmEligibility(): Boolean {
-        val e = _eligibility.value
-        return e.serviceConnected && e.editorFocused && !e.editorSecure && !e.editorUncertain &&
-            e.microphoneGranted && cachedAppEnabled &&
-            !coordinator.isActive &&
-            keyProvider.hasKey()
+     *  only when the in-memory conditions already pass. The pool stays eligible
+     *  during [DictationState.Starting] so a Ready socket can be claimed. */
+    private fun computeWarmEligibility(): Boolean =
+        WarmPoolEligibility.compute(
+            eligibility = _eligibility.value,
+            blocksWarmPool = coordinator.blocksWarmPool(),
+            appEnabled = cachedAppEnabled,
+            hasApiKey = keyProvider.hasKey(),
+        )
+
+    private fun recordWarmClaim(metrics: MutableSessionMetrics, claim: WarmSessionClaim) {
+        val ageNanos = claim.ageMs?.times(1_000_000L)
+        when (claim) {
+            is WarmSessionClaim.Hit ->
+                metrics.recordWarmClaim(WarmClaimResult.HIT, ageNanos = ageNanos)
+            is WarmSessionClaim.Miss ->
+                metrics.recordWarmClaim(claim.reason.toWarmClaimResult(), ageNanos = ageNanos)
+        }
+    }
+
+    private fun WarmSessionClaimMissReason.toWarmClaimResult(): WarmClaimResult = when (this) {
+        WarmSessionClaimMissReason.SHUT_DOWN -> WarmClaimResult.SHUT_DOWN
+        WarmSessionClaimMissReason.INELIGIBLE -> WarmClaimResult.INELIGIBLE
+        WarmSessionClaimMissReason.MISSING_PROFILE -> WarmClaimResult.MISSING_PROFILE
+        WarmSessionClaimMissReason.CONNECTING -> WarmClaimResult.CONNECTING
+        WarmSessionClaimMissReason.BACKING_OFF -> WarmClaimResult.BACKING_OFF
+        WarmSessionClaimMissReason.NO_READY_SESSION -> WarmClaimResult.NO_READY_SESSION
+        WarmSessionClaimMissReason.PROFILE_MISMATCH -> WarmClaimResult.PROFILE_MISMATCH
+        WarmSessionClaimMissReason.TERMINATED -> WarmClaimResult.TERMINATED
     }
 
     private fun refreshWarmEligibility() {

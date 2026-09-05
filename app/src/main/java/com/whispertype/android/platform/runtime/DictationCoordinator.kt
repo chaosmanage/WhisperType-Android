@@ -33,6 +33,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
@@ -221,8 +222,9 @@ class DictationCoordinator(
          * non-retryable ambiguity instead of leaving Inserting stuck forever.
          * Set to 0 only in deterministic tests that complete insertion manually. */
         val insertionResultTimeoutMs: Long = 2_000,
-        /** Bounded pre-ready PCM frames buffered while a cold session connects (F5). */
-        val preReadyMaxFrames: Int = 150,
+        /** Bounded pre-ready PCM frames buffered while a cold session connects (F5).
+         *  1.0.8: 150 → 500 (20 ms × 500 ≈ 10 s backstop; overflow is last resort). */
+        val preReadyMaxFrames: Int = 500,
         /** Auto-stop: stop after this many seconds of silence (0 disables). The
          *  runtime supplies the product default (60 s) via the settings-backed
          *  provider. Disabled by default so host tests keep deterministic time. */
@@ -247,6 +249,14 @@ class DictationCoordinator(
 
     /** True when a live session is running or finalizing (guards duplicate START). */
     val isActive: Boolean get() = active != null
+
+    /**
+     * True when an in-flight dictation owns the warm Live socket. The warm pool
+     * must stay eligible during [DictationState.Starting] so [claim] can succeed
+     * before [DictationState.Listening] is published.
+     */
+    fun blocksWarmPool(): Boolean =
+        WarmPoolEligibility.blocksWarmPool(lastPublished, active != null)
 
     /** Test visibility: metrics of the currently active session, or null. */
     internal fun activeMetrics(): MutableSessionMetrics? = active?.metrics
@@ -374,12 +384,15 @@ class DictationCoordinator(
         val sessionId = holder.sessionId
         try {
             // Release F4 (tap-to-recording fix): capture starts immediately on the
-            // accepted tap, BEFORE session resolution. The overlay flips to
-            // Listening as soon as the mic is hot; key load and socket connect
-            // happen afterwards, and cold-session PCM is buffered in the bounded
+            // accepted tap. Session resolution runs in parallel so TLS/handshake
+            // overlaps AudioRecord init; cold-session PCM is buffered in the bounded
             // pre-ready buffer until the session is ready.
-            when (val outcome = host.startCapture(holder.metrics)) {
+            val captureDeferred = scope.async { host.startCapture(holder.metrics) }
+            val resolveDeferred = scope.async { host.resolveSession(holder.metrics) }
+
+            when (val outcome = captureDeferred.await()) {
                 is CaptureStart.Failed -> {
+                    resolveDeferred.cancel()
                     fail(holder, outcome.failure)
                     return
                 }
@@ -390,9 +403,12 @@ class DictationCoordinator(
                     }
                 }
             }
-            if (active !== holder) return
+            if (active !== holder) {
+                resolveDeferred.cancel()
+                return
+            }
             publish(DictationState.Listening(sessionId, connecting = true))
-            val resolution = when (val resolved = host.resolveSession(holder.metrics)) {
+            val resolution = when (val resolved = resolveDeferred.await()) {
                 is SessionResolve.Failed -> {
                     fail(holder, resolved.failure)
                     return

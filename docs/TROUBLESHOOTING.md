@@ -100,6 +100,7 @@ Without the notification permission, the recording foreground service cannot sho
 
 - A transport failure while the session is active surfaces as `gemini_transport`; a session cancelled by network loss reports `NETWORK_FAILURE`. No retry happens mid-session — start a new dictation when connectivity returns.
 - Timeouts (`TIMEOUT`) mean the speech service did not respond in time; check your connection and try again.
+- **`The Gemini connection is too slow`** (`gemini_connection_too_slow`): the pre-ready audio buffer overflowed while the Live session was still waiting for `setupComplete`. Since 1.0.8 this is a 10 s backstop (500 frames), not the primary connect timeout — if you still see it, check `SESSION DONE` for `overflow=true` and `warmClaimResult=` (a healthy tap should show `warmClaimResult=HIT overflow=false`). Retry after confirming network and API key.
 - `FGS_START_DENIED` means Android refused to start the microphone foreground service. Check that the notification permission is granted, another app is not holding the mic, and the app is not in a restricted/stopped state.
 
 ## Secure fields never show the bubble

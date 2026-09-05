@@ -15,14 +15,14 @@ sealed interface PreReadyOffer {
  * Release F5). Frames buffered here are replayed in strict order once the
  * session becomes ready.
  *
- * Default capacity is 150 frames (20 ms frames ≈ 3 seconds ≈ ~96 KB PCM16 at
+ * Default capacity is 500 frames (20 ms frames ≈ 10 seconds ≈ ~320 KB PCM16 at
  * 16 kHz mono). Overflow is never silently dropped: the caller must observe
  * [PreReadyOffer.Overflow] and surface an explicit connection-too-slow failure.
  *
  * Not thread-safe. All access must happen on the single audio dispatcher
  * producer; there is no synchronization.
  */
-class PreReadyAudioBuffer(private val maxFrames: Int = 150) {
+class PreReadyAudioBuffer(private val maxFrames: Int = 500) {
 
     init {
         require(maxFrames > 0) { "maxFrames must be > 0, was $maxFrames" }

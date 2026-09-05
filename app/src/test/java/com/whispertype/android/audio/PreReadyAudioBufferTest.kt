@@ -13,11 +13,11 @@ class PreReadyAudioBufferTest {
         AudioChunk(sequence = seq, pcm16Bytes = ByteArray(640) { it.toByte() }, sampleRateHz = 16_000)
 
     @Test
-    fun `default capacity is 150 frames`() {
+    fun `default capacity is 500 frames`() {
         val buffer = PreReadyAudioBuffer()
-        repeat(150) { assertSame(PreReadyOffer.Accepted, buffer.offer(chunk(it.toLong()))) }
+        repeat(500) { assertSame(PreReadyOffer.Accepted, buffer.offer(chunk(it.toLong()))) }
         assertTrue(buffer.isFull)
-        assertEquals(150, buffer.size)
+        assertEquals(500, buffer.size)
     }
 
     @Test

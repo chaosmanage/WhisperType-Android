@@ -17,11 +17,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Immutable, non-secret fingerprint of every setup choice that can make a warm
@@ -138,8 +140,11 @@ class WarmLiveSessionManager private constructor(
 
     /** Tunable prewarm timing (all monotonic delays). */
     data class Config(
-        val warmIdleTimeoutMs: Long = 30_000L,
+        /** Idle timeout before a ready warm session is recycled (1.0.8: 30 s → 180 s). */
+        val warmIdleTimeoutMs: Long = 180_000L,
         val backoffStepsMs: List<Long> = listOf(1_000L, 2_000L, 5_000L, 10_000L),
+        /** Max wait while the pool is [WarmSessionState.Connecting] before a cold connect. */
+        val claimAwaitTimeoutMs: Long = 10_000L,
     )
 
     /**
@@ -208,6 +213,7 @@ class WarmLiveSessionManager private constructor(
 
     init {
         require(config.warmIdleTimeoutMs > 0L) { "warmIdleTimeoutMs must be positive" }
+        require(config.claimAwaitTimeoutMs > 0L) { "claimAwaitTimeoutMs must be positive" }
         require(backoffStepsMs.isNotEmpty()) { "backoffStepsMs must not be empty" }
         require(backoffStepsMs.all { it > 0L }) { "backoffStepsMs must contain only positive delays" }
     }
@@ -292,6 +298,33 @@ class WarmLiveSessionManager private constructor(
             ),
         )
     }
+
+    /**
+     * Claims a ready session, or waits for an in-flight prewarm to reach Ready
+     * instead of opening a duplicate cold socket. Returns immediately on any
+     * non-[WarmSessionClaimMissReason.CONNECTING] miss.
+     */
+    suspend fun claimOrAwait(
+        profile: WarmSessionProfile,
+        timeoutMs: Long = config.claimAwaitTimeoutMs,
+    ): WarmSessionClaim =
+        withTimeoutOrNull(timeoutMs) {
+            while (true) {
+                when (val claim = claim(profile)) {
+                    is WarmSessionClaim.Hit -> return@withTimeoutOrNull claim
+                    is WarmSessionClaim.Miss ->
+                        when (claim.reason) {
+                            WarmSessionClaimMissReason.CONNECTING ->
+                                state.first { it !is WarmSessionState.Connecting }
+                            else -> return@withTimeoutOrNull claim
+                        }
+                }
+            }
+            @Suppress("UNREACHABLE_CODE")
+            null
+        } ?: WarmSessionClaim.Miss(
+            reason = WarmSessionClaimMissReason.CONNECTING,
+        )
 
     /**
      * Permanently stops this manager and closes every manager-owned session.

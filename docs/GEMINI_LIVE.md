@@ -159,7 +159,7 @@ races, main-thread contention, and additive timers.
   backoff (1/2/5/10 s), conservative 30 s warm idle timeout; a claimed session
   is never closed by losing eligibility.
 - Capture starts **immediately on the accepted tap**; cold-session PCM flows into
-  a bounded 150-frame **pre-ready buffer** and drains in strict order once the
+  a bounded 500-frame **pre-ready buffer** and drains in strict order once the
   session is ready (overflow fails with `gemini_connection_too_slow`).
   `DictationState.Listening` gains a `connecting` flag for the UI.
 
@@ -315,7 +315,7 @@ AudioRecord (16 kHz mono PCM16, blocking read, real-time pace)
   -> AudioCapture.chunks (bounded ReceiveChannel, cap 64)
   -> DictationCoordinator.streamAudio (one ordered sender coroutine)
        |-- if session ready:  sendAudio(chunk) directly (base64+JSON+queue on Dispatchers.IO)
-       `-- if still connecting: PreReadyAudioBuffer (150 frames ≈ 3 s) then drain in order
+       `-- if still connecting: PreReadyAudioBuffer (500 frames ≈ 10 s) then drain in order
   -> OkHttpGeminiLiveSession.sendAudio -> WebSocket
 ```
 
@@ -855,15 +855,17 @@ withTimeout(READY_TIMEOUT_MS) { ready.await() }
 
 #### 14.3 Warm-pool lifecycle (`WarmLiveSessionManager`)
 
-Eligibility-driven prewarm (focused non-secure editor, keyboard visible, mic +
-API key configured, no active dictation — `FlowRuntimeService.computeWarmEligibility`):
+Eligibility-driven prewarm (focused non-secure editor, mic +
+API key configured — `FlowRuntimeService.computeWarmEligibility`; the pool
+stays eligible during `Starting` and retryable `Error` so a Ready socket can
+be claimed before `Listening`):
 
 - States: `None -> Connecting -> Ready(session) -> Claimed -> Closing`, with
   `Backoff(retryMs)` between failed attempts.
 - **Reconnect backoff: 1 s, 2 s, 5 s, then 10 s** (`Config.backoffStepsMs`); the
   last step repeats (`getOrElse ... last()`), with `backoffAttempt` reset to 0
   on success.
-- **Idle timeout: 30 s** (`Config.warmIdleTimeoutMs`); when it fires, the warm
+- **Idle timeout: 180 s** (`Config.warmIdleTimeoutMs`, raised from 30 s in 1.0.8); when it fires, the warm
   session is closed and the pool returns to `None`. A `Claimed` session is never
   closed by the manager — it belongs to an active dictation.
 - `claim()` atomically takes a `Ready` session, cancels the idle timer, sets
@@ -1010,7 +1012,7 @@ noted, `retryAllowed = recoverable` was set explicitly.
 | `gemini_setup` | `awaitReady` 15 s timeout; `setupError.error.message`; top-level `error.message`; `onClosing`/`onClosed` before ready; coordinator fallback when `awaitReady` throws a non-`GeminiLiveException` | true | true | session: the server/timing detail; coordinator fallback: `"Could not reach Gemini. Check your network and API key."` |
 | `gemini_transport` | (a) `onFailure` — pong timeout, network drop (`t.message ?: "Connection failed"`); (b) `SessionEnd` in the coordinator → `"The Gemini session closed."`; (c) rejected activity boundary → `"Gemini rejected the activity boundary (<reason>)."` | true | (a)/(c) **true**, (b) **false** (default; the turn ended itself) | as above |
 | `gemini_no_transcript` | settlement with no usable value at the hard deadline | true | true | `"No transcript could be recognized. Try again."` |
-| `gemini_connection_too_slow` | `PreReadyAudioBuffer` overflow (150 frames ≈ 3 s while connecting) — overflow is never silently dropped | true | true | `"The Gemini connection is too slow. Try again."` |
+| `gemini_connection_too_slow` | `PreReadyAudioBuffer` overflow (500 frames ≈ 10 s while connecting) — overflow is never silently dropped; since 1.0.8 this is a last-resort backstop, not the primary connect timeout | true | true | `"The Gemini connection is too slow. Try again."` |
 | `runtime_no_api_key` | `keyProvider.provideKey()` returned null/empty in `resolveSession` or `createColdSession` | true | false | `"Add your Gemini API key in Settings first."` |
 | `runtime_mic_permission` | `RECORD_AUDIO` not granted at `startCapture` | true | false | `"Microphone permission was revoked."` |
 | `runtime_no_accessibility` | `sendInsertion` returned false (`a11yReply == null`, i.e. accessibility process not registered) | true | true | `"Could not reach the accessibility service."` |
@@ -1129,7 +1131,7 @@ only in `resolveSession` + pre-ready buffering):
    │
    │   streamAudio (one ordered sender):
    │        └─ sendAudio(chunk) ──► {"realtimeInput":{"audio":{"data":"<base64>","mimeType":"audio/pcm;rate=16000"}}}
-   │             (cold: PreReadyAudioBuffer 150 frames ≈ 3 s → drain in order → overflow = gemini_connection_too_slow)
+   │             (cold: PreReadyAudioBuffer 500 frames ≈ 10 s → drain in order → overflow = gemini_connection_too_slow)
    │                                                                            [FirstAudioQueued]
    │                                    ◄── binary frame (opcode 0x2) ── {"serverContent":{"inputTranscription":{"text":"<text>"},...}}
    │                                       parseServerMessage → ServerContent → GeminiEvent.TranscriptCandidates
