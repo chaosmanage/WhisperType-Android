@@ -4,6 +4,17 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] - 2026-08-27
+
+### Changed
+
+- **The smart final is the only dictation source (`runtime`)** — committed
+  `inputTranscription` segments are the only text ever inserted. Interim
+  partials (`interimInputTranscription`) are preview-only: they keep the quiet /
+  tail barriers open while the model is still transcribing, but they can never
+  settle or be inserted. If no final segment arrives, the session fails with a
+  retry instead of inserting a provisional partial.
+
 ## [1.0.6] - 2026-08-27
 
 ### Fixed
