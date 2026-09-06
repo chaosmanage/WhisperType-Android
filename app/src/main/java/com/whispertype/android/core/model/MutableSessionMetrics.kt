@@ -1018,6 +1018,8 @@ enum class SettlePath {
     ECHO_COMPLETE,
     ECHO_PARTIAL_RAW,
     RAW_ONLY,
+    /** Last revisable interim used because no final segment arrived before tail. */
+    PREVIEW_FALLBACK,
     ECHO_ONLY,
     NONE,
 }

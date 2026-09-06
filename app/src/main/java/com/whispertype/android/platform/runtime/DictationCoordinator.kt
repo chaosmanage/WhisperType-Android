@@ -206,7 +206,7 @@ class DictationCoordinator(
          *  replaces the 0.6.2 stack of echo-quiet (900 ms), echo-stall (2.5 s),
          *  source-missing grace (2 s) and hard deadline (20 s) barriers that
          *  dominated post-stop latency. */
-        val asrTailTimeoutMs: Long = 2_500,
+        val asrTailTimeoutMs: Long = 6_000,
         val returnToIdleMs: Long = 1_200,
         val captureShutdownTimeoutMs: Long = 1_500,
         /** Dispatcher for the blocking AudioRecord stop/release calls during
@@ -902,8 +902,15 @@ class DictationCoordinator(
         holder.settleJob?.cancel()
         holder.asrTailJob?.cancel()
         holder.metrics.recordSettlement(reason)
-        val raw = holder.accumulator.settledText()?.takeIf { it.isNotBlank() }
-        holder.metrics.settlePath = if (raw != null) SettlePath.RAW_ONLY else SettlePath.NONE
+        if (holder.asrTailElapsed) {
+            holder.metrics.usedHardDeadline = true
+        }
+        val raw = settlementRawText(holder)
+        holder.metrics.settlePath = when {
+            raw == null -> SettlePath.NONE
+            holder.accumulator.settledText()?.isNotBlank() == true -> SettlePath.RAW_ONLY
+            else -> SettlePath.PREVIEW_FALLBACK
+        }
         val candidate = raw?.let {
             ResultCandidate(raw = it, cleaned = null, language = holder.language)
         }
@@ -951,8 +958,17 @@ class DictationCoordinator(
         }
     }
 
+    /** Final committed text first; at the tail backstop, fall back to the last
+     *  revisable interim when the model never emitted a final segment. */
+    private fun settlementRawText(holder: ActiveLiveSession): String? {
+        holder.accumulator.settledText()?.takeIf { it.isNotBlank() }?.let { return it }
+        if (holder.asrTailElapsed) {
+            return holder.previewAccumulator.settledText()?.takeIf { it.isNotBlank() }
+        }
+        return null
+    }
+
     /**
-     * 0.10.0 Hinglish: there is no script repair stage. The transcribe model
      * handles code-mixing natively (a `hi-IN` language hint is sent in setup),
      * and whatever text it returns is inserted verbatim — including, at worst,
      * Devanagari, which is inserted as-is rather than hard-failing the session.

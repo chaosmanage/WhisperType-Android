@@ -496,10 +496,9 @@ class DictationCoordinatorTest {
     }
 
     @Test
-    fun `interims are never inserted, even at the tail backstop`() = runTest {
-        // 1.0.7 invariant: the smart final is the ONLY dictation source. When
-        // only interims arrive, the session fails rather than inserting a
-        // partial — the backstop cannot fall back to provisional text.
+    fun `interims fall back at the tail backstop when no final arrives`() = runTest {
+        // When the model streams only revisable partials, fail only after the
+        // tail backstop — then insert the last interim rather than erroring out.
         val host = FakeHost()
         val coordinator = coordinator(this, host)
         coordinator.start()
@@ -507,13 +506,16 @@ class DictationCoordinatorTest {
         coordinator.stop()
         runCurrent()
 
-        sendInterim(host, "so um we should uh meet on thursday for the like project review at ten")
-        advanceTimeBy(3_000)
+        val interim = "so um we should uh meet on thursday for the like project review at ten"
+        sendInterim(host, interim)
+        advanceTimeBy(6_000)
         runCurrent()
 
-        assertTrue(host.insertions.isEmpty(), "an interim must never be inserted")
-        val error = states(host).first { it is DictationState.Error } as DictationState.Error
-        assertEquals("gemini_no_transcript", error.failure.code)
+        assertEquals(1, host.insertions.size, "tail backstop must fall back to the last interim")
+        assertEquals(interim, host.insertions[0].second)
+        assertEquals(SettlePath.PREVIEW_FALLBACK, coordinator.activeMetrics()!!.settlePath)
+        coordinator.onInsertionResult(host.insertions.single().first, InsertionResult.Inserted)
+        advanceUntilIdle()
     }
 
     @Test
@@ -1461,7 +1463,7 @@ class DictationCoordinatorTest {
         coordinator.stop()
         runCurrent()
 
-        advanceTimeBy(2_499)
+        advanceTimeBy(5_999)
         assertTrue(states(host).none { it is DictationState.Error })
         advanceTimeBy(2)
         runCurrent()

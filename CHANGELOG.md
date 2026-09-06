@@ -4,6 +4,26 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.9] - 2026-09-06
+
+### Fixed
+
+- **Dictation (`runtime`)** — extend the post-stop transcription tail to 6 s
+  and, if Gemini never commits a final segment, insert the last revisable
+  interim instead of reporting `gemini_no_transcript`.
+
+### Changed
+
+- **Recording pill (`overlay`)** — flat resting line while silent; taller
+  animated bars when speaking; fixed 96dp waveform lane width.
+
+## [1.1.8] - 2026-09-06
+
+### Changed
+
+- **Recording pill (`overlay`)** — show a flat resting line while silent; animate
+  full-height bars only when voice is detected. Slightly taller waveform lane.
+
 ## [1.1.7] - 2026-09-05
 
 ### Fixed

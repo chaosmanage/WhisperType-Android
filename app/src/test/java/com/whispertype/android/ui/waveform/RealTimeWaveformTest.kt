@@ -15,6 +15,13 @@ class RealTimeWaveformTest {
     }
 
     @Test
+    fun `flat line draws at effective silence while listening`() {
+        assertTrue(shouldDrawFlatWaveform(0f))
+        assertTrue(shouldDrawFlatWaveform(WAVEFORM_SILENCE_THRESHOLD))
+        assertFalse(shouldDrawFlatWaveform(WAVEFORM_SILENCE_THRESHOLD + 0.001f))
+    }
+
+    @Test
     fun `phase animation starts above silence while listening`() {
         assertTrue(shouldAnimateWaveform(WAVEFORM_SILENCE_THRESHOLD + 0.001f, isListening = true))
     }

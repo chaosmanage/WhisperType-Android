@@ -60,7 +60,7 @@ import kotlinx.coroutines.delay
 
 /** Studio P1 waveform lane — fixed width; do not use Row weight (collapses to ~0). */
 private val PillWaveformWidth = 96.dp
-private val PillWaveformHeight = 44.dp
+private val PillWaveformHeight = 48.dp
 
 /**
  * Renders the persistent overlay surface for [uiState] and forwards user

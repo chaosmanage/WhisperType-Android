@@ -16,7 +16,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import kotlin.math.sin
-import kotlin.math.sqrt
 import kotlinx.coroutines.delay
 
 internal const val WAVEFORM_SILENCE_THRESHOLD = 0.005f
@@ -33,15 +32,18 @@ internal fun effectiveWaveformAmplitude(amplitude: Float): Float =
 internal fun shouldAnimateWaveform(amplitude: Float, isListening: Boolean): Boolean =
     isListening && effectiveWaveformAmplitude(amplitude) > 0f
 
+/** True when the pill should show the resting flat line instead of bars. */
+internal fun shouldDrawFlatWaveform(animatedAmplitude: Float): Boolean =
+    animatedAmplitude <= WAVEFORM_SILENCE_THRESHOLD
+
 private const val PHASE_TICK_MS = 50L
 private const val PHASE_CYCLE_MS = 550L
 private val FULL_TURN = (Math.PI * 2).toFloat()
 private val PHASE_STEP = FULL_TURN * PHASE_TICK_MS / PHASE_CYCLE_MS
 
 /**
- * Centered soundwave for the Studio hairline pill: mirrored bars around the
- * vertical midpoint, teal by default, with a longer amplitude tween for fluid
- * motion. Phase ticks stay at ~20 Hz to avoid logcat frame-rate spam.
+ * Centered soundwave for the Studio hairline pill: a flat resting line while
+ * silent, animated mirrored bars while speaking. Phase ticks stay at ~20 Hz.
  */
 @Composable
 fun RealTimeWaveform(
@@ -53,7 +55,7 @@ fun RealTimeWaveform(
     val targetAmplitude = effectiveWaveformAmplitude(amplitude)
     val animated by animateFloatAsState(
         targetValue = targetAmplitude,
-        animationSpec = tween(durationMillis = 160),
+        animationSpec = tween(durationMillis = 140),
         label = "waveformAmplitude",
     )
 
@@ -71,14 +73,25 @@ fun RealTimeWaveform(
     }
 
     Canvas(modifier = modifier) {
-        if (animated <= WAVEFORM_SILENCE_THRESHOLD && !isListening) return@Canvas
-
         val w = size.width
         val h = size.height
         val midY = h * 0.5f
-        val level = sqrt(animated.coerceIn(0f, 1f))
-        val idleFloor = if (isListening) 0.22f else 0f
-        val maxHalf = h * 0.48f * level.coerceAtLeast(idleFloor)
+        val insetX = 4.dp.toPx()
+
+        if (shouldDrawFlatWaveform(animated)) {
+            drawLine(
+                color = lineColor.copy(alpha = 0.9f),
+                start = Offset(insetX, midY),
+                end = Offset(w - insetX, midY),
+                strokeWidth = 2.dp.toPx(),
+                cap = StrokeCap.Round,
+            )
+            return@Canvas
+        }
+
+        val level = animated.coerceIn(0f, 1f)
+        // Use most of the lane height at full voice level.
+        val maxHalf = h * 0.49f * level
 
         val barCount = 32
         val step = w / barCount
@@ -90,7 +103,8 @@ fun RealTimeWaveform(
             val v2 = sin(phase * 0.65f + i * 1.1f)
             val v3 = sin(phase * 1.4f + i * 0.25f)
             val mix = abs((v1 + v2 + v3) / 3f)
-            val half = (0.22f + 0.78f * mix) * maxHalf
+            val half = mix * maxHalf
+            if (half <= 0.5f) continue
             drawLine(
                 color = lineColor,
                 start = Offset(x, midY - half),
