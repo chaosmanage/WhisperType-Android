@@ -7,28 +7,58 @@ import org.junit.Test
 
 class RealTimeWaveformTest {
 
+    private val laneHeightPx = 48f * 3f // ~48dp at mdpi scale for math checks
+
     @Test
     fun `phase animation stays stopped at effective silence`() {
         assertFalse(shouldAnimateWaveform(0f, isListening = true))
-        assertFalse(shouldAnimateWaveform(WAVEFORM_SILENCE_THRESHOLD, isListening = true))
-        assertEquals(0f, effectiveWaveformAmplitude(WAVEFORM_SILENCE_THRESHOLD), 0f)
+        assertFalse(shouldAnimateWaveform(WAVEFORM_SPEECH_GATE, isListening = true))
+        assertEquals(0f, effectiveWaveformAmplitude(WAVEFORM_SPEECH_GATE), 0f)
     }
 
     @Test
-    fun `flat line draws at effective silence while listening`() {
+    fun `flat line draws at and below speech gate`() {
         assertTrue(shouldDrawFlatWaveform(0f))
-        assertTrue(shouldDrawFlatWaveform(WAVEFORM_SILENCE_THRESHOLD))
-        assertFalse(shouldDrawFlatWaveform(WAVEFORM_SILENCE_THRESHOLD + 0.001f))
+        assertTrue(shouldDrawFlatWaveform(WAVEFORM_SPEECH_GATE))
+        assertFalse(shouldDrawFlatWaveform(WAVEFORM_SPEECH_GATE + 0.001f))
     }
 
     @Test
-    fun `phase animation starts above silence while listening`() {
-        assertTrue(shouldAnimateWaveform(WAVEFORM_SILENCE_THRESHOLD + 0.001f, isListening = true))
+    fun `phase animation starts above speech gate while listening`() {
+        assertTrue(shouldAnimateWaveform(WAVEFORM_SPEECH_GATE + 0.001f, isListening = true))
     }
 
     @Test
     fun `phase animation stays stopped when not listening`() {
         assertFalse(shouldAnimateWaveform(1f, isListening = false))
+    }
+
+    @Test
+    fun `typical speech RMS boosts to full display level`() {
+        assertEquals(0f, waveformDisplayLevel(0f), 0f)
+        assertEquals(0f, waveformDisplayLevel(0.02f), 0f)
+        assertEquals(1f, waveformDisplayLevel(0.05f), 0f)
+        assertEquals(1f, waveformDisplayLevel(0.15f), 0f)
+        assertEquals(1f, waveformDisplayLevel(1f), 0f)
+    }
+
+    @Test
+    fun `typical speech bars occupy at least 30 percent of lane height`() {
+        val display = waveformDisplayLevel(0.05f)
+        val minHalf = waveformBarHalfPx(display, mix = 0f, laneHeightPx)
+        val minBarHeight = minHalf * 2f
+        assertTrue(
+            "quietest bar should be visible",
+            minBarHeight >= laneHeightPx * 0.30f,
+        )
+    }
+
+    @Test
+    fun `loudest bars stay within lane without clipping past pill`() {
+        val display = waveformDisplayLevel(1f)
+        val maxHalf = waveformBarHalfPx(display, mix = 1f, laneHeightPx)
+        val maxBarHeight = maxHalf * 2f
+        assertTrue(maxBarHeight <= laneHeightPx * 0.96f)
     }
 
     @Test
