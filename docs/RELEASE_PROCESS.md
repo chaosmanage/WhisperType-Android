@@ -12,8 +12,8 @@ defaultConfig {
     applicationId = "com.whispertype.android"
     minSdk = 33
     targetSdk = 36
-    versionCode = 53
-    versionName = "1.0.8"
+    versionCode = 66
+    versionName = "1.2.0"
 }
 ```
 
