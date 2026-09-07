@@ -146,6 +146,64 @@ class SettingsRepositoryTest {
     }
 
     @Test
+    fun `updateDictionaryEntry replaces rule by original match`() = runTest {
+        val repo = newRepository()
+
+        repo.addDictionaryEntry(DictionaryEntry("kuber net", "Kubernetes"))
+        repo.updateDictionaryEntry("kuber net", DictionaryEntry("kuber net ease", "Kubernetes"))
+
+        assertEquals(
+            listOf(DictionaryEntry("kuber net ease", "Kubernetes")),
+            repo.dictionary.first(),
+        )
+    }
+
+    @Test
+    fun `updateDictionaryEntry deduplicates when updated match exists`() = runTest {
+        val repo = newRepository()
+
+        repo.addDictionaryEntry(DictionaryEntry("kuber net", "Kubernetes"))
+        repo.addDictionaryEntry(DictionaryEntry("k8s", "Kubernetes"))
+        repo.updateDictionaryEntry("kuber net", DictionaryEntry("k8s", "Kubernetes Platform"))
+
+        assertEquals(
+            listOf(DictionaryEntry("k8s", "Kubernetes Platform")),
+            repo.dictionary.first(),
+        )
+    }
+
+    @Test
+    fun `adding duplicate source matches case-insensitively`() = runTest {
+        val repo = newRepository()
+
+        repo.addDictionaryEntry(DictionaryEntry("Kuber Net", "Kubernetes"))
+        repo.addDictionaryEntry(DictionaryEntry("kuber net", "K8s"))
+
+        assertEquals(
+            listOf(DictionaryEntry("kuber net", "K8s")),
+            repo.dictionary.first(),
+        )
+    }
+
+    @Test
+    fun `legacy blank replacement json round-trips without mutating to match`() = runTest {
+        val dataStore =
+            PreferenceDataStoreFactory.create(
+                produceFile = { File(tmp.root, "legacy-blank-dictionary.preferences_pb") },
+            )
+        val repo = SettingsRepository(dataStore)
+
+        dataStore.edit {
+            it[stringPreferencesKey("dictionary")] = "{\"entries\":[{\"match\":\"test\",\"replace\":\"\"}]}"
+        }
+
+        val entries = repo.dictionary.first()
+        assertEquals(1, entries.size)
+        assertEquals("test", entries[0].match)
+        assertEquals("", entries[0].replace)
+    }
+
+    @Test
     fun `bubble position defaults to null`() = runTest {
         val repo = newRepository()
 

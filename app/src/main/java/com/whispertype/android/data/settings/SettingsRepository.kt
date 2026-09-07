@@ -153,14 +153,40 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
     suspend fun addDictionaryEntry(entry: DictionaryEntry) {
         dataStore.edit { prefs ->
             val current = decodeDictionary(prefs[Keys.dictionary])
-            prefs[Keys.dictionary] = encodeDictionary(current.filterNot { it.match == entry.match } + entry)
+            prefs[Keys.dictionary] = encodeDictionary(
+                current.filterNot { it.match.equals(entry.match, ignoreCase = true) } + entry,
+            )
+        }
+    }
+
+    suspend fun updateDictionaryEntry(originalMatch: String, newEntry: DictionaryEntry) {
+        dataStore.edit { prefs ->
+            val current = decodeDictionary(prefs[Keys.dictionary])
+            val index = current.indexOfFirst { it.match.equals(originalMatch, ignoreCase = true) }
+            if (index >= 0) {
+                val mutable = current.filterIndexed { i, it ->
+                    i == index || !it.match.equals(newEntry.match, ignoreCase = true)
+                }.toMutableList()
+                val targetIndex = mutable.indexOfFirst { it.match.equals(originalMatch, ignoreCase = true) }
+                if (targetIndex >= 0) {
+                    mutable[targetIndex] = newEntry
+                } else {
+                    mutable.add(newEntry)
+                }
+                prefs[Keys.dictionary] = encodeDictionary(mutable)
+            } else {
+                val updated = current.filterNot { it.match.equals(newEntry.match, ignoreCase = true) } + newEntry
+                prefs[Keys.dictionary] = encodeDictionary(updated)
+            }
         }
     }
 
     suspend fun removeDictionaryEntry(match: String) {
         dataStore.edit { prefs ->
             val current = decodeDictionary(prefs[Keys.dictionary])
-            prefs[Keys.dictionary] = encodeDictionary(current.filterNot { it.match == match })
+            prefs[Keys.dictionary] = encodeDictionary(
+                current.filterNot { it.match.equals(match, ignoreCase = true) },
+            )
         }
     }
 
