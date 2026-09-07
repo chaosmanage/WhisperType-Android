@@ -58,7 +58,7 @@ Layer rules:
 ## Conventions
 
 - **Version bump in the same commit** as any behavior change: `versionCode` +1 and
-  `versionName` bump in `app/build.gradle.kts` (currently 1.2.0 / 66). Add a
+  `versionName` bump in `app/build.gradle.kts` (currently 1.2.1 / 67). Add a
   `CHANGELOG.md` entry for user-visible changes. The README version line lags the real
   version — trust `app/build.gradle.kts`.
 - **Every push to the test device carries a fresh build number** — bump

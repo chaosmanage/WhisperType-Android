@@ -4,6 +4,13 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-09-07
+
+### Changed
+
+- **Default speech mode (`settings`)** — default out-of-the-box speech mode is now English (`LanguageMode.ENGLISH`), with fallback for unknown or corrupted stored values defaulting to English.
+- **Smaller bubble sizing (`overlay`, `settings`)** — allowed the floating mic bubble to scale down to 12 dp (expanded range from 24–72 dp to 12–72 dp). Removed the hardcoded 48 dp floor in the overlay layout and positioning calculation, enabling true compact bubble sizes on screen. The settings slider now indicates the exact dp dimension alongside the size label (e.g. "Tiny · 12 dp").
+
 ## [1.2.0] - 2026-09-07
 
 ### Added

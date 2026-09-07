@@ -213,5 +213,5 @@ scripts/        build, install, and diagnostics helper scripts
 
 ## Version
 
-Current version **1.2.0** (versionCode 66), developed on the `main` branch.
+Current version **1.2.1** (versionCode 67), developed on the `main` branch.
 See `CHANGELOG.md` for the full release history.

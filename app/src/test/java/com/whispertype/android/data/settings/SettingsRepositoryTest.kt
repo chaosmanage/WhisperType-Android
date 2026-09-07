@@ -36,11 +36,11 @@ class SettingsRepositoryTest {
     }
 
     @Test
-    fun `defaults are Hinglish - history on - 30 day retention - app on - onboarding pending`() =
+    fun `defaults are English - history on - 30 day retention - app on - onboarding pending`() =
         runTest {
             val repo = newRepository()
 
-            assertEquals(LanguageMode.HINGLISH, repo.speechMode.first())
+            assertEquals(LanguageMode.ENGLISH, repo.speechMode.first())
             assertTrue(repo.historyEnabled.first())
             assertEquals(SettingsRepository.DEFAULT_RETENTION_DAYS, repo.historyRetentionDays.first())
             assertTrue(repo.appEnabled.first())
@@ -72,19 +72,19 @@ class SettingsRepositoryTest {
     }
 
     @Test
-    fun `unknown stored speech mode falls back to Hinglish`() = runTest {
+    fun `unknown stored speech mode falls back to English`() = runTest {
         val dataStore =
             PreferenceDataStoreFactory.create(
                 produceFile = { File(tmp.root, "corrupt-mode.preferences_pb") },
             )
         val repo = SettingsRepository(dataStore)
 
-        repo.setSpeechMode(LanguageMode.HINGLISH)
+        repo.setSpeechMode(LanguageMode.ENGLISH)
         // Write an unknown value directly to simulate a store that predates
         // removing/modifying a mode and would otherwise be a parse risk.
         dataStore.edit { it[stringPreferencesKey("speech_mode")] = "KANNADA" }
 
-        assertEquals(LanguageMode.HINGLISH, repo.speechMode.first())
+        assertEquals(LanguageMode.ENGLISH, repo.speechMode.first())
     }
 
     @Test

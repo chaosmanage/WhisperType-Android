@@ -137,7 +137,7 @@ Open:
 
 Choose:
 
-- `English`
+- `English` (default)
 - `Hinglish`
 
 Hinglish supports natural English/Hindi code-switching; the transcribe model's
@@ -152,7 +152,7 @@ Open:
 
 Available controls:
 
-- Bubble size (24-72 dp).
+- Bubble size (12-72 dp).
 - Bubble opacity (10-100%).
 - `Mini dot` — shrink the bubble to a small dot when idle (the dot still starts dictation).
 - `Turn to dot after` — idle seconds before auto-minimizing (1-15 s, default 3 s).

@@ -440,7 +440,7 @@ private fun BubblePage(settings: SettingsRepository, onBack: () -> Unit) {
         SettingsGroupCard {
             StudioSliderRow(
                 title = stringResource(R.string.settings_bubble_size_friendly),
-                description = bubbleSizeLabel(bubbleSizeDp),
+                description = "${bubbleSizeLabel(bubbleSizeDp)} · $bubbleSizeDp dp",
                 value = bubbleSizeDp.toFloat(),
                 range = BUBBLE_SIZE_RANGE_DP_F,
                 onValueChange = { scope.launch { settings.setBubbleSizeDp(it.roundToInt()) } },
@@ -600,8 +600,10 @@ private val AUTO_STOP_OPTIONS: List<Int> = listOf(15, 30, 60, 120, 300)
 private val RETENTION_RANGE_DAYS_F: ClosedFloatingPointRange<Float> = 7f..90f
 
 private fun bubbleSizeLabel(dp: Int): String = when {
-    dp <= 30 -> "Small"
-    dp <= 44 -> "Medium"
+    dp <= 16 -> "Tiny"
+    dp <= 24 -> "Extra small"
+    dp <= 34 -> "Small"
+    dp <= 48 -> "Medium"
     else -> "Large"
 }
 

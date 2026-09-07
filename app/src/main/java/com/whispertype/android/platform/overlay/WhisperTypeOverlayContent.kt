@@ -132,8 +132,7 @@ private fun IdleBubble(
             minimized = true
         }
     }
-    val touchMin = with(LocalDensity.current) { 48.dp }
-    val bubbleSize = with(LocalDensity.current) { appearance.bubbleSizeDp.dp }
+    val bubbleSize = appearance.bubbleSizeDp.dp
 
     Box(
         modifier = Modifier.pointerInput(onDragBubble) {
@@ -150,11 +149,10 @@ private fun IdleBubble(
         contentAlignment = Alignment.Center,
     ) {
         if (minimized) {
-            // Mini dot: tiny visual (10% of the bubble) with a >=48dp touch target.
+            // Mini dot: tiny visual proportional to the bubble size.
             Surface(
                 onClick = { onIntent(OverlayIntent.START_DICTATION) },
                 modifier = Modifier
-                    .sizeIn(minWidth = touchMin, minHeight = touchMin)
                     .size(bubbleSize)
                     .alpha(appearance.opacity)
                     .testTag(stringResource(R.string.test_tag_dot))
@@ -167,7 +165,7 @@ private fun IdleBubble(
                     Surface(
                         shape = SquircleShape,
                         color = com.whispertype.android.ui.theme.BrandColors.Teal,
-                        modifier = Modifier.size(12.dp),
+                        modifier = Modifier.size((bubbleSize * 0.5f).coerceIn(6.dp, 12.dp)),
                     ) {}
                 }
             }
@@ -176,7 +174,6 @@ private fun IdleBubble(
             Surface(
                 onClick = { onIntent(OverlayIntent.START_DICTATION) },
                 modifier = Modifier
-                    .sizeIn(minWidth = touchMin, minHeight = touchMin)
                     .size(bubbleSize)
                     .alpha(if (pressed) appearance.opacity * 0.75f else appearance.opacity)
                     .testTag(stringResource(R.string.test_tag_bubble))

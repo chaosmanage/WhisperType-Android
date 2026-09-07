@@ -58,7 +58,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
     override val speechMode: Flow<LanguageMode> =
         dataStore.data.map { prefs ->
             val stored = prefs[Keys.speechMode]
-            LanguageMode.entries.firstOrNull { it.name == stored } ?: LanguageMode.HINGLISH
+            LanguageMode.entries.firstOrNull { it.name == stored } ?: DEFAULT_SPEECH_MODE
         }
 
     override val historyEnabled: Flow<Boolean> =
@@ -273,10 +273,13 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
         /** Hotkey default: no modifier required. */
         const val DEFAULT_HOTKEY_MODIFIERS = 0
+
+        /** Default speech transcription mode is English. */
+        val DEFAULT_SPEECH_MODE = LanguageMode.ENGLISH
         const val DEFAULT_RETENTION_DAYS = 30
         const val DEFAULT_AUTO_STOP_SECONDS = 60
         const val DEFAULT_BUBBLE_SIZE_DP = 38
-        const val MIN_BUBBLE_SIZE_DP = 24
+        const val MIN_BUBBLE_SIZE_DP = 12
         const val MAX_BUBBLE_SIZE_DP = 72
         const val DEFAULT_BUBBLE_OPACITY_PERCENT = 80
         const val MIN_BUBBLE_OPACITY_PERCENT = 10
