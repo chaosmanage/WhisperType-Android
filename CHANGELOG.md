@@ -4,6 +4,16 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.11] - 2026-09-07
+
+### Added
+
+- **Home dashboard redesign (`ui`)** — new visual hierarchy featuring a Weekly Hero Card with 7 daily rounded vertical bars aligned to a common baseline, an adaptive 2-column or stacked 1-column At-a-Glance metric grid (Words / min, Words / session), a compact content-height Recent dictation card with direct history link, and an action-oriented setup banner.
+- **Custom dictionary rule editor (`dictionary`)** — full modal bottom sheet for creating and editing rules with live replacement preview, outer-whitespace trimming while preserving internal spaces and casing, multiword support, and case-insensitive identical text detection with explicit confirmation.
+- **Dictionary entry update & legacy safety (`core`)** — explicit `updateDictionaryEntry` API with deduplication, and safe no-op handling for legacy blank replacement entries so matched text is never accidentally deleted.
+- **Stateful foreground notification (`runtime`)** — state-specific copy for idle ("WhisperType bubble is ready"), recording ("Recording dictation" with active Stop and Cancel actions wired to `DictationCoordinator`), and finishing ("Finishing dictation"). Prompt FGS type demotion back to `specialUse` as soon as microphone capture ends.
+- **Non-blocking notifications (`platform`)** — notification permission is optional: declining it never blocks onboarding, does not trigger a Home banner, and does not fail system diagnostics. Added a direct Settings row opening Android notification settings with Task Manager explanatory copy.
+
 ## [1.1.10] - 2026-09-06
 
 ### Fixed
