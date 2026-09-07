@@ -126,7 +126,6 @@ class MainActivity : ComponentActivity() {
                         overlayGranted = overlayGranted,
                         keyProvider = keyProvider,
                         hasMic = ::hasMicPermission,
-                        hasNotifications = ::hasNotificationPermission,
                         hasAccessibility = ::isAccessibilityEnabled,
                         onRequestOverlay = ::requestOverlayPermission,
                         onRequestMicNotifications = {

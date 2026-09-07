@@ -178,8 +178,8 @@ fun WeeklyBarsView(
 fun GlanceMetricCard(
     value: String,
     label: String,
-    minHeight: Dp = 88.dp,
     modifier: Modifier = Modifier,
+    minHeight: Dp = 88.dp,
 ) {
     StudioCard(
         radius = StudioLayout.RadiusCard,

@@ -38,9 +38,9 @@ fun HomeScreen(
     entries: List<HistoryRepository.HistoryEntry>,
     setupBannerReasons: List<String>,
     onSetupBannerTap: () -> Unit,
+    modifier: Modifier = Modifier,
     onOpenHistory: () -> Unit = {},
     onEnableHistory: () -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     val now = remember { System.currentTimeMillis() }
     val greeting = rememberHomeGreeting(now)

@@ -1,6 +1,9 @@
 package com.whispertype.android.ui.settings
 
+import android.content.Intent
 import android.media.AudioManager
+import android.net.Uri
+import android.provider.Settings as AndroidSettings
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
@@ -112,6 +115,7 @@ private fun SettingsMainScreen(
     onOpen: (SettingsPage) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val appEnabled by settings.appEnabled.collectAsStateWithLifecycle(initialValue = true)
     val speechMode by settings.speechMode.collectAsStateWithLifecycle(initialValue = LanguageMode.ENGLISH)
     val autoStopSeconds by settings.autoStopSeconds
@@ -255,6 +259,24 @@ private fun SettingsMainScreen(
                     stringResource(R.string.settings_system_needs_attention)
                 },
                 onClick = { onOpen(SettingsPage.System) },
+            )
+            SettingsDivider()
+            SettingsNavRow(
+                title = stringResource(R.string.settings_notifications_row),
+                subtitle = stringResource(R.string.settings_notifications_row_desc),
+                onClick = {
+                    try {
+                        val intent = Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                            putExtra(AndroidSettings.EXTRA_APP_PACKAGE, context.packageName)
+                        }
+                        context.startActivity(intent)
+                    } catch (_: Throwable) {
+                        val fallback = Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", context.packageName, null)
+                        }
+                        context.startActivity(fallback)
+                    }
+                },
             )
             SettingsDivider()
             SettingsNavRow(

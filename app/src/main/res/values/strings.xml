@@ -240,7 +240,7 @@
     <string name="dictionary_clear_confirm_title">Clear all dictionary rules?</string>
     <string name="dictionary_clear_confirm_action">Clear</string>
     <string name="settings_notifications_row">Notifications</string>
-    <string name="settings_notifications_row_desc">Status &amp; alerts · Android may show an active service in Task Manager even when silent</string>
+    <string name="settings_notifications_row_desc">If notifications are turned off, Android may still show an active foreground service in Task Manager.</string>
     <string name="settings_bubble_reset">Reset bubble position</string>
     <string name="settings_bubble_reset_desc">Return the mic bubble to its default position.</string>
     <string name="settings_section_general">General</string>
@@ -317,7 +317,7 @@
     <string name="onboard_continue">Continue</string>
     <string name="onboard_skip_for_now">Skip for now</string>
     <string name="onboard_mic_title">Microphone, only while you speak</string>
-    <string name="onboard_mic_body">We also show a recording notification so you always know the mic is on. Neither runs in the background when you are idle.</string>
+    <string name="onboard_mic_body">WhisperType shows a background status notification so Android keeps the bubble running and lets you stop dictation from the shade.</string>
     <string name="onboard_allow_mic">Allow mic and notifications</string>
     <string name="onboard_a11y_why_title">Find the field. Put the words in.</string>
     <string name="onboard_a11y_why_body">Accessibility is how WhisperType sees the cursor and inserts text. It does not scrape the rest of your screen, and it is off in password fields.</string>
