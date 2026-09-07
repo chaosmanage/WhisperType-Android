@@ -226,6 +226,7 @@ class MainActivity : ComponentActivity() {
         onOpenAppInfo: () -> Unit,
     ) {
         var selectedTab by remember { mutableIntStateOf(0) }
+        val scope = rememberCoroutineScope()
         var openSystemPage by remember { mutableStateOf(false) }
         var settingsScrollToGemini by remember { mutableStateOf(false) }
         val historyEntries by historyRepository.events().collectAsState(initial = emptyList())
@@ -360,6 +361,8 @@ class MainActivity : ComponentActivity() {
                             openSystemPage = true
                             selectedTab = 3
                         },
+                        onOpenHistory = { selectedTab = 1 },
+                        onEnableHistory = { scope.launch { settings.setHistoryEnabled(true) } },
                     )
                 }
             }
