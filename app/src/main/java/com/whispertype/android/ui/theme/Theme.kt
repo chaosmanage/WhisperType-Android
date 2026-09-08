@@ -41,7 +41,7 @@ object BrandColors {
     val TealLight = Color(0xFFA7F0E2)
 }
 
-/** Studio tokens from docs/ui-redesign-proposals.html `.lang-studio`. */
+/** Studio theme color palette. */
 object StudioColors {
     val Background = Color(0xFF10100E)
     val Surface = Color(0xFF1A1A16)
@@ -215,7 +215,7 @@ object StudioType {
     )
 }
 
-/** Layout metrics locked in HOME_DICTIONARY_NOTIFICATION_REDESIGN_PLAN.md */
+/** Studio layout spacing, radii, and gutter metrics. */
 object StudioLayout {
     val GutterHorizontal = 20.dp
     val GutterBottom = 24.dp

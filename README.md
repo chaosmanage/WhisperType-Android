@@ -142,7 +142,6 @@ restrictions, and the threat model — is in `docs/SECURITY_AND_PRIVACY.md`.
 | Troubleshooting | `docs/TROUBLESHOOTING.md` |
 | Contributing (branching, commits, privacy rules) | `docs/CONTRIBUTING.md` |
 | Push the build to a phone over wireless ADB | `docs/PUSH_TO_PHONE_VIA_ADB.md` |
-| Product requirements (historical reference) | `PRD/WhisperType-Android-PRD.md` |
 | Release history | `CHANGELOG.md` |
 
 ---
@@ -205,7 +204,6 @@ app/src/main/java/com/whispertype/android/
                 waveform
 app/src/test/   JVM unit tests (device-free)
 docs/           documentation hub
-PRD/            product requirements (historical)
 scripts/        build, install, and diagnostics helper scripts
 ```
 
@@ -213,5 +211,5 @@ scripts/        build, install, and diagnostics helper scripts
 
 ## Version
 
-Current version **1.2.1** (versionCode 67), developed on the `main` branch.
+Current version **1.2.3** (versionCode 69), developed on the `main` branch.
 See `CHANGELOG.md` for the full release history.

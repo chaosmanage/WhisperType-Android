@@ -36,3 +36,7 @@ fixtures/*.txt
 
 # Playwright MCP session artifacts
 .playwright-mcp/
+
+# OpenCode session and goal artifacts
+.opencode/
+
