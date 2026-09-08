@@ -41,6 +41,7 @@ import com.whispertype.android.core.model.MutableSessionMetrics
 import com.whispertype.android.core.model.OverlayIntent
 import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.TargetEligibility
+import com.whispertype.android.core.model.TranscriptionMode
 import com.whispertype.android.core.model.WarmClaimResult
 import com.whispertype.android.data.history.EncryptedHistoryRepository
 import com.whispertype.android.data.history.HistoryRepository
@@ -162,6 +163,9 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
     private var cachedSpeechMode: LanguageMode = LanguageMode.ENGLISH
 
     @Volatile
+    private var cachedTranscriptionMode: TranscriptionMode = SettingsRepository.DEFAULT_TRANSCRIPTION_MODE
+
+    @Volatile
     private var cachedHistoryEnabled: Boolean = false
 
     @Volatile
@@ -277,6 +281,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         // Collect the runtime settings snapshot eagerly (Release D2) so the tap
         // path reads in-memory values instead of blocking on DataStore.
         scope.launch { settings.speechMode.collect { cachedSpeechMode = it } }
+        scope.launch { settings.transcriptionMode.collect { cachedTranscriptionMode = it } }
         scope.launch { settings.historyEnabled.collect { cachedHistoryEnabled = it } }
         scope.launch { settings.historyRetentionDays.collect { cachedHistoryRetentionDays = it } }
         scope.launch { settings.autoStopSeconds.collect { cachedAutoStopSeconds = it } }
@@ -441,14 +446,15 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                 model = model,
                 apiVersion = profile.apiVersion,
                 language = language,
+                transcriptionMode = profile.transcriptionMode,
                 transcriptionLanguageCode = transcriptionLanguageCode(language),
                 automaticActivityDetectionDisabled = profile.automaticActivityDetectionDisabled,
                 activityHandlingNoInterruption = profile.activityHandlingNoInterruption,
                 inputAudioTranscription = profile.inputAudioTranscription,
                 // Release B production protocol: manual activity signaling
                 // (automaticActivityDetection disabled by default) and no text
-                // prime. Text shaping runs server-side in the transcribe model's
-                // `smart` mode; the language hint biases code-mixing.
+                // prime. Text shaping runs server-side according to the selected
+                // transcriptionMode; the language hint biases code-mixing.
             ),
             client = sharedOkHttpClient,
             metrics = metrics,
@@ -480,6 +486,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
                 model = profile.model,
                 apiVersion = profile.apiVersion,
                 language = profile.language,
+                transcriptionMode = profile.transcriptionMode,
                 transcriptionLanguageCode = transcriptionLanguageCode(profile.language),
                 automaticActivityDetectionDisabled = profile.automaticActivityDetectionDisabled,
                 activityHandlingNoInterruption = profile.activityHandlingNoInterruption,
@@ -496,6 +503,7 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
             model = GeminiSessionFactory.LIVE_MODEL,
             apiVersion = GeminiSessionConfig.DEFAULT_API_VERSION,
             language = language,
+            transcriptionMode = cachedTranscriptionMode.wireValue,
             automaticActivityDetectionDisabled = true,
             activityHandlingNoInterruption = cachedSegmentAtSilence,
             inputAudioTranscription = true,

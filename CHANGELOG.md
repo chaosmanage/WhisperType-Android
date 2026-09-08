@@ -4,6 +4,17 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-09-08
+
+### Added
+
+- **Transcription mode setting (`settings`, `runtime`, `gemini`)** — added a new setting under Dictation allowing users to choose between **Verbatim** and **Smart** transcription modes for Gemini Live (`gemini-3.5-transcribe-live`), defaulting to **Verbatim**. Includes clear in-app explanations for both modes: Verbatim captures speech literally with filler words and repetitions preserved, while Smart performs server-side shaping (disfluency removal, self-corrections, and structured punctuation/formatting). Session configuration and warm pool profiles now propagate the selected mode dynamically.
+- **GitHub release update checker (`updates`, `ui`, `notifications`)** — added automated checking against GitHub releases API (`api.github.com/repos/chaosmanage/WhisperType-Android/releases/latest`). Includes:
+  - Background update check on app startup with semantic version comparison (`vX.Y.Z`).
+  - System notification when a newer release is published, deep-linking directly to the release APK download URL to auto-trigger download in the browser.
+  - Home screen update banner with release version and one-tap "Download" action.
+  - "Check for updates" row in General settings with live check status, showing "WhisperType is up to date" or launching direct APK download if a new build is found.
+
 ## [1.2.1] - 2026-09-07
 
 ### Changed

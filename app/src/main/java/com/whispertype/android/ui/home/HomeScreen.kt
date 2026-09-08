@@ -39,6 +39,8 @@ fun HomeScreen(
     setupBannerReasons: List<String>,
     onSetupBannerTap: () -> Unit,
     modifier: Modifier = Modifier,
+    updateRelease: com.whispertype.android.core.updates.AppReleaseInfo? = null,
+    onDownloadUpdate: (String) -> Unit = {},
     onOpenHistory: () -> Unit = {},
     onEnableHistory: () -> Unit = {},
 ) {
@@ -62,6 +64,14 @@ fun HomeScreen(
             Spacer(Modifier.height(2.dp))
             Text(text = greeting, style = StudioType.greeting)
             Spacer(Modifier.height(StudioLayout.SpacingSection))
+
+            if (updateRelease != null && updateRelease.isNewerThanCurrent) {
+                UpdateBanner(
+                    versionName = updateRelease.tagName,
+                    onClick = { onDownloadUpdate(updateRelease.downloadUrl) },
+                )
+                Spacer(Modifier.height(StudioLayout.SpacingRelated))
+            }
 
             if (setupBannerReasons.isNotEmpty()) {
                 SetupBanner(

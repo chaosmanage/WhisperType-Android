@@ -132,10 +132,8 @@ superseded by a later release) so the tag list matches the release list.
 
    `https://github.com/<owner>/<repo>/releases/download/<tag>/app-release.apk`
 
-   The repository is private, so the link only works for signed-in
-   collaborators; anonymous requests (browser page and REST API) return `404`.
-   The authenticated GitHub API is the ground truth for whether the release and
-   asset exist.
+   The repository is public, so the link is accessible directly for automatic
+   and browser downloads without requiring authentication.
 
 4. **Verify the upload** — GitHub records the SHA-256 of every uploaded asset.
    Compare it against the local build (and the checksum from the Checksum

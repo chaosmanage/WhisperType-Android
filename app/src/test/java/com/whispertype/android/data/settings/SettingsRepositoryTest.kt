@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.whispertype.android.core.dictionary.DictionaryEntry
 import com.whispertype.android.core.model.AudioSourcePreference
 import com.whispertype.android.core.model.LanguageMode
+import com.whispertype.android.core.model.TranscriptionMode
 import java.io.File
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -41,6 +42,7 @@ class SettingsRepositoryTest {
             val repo = newRepository()
 
             assertEquals(LanguageMode.ENGLISH, repo.speechMode.first())
+            assertEquals(TranscriptionMode.VERBATIM, repo.transcriptionMode.first())
             assertTrue(repo.historyEnabled.first())
             assertEquals(SettingsRepository.DEFAULT_RETENTION_DAYS, repo.historyRetentionDays.first())
             assertTrue(repo.appEnabled.first())
@@ -59,12 +61,14 @@ class SettingsRepositoryTest {
         val repo = newRepository()
 
         repo.setSpeechMode(LanguageMode.HINGLISH)
+        repo.setTranscriptionMode(TranscriptionMode.SMART)
         repo.setHistoryEnabled(true)
         repo.setHistoryRetentionDays(7)
         repo.setAppEnabled(false)
         repo.setOnboardingCompleted(true)
 
         assertEquals(LanguageMode.HINGLISH, repo.speechMode.first())
+        assertEquals(TranscriptionMode.SMART, repo.transcriptionMode.first())
         assertTrue(repo.historyEnabled.first())
         assertEquals(7, repo.historyRetentionDays.first())
         assertFalse(repo.appEnabled.first())
@@ -85,6 +89,33 @@ class SettingsRepositoryTest {
         dataStore.edit { it[stringPreferencesKey("speech_mode")] = "KANNADA" }
 
         assertEquals(LanguageMode.ENGLISH, repo.speechMode.first())
+    }
+
+    @Test
+    fun `unknown stored transcription mode falls back to Verbatim`() = runTest {
+        val dataStore =
+            PreferenceDataStoreFactory.create(
+                produceFile = { File(tmp.root, "corrupt-transcription-mode.preferences_pb") },
+            )
+        val repo = SettingsRepository(dataStore)
+
+        repo.setTranscriptionMode(TranscriptionMode.SMART)
+        dataStore.edit { it[stringPreferencesKey("transcription_mode")] = "UNKNOWN_MODE" }
+
+        assertEquals(TranscriptionMode.VERBATIM, repo.transcriptionMode.first())
+    }
+
+    @Test
+    fun `transcription mode setter round-trips`() = runTest {
+        val repo = newRepository()
+
+        assertEquals(TranscriptionMode.VERBATIM, repo.transcriptionMode.first())
+
+        repo.setTranscriptionMode(TranscriptionMode.SMART)
+        assertEquals(TranscriptionMode.SMART, repo.transcriptionMode.first())
+
+        repo.setTranscriptionMode(TranscriptionMode.VERBATIM)
+        assertEquals(TranscriptionMode.VERBATIM, repo.transcriptionMode.first())
     }
 
     @Test

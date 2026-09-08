@@ -74,18 +74,18 @@ class GeminiLiveWireTest {
     }
 
     @Test
-    fun `buildSetup sends the smart transcription mode by default`() {
+    fun `buildSetup sends the verbatim transcription mode by default`() {
         val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(config)).jsonObject
         val transcription = root["setup"]!!.jsonObject["inputAudioTranscription"]!!.jsonObject
-        assertEquals("smart", transcription["mode"]!!.jsonPrimitive.content)
+        assertEquals("verbatim", transcription["mode"]!!.jsonPrimitive.content)
     }
 
     @Test
     fun `buildSetup sends the configured transcription mode`() {
-        val verbatim = GeminiSessionConfig(model = "m", transcriptionMode = "verbatim")
-        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(verbatim)).jsonObject
+        val smart = GeminiSessionConfig(model = "m", transcriptionMode = "smart")
+        val root = Json.parseToJsonElement(GeminiLiveWire.buildSetup(smart)).jsonObject
         val transcription = root["setup"]!!.jsonObject["inputAudioTranscription"]!!.jsonObject
-        assertEquals("verbatim", transcription["mode"]!!.jsonPrimitive.content)
+        assertEquals("smart", transcription["mode"]!!.jsonPrimitive.content)
     }
 
     @Test

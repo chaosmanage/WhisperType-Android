@@ -3,6 +3,7 @@ package com.whispertype.android.data.settings
 import com.whispertype.android.core.dictionary.DictionaryEntry
 import com.whispertype.android.core.model.AudioSourcePreference
 import com.whispertype.android.core.model.LanguageMode
+import com.whispertype.android.core.model.TranscriptionMode
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -11,6 +12,7 @@ import kotlinx.coroutines.flow.Flow
  */
 interface SettingsProvider {
     val speechMode: Flow<LanguageMode>
+    val transcriptionMode: Flow<TranscriptionMode>
     val historyEnabled: Flow<Boolean>
     val historyRetentionDays: Flow<Int>
     val appEnabled: Flow<Boolean>

@@ -691,7 +691,7 @@ Per-key detail (from `GeminiLiveWire.buildSetup` and
 | --- | --- | --- |
 | `model` | `"models/${config.model}"` — `"models/gemini-3.5-transcribe-live"` (the pinned `GeminiSessionFactory.LIVE_MODEL`) | always |
 | `generationConfig.responseModalities` | `["TEXT"]` (the config default `responseModalities = listOf("TEXT")`) | always, unless `config.omitGenerationConfig` |
-| `inputAudioTranscription.mode` | `"smart"` (default) or `"verbatim"` | only when `config.inputAudioTranscription` (default `true`) |
+| `inputAudioTranscription.mode` | `"verbatim"` (default) or `"smart"` | only when `config.inputAudioTranscription` (default `true`) |
 | `inputAudioTranscription.languageCodes` | `["en-US"]` / `["hi-IN"]` from the speech mode | only when `config.transcriptionLanguageCode != null` |
 | `realtimeInputConfig.automaticActivityDetection.disabled` | `true` | only when `config.automaticActivityDetectionDisabled` (default `true`) |
 | `realtimeInputConfig.activityHandling` | `"NO_INTERRUPTION"` | only when `config.activityHandlingNoInterruption` (segmentation) |

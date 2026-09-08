@@ -157,6 +157,12 @@
     <string name="settings_speech_mode">Speech</string>
     <string name="language_english">English</string>
     <string name="language_hinglish">Hinglish</string>
+    <string name="settings_transcription_mode">Transcription mode</string>
+    <string name="transcription_mode_verbatim">Verbatim</string>
+    <string name="transcription_mode_verbatim_desc">Transcribes speech word-for-word exactly as spoken, retaining filler words (um, uh) and repetitions.</string>
+    <string name="transcription_mode_smart">Smart</string>
+    <string name="transcription_mode_smart_desc">Cleans up filler words, resolves inline self-corrections, and applies punctuation and formatting.</string>
+    <string name="settings_transcription_mode_why">Both modes stream directly from Google\'s gemini-3.5-transcribe-live model. Verbatim produces an exact literal transcript, while Smart shapes and polishes the text server-side.</string>
     <string name="settings_history">Save history</string>
     <string name="settings_history_desc">Keep a private local record of your dictation.</string>
     <string name="settings_history_retention">Keep history for</string>
@@ -366,4 +372,16 @@
         <item quantity="one">%1$d item needs attention</item>
         <item quantity="other">%1$d items need attention</item>
     </plurals>
+
+    <!-- App updates -->
+    <string name="update_notification_channel">App updates</string>
+    <string name="update_notification_title">WhisperType update available</string>
+    <string name="update_notification_text">Version %1$s is available. Tap to download.</string>
+    <string name="update_banner_message">WhisperType %1$s is available</string>
+    <string name="update_banner_action">Download</string>
+    <string name="settings_check_for_updates">Check for updates</string>
+    <string name="settings_update_available">Update available: %1$s · Tap to download</string>
+    <string name="settings_update_latest">You\'re on the latest version (%1$s)</string>
+    <string name="settings_checking_updates">Checking for updates…</string>
+    <string name="settings_update_check_failed">Couldn\'t check for updates</string>
 </resources>

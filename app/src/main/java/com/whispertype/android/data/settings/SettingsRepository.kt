@@ -12,6 +12,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.whispertype.android.core.dictionary.DictionaryEntry
 import com.whispertype.android.core.model.AudioSourcePreference
 import com.whispertype.android.core.model.LanguageMode
+import com.whispertype.android.core.model.TranscriptionMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
@@ -35,6 +36,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     private object Keys {
         val speechMode = stringPreferencesKey("speech_mode")
+        val transcriptionMode = stringPreferencesKey("transcription_mode")
         val historyEnabled = booleanPreferencesKey("history_enabled")
         val historyRetentionDays = intPreferencesKey("history_retention_days")
         val appEnabled = booleanPreferencesKey(SettingsRepository.KEY_APP_ENABLED)
@@ -59,6 +61,11 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
         dataStore.data.map { prefs ->
             val stored = prefs[Keys.speechMode]
             LanguageMode.entries.firstOrNull { it.name == stored } ?: DEFAULT_SPEECH_MODE
+        }
+
+    override val transcriptionMode: Flow<TranscriptionMode> =
+        dataStore.data.map { prefs ->
+            TranscriptionMode.fromString(prefs[Keys.transcriptionMode])
         }
 
     override val historyEnabled: Flow<Boolean> =
@@ -124,6 +131,10 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
     suspend fun setSpeechMode(mode: LanguageMode) {
         dataStore.edit { it[Keys.speechMode] = mode.name }
+    }
+
+    suspend fun setTranscriptionMode(mode: TranscriptionMode) {
+        dataStore.edit { it[Keys.transcriptionMode] = mode.name }
     }
 
     suspend fun setHistoryEnabled(enabled: Boolean) {
@@ -276,6 +287,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) : Settin
 
         /** Default speech transcription mode is English. */
         val DEFAULT_SPEECH_MODE = LanguageMode.ENGLISH
+        val DEFAULT_TRANSCRIPTION_MODE = TranscriptionMode.DEFAULT
         const val DEFAULT_RETENTION_DAYS = 30
         const val DEFAULT_AUTO_STOP_SECONDS = 60
         const val DEFAULT_BUBBLE_SIZE_DP = 38

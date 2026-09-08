@@ -29,11 +29,10 @@ class GeminiSessionConfig(
      *  returns `serverContent.inputTranscription.text` for the user's speech.
      *  This is the only dictation source. */
     val inputAudioTranscription: Boolean = true,
-    /** Transcription shaping mode: `"smart"` (server-side disfluency removal,
-     *  self-corrections, formatting, casing polish) or `"verbatim"` (literal).
-     *  0.10.0: default is `smart` — the server-side replacement for the removed
-     *  on-device text stage. */
-    val transcriptionMode: String = "smart",
+    /** Transcription shaping mode: `"verbatim"` (literal) or `"smart"`
+     *  (server-side disfluency removal, self-corrections, formatting, casing polish).
+     *  Default is `"verbatim"`. */
+    val transcriptionMode: String = "verbatim",
     /** Optional BCP-47 language hint (`languageCodes`) for the transcription,
      *  e.g. `en-US` or `hi-IN`. Null omits the field (automatic detection). */
     val transcriptionLanguageCode: String? = null,

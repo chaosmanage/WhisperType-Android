@@ -78,6 +78,43 @@ fun SetupBanner(
 }
 
 @Composable
+fun UpdateBanner(
+    versionName: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(StudioLayout.RadiusField),
+        color = StudioColors.AccentSoft,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Surface(
+                modifier = Modifier.size(8.dp),
+                shape = CircleShape,
+                color = StudioColors.Accent,
+            ) {}
+            Text(
+                text = stringResource(R.string.update_banner_message, versionName),
+                style = StudioType.snippet.copy(color = StudioColors.Accent),
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = stringResource(R.string.update_banner_action),
+                style = StudioType.heroLabel.copy(color = StudioColors.Accent),
+            )
+        }
+    }
+}
+
+@Composable
 fun WeeklyHeroCard(
     weekWords: String,
     contextLine: String,
