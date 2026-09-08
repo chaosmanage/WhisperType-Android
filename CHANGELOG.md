@@ -4,6 +4,12 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-09-08
+
+### Changed
+
+- **Default transcription mode (`settings`, `gemini`)** — changed the default transcription shaping mode to **Smart** (`TranscriptionMode.SMART`), enabling server-side disfluency cleanup, self-correction handling, and polished formatting out of the box while allowing users to select Verbatim anytime in Settings.
+
 ## [1.2.2] - 2026-09-08
 
 ### Added

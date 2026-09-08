@@ -42,7 +42,7 @@ class SettingsRepositoryTest {
             val repo = newRepository()
 
             assertEquals(LanguageMode.ENGLISH, repo.speechMode.first())
-            assertEquals(TranscriptionMode.VERBATIM, repo.transcriptionMode.first())
+            assertEquals(TranscriptionMode.SMART, repo.transcriptionMode.first())
             assertTrue(repo.historyEnabled.first())
             assertEquals(SettingsRepository.DEFAULT_RETENTION_DAYS, repo.historyRetentionDays.first())
             assertTrue(repo.appEnabled.first())
@@ -92,30 +92,30 @@ class SettingsRepositoryTest {
     }
 
     @Test
-    fun `unknown stored transcription mode falls back to Verbatim`() = runTest {
+    fun `unknown stored transcription mode falls back to Smart`() = runTest {
         val dataStore =
             PreferenceDataStoreFactory.create(
                 produceFile = { File(tmp.root, "corrupt-transcription-mode.preferences_pb") },
             )
         val repo = SettingsRepository(dataStore)
 
-        repo.setTranscriptionMode(TranscriptionMode.SMART)
+        repo.setTranscriptionMode(TranscriptionMode.VERBATIM)
         dataStore.edit { it[stringPreferencesKey("transcription_mode")] = "UNKNOWN_MODE" }
 
-        assertEquals(TranscriptionMode.VERBATIM, repo.transcriptionMode.first())
+        assertEquals(TranscriptionMode.SMART, repo.transcriptionMode.first())
     }
 
     @Test
     fun `transcription mode setter round-trips`() = runTest {
         val repo = newRepository()
 
-        assertEquals(TranscriptionMode.VERBATIM, repo.transcriptionMode.first())
-
-        repo.setTranscriptionMode(TranscriptionMode.SMART)
         assertEquals(TranscriptionMode.SMART, repo.transcriptionMode.first())
 
         repo.setTranscriptionMode(TranscriptionMode.VERBATIM)
         assertEquals(TranscriptionMode.VERBATIM, repo.transcriptionMode.first())
+
+        repo.setTranscriptionMode(TranscriptionMode.SMART)
+        assertEquals(TranscriptionMode.SMART, repo.transcriptionMode.first())
     }
 
     @Test

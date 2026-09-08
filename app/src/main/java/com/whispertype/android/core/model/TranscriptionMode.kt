@@ -13,7 +13,7 @@ enum class TranscriptionMode(val wireValue: String) {
     SMART("smart");
 
     companion object {
-        val DEFAULT = VERBATIM
+        val DEFAULT = SMART
 
         fun fromString(value: String?): TranscriptionMode =
             entries.firstOrNull {

@@ -39,7 +39,7 @@ data class WarmSessionProfile(
     val model: String,
     val apiVersion: String,
     val language: LanguageMode,
-    val transcriptionMode: String = "verbatim",
+    val transcriptionMode: String = "smart",
     val automaticActivityDetectionDisabled: Boolean,
     val activityHandlingNoInterruption: Boolean = false,
     val inputAudioTranscription: Boolean,

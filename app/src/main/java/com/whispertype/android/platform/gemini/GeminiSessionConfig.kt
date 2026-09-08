@@ -31,8 +31,8 @@ class GeminiSessionConfig(
     val inputAudioTranscription: Boolean = true,
     /** Transcription shaping mode: `"verbatim"` (literal) or `"smart"`
      *  (server-side disfluency removal, self-corrections, formatting, casing polish).
-     *  Default is `"verbatim"`. */
-    val transcriptionMode: String = "verbatim",
+     *  Default is `"smart"`. */
+    val transcriptionMode: String = "smart",
     /** Optional BCP-47 language hint (`languageCodes`) for the transcription,
      *  e.g. `en-US` or `hi-IN`. Null omits the field (automatic detection). */
     val transcriptionLanguageCode: String? = null,
