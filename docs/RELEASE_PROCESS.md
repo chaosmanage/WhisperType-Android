@@ -5,19 +5,24 @@ This document covers versioning, signing, APK generation, checksum generation, i
 ## Versioning
 
 - The project follows semantic versioning: `MAJOR.MINOR.PATCH`.
-- The current line is 0.4.x. The version lives in `app/build.gradle.kts`:
+- The current line is 1.2.x. The version lives in `app/build.gradle.kts`:
 
 ```kotlin
 defaultConfig {
     applicationId = "com.whispertype.android"
     minSdk = 33
     targetSdk = 36
-    versionCode = 66
-    versionName = "1.2.0"
+    versionCode = 70
+    versionName = "1.2.4"
 }
 ```
 
 - `versionName` is user-facing; `versionCode` is a strict integer that must increase monotonically, including for downgrade-prevention. Bump both for every release and add a `CHANGELOG.md` entry.
+- **Version-reference sync:** every version bump or release updates all version
+  references in the same commit — `README.md` (download badge + Current Release
+  line), `docs/PUSH_TO_PHONE_VIA_ADB.md` (device reference + download link),
+  the baseline in `docs/CONTRIBUTING.md`, and the example block above — so no
+  doc ever points at an old release.
 
 ## Signing
 
@@ -187,4 +192,4 @@ Each release entry in `CHANGELOG.md` must record:
 
 ## Release gate
 
-A deployment is complete only when: preflight works in all device states; a signed non-debug APK exists with the expected application id/version; `apksigner` verification succeeds against the recorded certificate; clean-install and upgrade tests pass; the versioned `dist` directory contains the APK, SHA-256 checksum, install guide, and release notes; at least one additional personal device install is tested or explicitly marked pending; and the release keystore plus credentials remain outside the repository.
+A deployment is complete only when: preflight works in all device states; a signed non-debug APK exists with the expected application id/version; `apksigner` verification succeeds against the recorded certificate; clean-install and upgrade tests pass; every version reference is synced to the release (`README.md`, `docs/PUSH_TO_PHONE_VIA_ADB.md`, `docs/CONTRIBUTING.md` baseline); the versioned `dist` directory contains the APK, SHA-256 checksum, install guide, and release notes; at least one additional personal device install is tested or explicitly marked pending; and the release keystore plus credentials remain outside the repository.

@@ -58,9 +58,11 @@ Layer rules:
 ## Conventions
 
 - **Version bump in the same commit** as any behavior change: `versionCode` +1 and
-  `versionName` bump in `app/build.gradle.kts` (currently 1.2.1 / 67). Add a
-  `CHANGELOG.md` entry for user-visible changes. The README version line lags the real
-  version — trust `app/build.gradle.kts`.
+  `versionName` bump in `app/build.gradle.kts` (currently 1.2.4 / 70). Add a
+  `CHANGELOG.md` entry for user-visible changes. Sync every version reference in
+  the same commit — `README.md` (badge + Current Release line),
+  `docs/PUSH_TO_PHONE_VIA_ADB.md` (device reference + download link), and the
+  baseline in `docs/CONTRIBUTING.md` — so no doc ever points at an old release.
 - **Every push to the test device carries a fresh build number** — bump
   `versionCode` +1 and `versionName` on each device push, even when the code is
   unchanged, so the on-device build is always identifiable.

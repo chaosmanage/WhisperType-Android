@@ -45,7 +45,7 @@ Every commit that changes app behavior bumps the app version **in the same commi
 
 Keep the bump in the same commit as the behavior change so the tracked release APK (`app/build/outputs/apk/release/app-release.apk`) always carries a `versionName`/`versionCode` that matches the committed source. Refresh the "Current device reference" in `docs/PUSH_TO_PHONE_VIA_ADB.md` whenever the version changes.
 
-Current baseline: `1.0.8` (versionCode `53`).
+Current baseline: `1.2.4` (versionCode `70`).
 
 ## Build and test commands
 

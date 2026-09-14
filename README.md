@@ -18,7 +18,7 @@
 
 <p align="center">
   <a href="https://github.com/chaosmanage/WhisperType-Android/releases/latest/download/app-release.apk">
-    <img src="https://img.shields.io/badge/📥_Download_Release_APK-v1.2.3-07695D?style=for-the-badge&logo=android&logoColor=white" alt="Download APK">
+    <img src="https://img.shields.io/badge/📥_Download_Release_APK-v1.2.4-07695D?style=for-the-badge&logo=android&logoColor=white" alt="Download APK">
   </a>
 </p>
 
@@ -180,4 +180,4 @@ Requires JDK 17 and Android SDK Platform 36.
 - **Operating System**: Android 13+ (`minSdk 33`, `targetSdk 36`).
 - **Supported Keyboards**: Gboard, Samsung Keyboard, Microsoft SwiftKey (standard docked mode).
 - **Service Requirements**: Android Accessibility Service enabled; overlay permission granted.
-- **Current Release**: **v1.2.3** (`versionCode = 69`).
+- **Current Release**: **v1.2.4** (`versionCode = 70`).
