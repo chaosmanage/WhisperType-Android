@@ -120,8 +120,10 @@ class HomeHelpersTest {
         assertEquals("0", HomeHelpers.formatCount(0))
         assertEquals("450", HomeHelpers.formatCount(450))
         assertEquals("999", HomeHelpers.formatCount(999))
-        assertEquals("1.2k", HomeHelpers.formatCount(1200))
-        assertEquals("15k", HomeHelpers.formatCount(15400))
+        assertEquals("1,000", HomeHelpers.formatCount(1000))
+        assertEquals("1,200", HomeHelpers.formatCount(1200))
+        assertEquals("15,400", HomeHelpers.formatCount(15400))
+        assertEquals("1,000,000", HomeHelpers.formatCount(1_000_000))
     }
 
     @Test

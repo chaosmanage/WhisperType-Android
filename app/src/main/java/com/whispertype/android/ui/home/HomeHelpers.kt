@@ -140,13 +140,8 @@ object HomeHelpers {
         )
     }
 
-    fun formatCount(n: Int): String =
-        if (n >= 1000) {
-            val k = n / 1000f
-            if (k >= 10) "${k.roundToInt()}k" else String.format(Locale.US, "%.1fk", k)
-        } else {
-            n.toString()
-        }
+    /** Full grouped count (e.g. "1,024") — never abbreviated, so big weeks read big. */
+    fun formatCount(n: Int): String = String.format(Locale.US, "%,d", n)
 
     fun formatRecentSnippetMeta(
         entry: HistoryRepository.HistoryEntry,
