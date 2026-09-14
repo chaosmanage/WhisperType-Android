@@ -257,11 +257,8 @@ class MainActivity : ComponentActivity() {
                 overlayGranted = overlayGrantedNow,
                 runtimeRunning = runtimeRunning,
                 notificationsGranted = notificationsGranted,
-            ).toMutableList().apply {
-                if (!appEnabled && !contains(com.whispertype.android.platform.accessibility.EligibilityExplanation.REASON_APP_DISABLED)) {
-                    add(com.whispertype.android.platform.accessibility.EligibilityExplanation.REASON_APP_DISABLED)
-                }
-            }
+                appEnabled = appEnabled,
+            )
         }
         val apiKeyConfigured = keyProvider.hasKey()
         val systemGates = remember(
@@ -369,8 +366,12 @@ class MainActivity : ComponentActivity() {
                             startActivity(intent)
                         },
                         onSetupBannerTap = {
-                            openSystemPage = true
-                            selectedTab = 3
+                            if (setupBannerReasons == listOf(com.whispertype.android.platform.accessibility.EligibilityExplanation.REASON_APP_DISABLED)) {
+                                scope.launch { settings.setAppEnabled(true) }
+                            } else {
+                                openSystemPage = true
+                                selectedTab = 3
+                            }
                         },
                         onOpenHistory = { selectedTab = 1 },
                         onEnableHistory = { scope.launch { settings.setHistoryEnabled(true) } },

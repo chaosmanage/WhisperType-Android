@@ -31,12 +31,41 @@ class SetupStatusTest {
             overlayGranted = false,
             runtimeRunning = false,
             notificationsGranted = false,
+            appEnabled = true,
         )
         assertTrue(EligibilityExplanation.REASON_SERVICE_NOT_CONNECTED in reasons)
         assertTrue(SetupStatus.REASON_OVERLAY_NOT_GRANTED in reasons)
         assertTrue(SetupStatus.REASON_RUNTIME_NOT_RUNNING in reasons)
         assertFalse(SetupStatus.REASON_NOTIFICATIONS_NOT_GRANTED in reasons)
         assertFalse(reasons.any { it.contains("focus") || it.contains("keyboard") })
+    }
+
+    @Test
+    fun `home banner collapses to the toggle reason when the app is turned off`() {
+        val reasons = SetupStatus.homeBannerReasons(
+            eligibility = eligible().copy(
+                serviceConnected = false,
+                microphoneGranted = false,
+                apiKeyConfigured = false,
+            ),
+            overlayGranted = false,
+            runtimeRunning = false,
+            notificationsGranted = false,
+            appEnabled = false,
+        )
+        assertEquals(listOf(EligibilityExplanation.REASON_APP_DISABLED), reasons)
+    }
+
+    @Test
+    fun `home banner shows the toggle reason alone even when everything else is healthy`() {
+        val reasons = SetupStatus.homeBannerReasons(
+            eligibility = eligible(),
+            overlayGranted = true,
+            runtimeRunning = true,
+            notificationsGranted = true,
+            appEnabled = false,
+        )
+        assertEquals(listOf(EligibilityExplanation.REASON_APP_DISABLED), reasons)
     }
 
     @Test

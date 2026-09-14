@@ -8,6 +8,7 @@ import com.whispertype.android.core.model.InsertionResult
 import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.TargetEligibility
 import com.whispertype.android.core.model.TargetSnapshot
+import com.whispertype.android.core.transcript.InsertionText
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -91,7 +92,8 @@ class AccessibilityTargetGateway(
         var commitVerified: Boolean? = null
         if (ic != null && live != null && targetCurrent && !targetSecureOrUncertain) {
             // Single-shot, cursor-aware commit; never retried, even if ambiguous.
-            commitVerified = commitAndVerify(ic, text)
+            // A trailing space lets the next dictation/typing continue directly.
+            commitVerified = commitAndVerify(ic, InsertionText.withTrailingSpace(text))
         }
 
         return InsertionDecision.evaluate(

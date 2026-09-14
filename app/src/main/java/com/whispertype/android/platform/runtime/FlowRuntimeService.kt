@@ -43,6 +43,7 @@ import com.whispertype.android.core.model.SessionId
 import com.whispertype.android.core.model.TargetEligibility
 import com.whispertype.android.core.model.TranscriptionMode
 import com.whispertype.android.core.model.WarmClaimResult
+import com.whispertype.android.core.transcript.InsertionText
 import com.whispertype.android.data.history.EncryptedHistoryRepository
 import com.whispertype.android.data.history.HistoryRepository
 import com.whispertype.android.data.secrets.AndroidKeystoreKeyStore
@@ -609,14 +610,14 @@ class FlowRuntimeService : Service(), OverlayOwners, DictationHost {
         val reply = a11yReply ?: return false
         // Custom-dictionary correction rules (client-side) applied to the final text.
         val corrected = DictionaryCorrections.apply(text, cachedDictionary)
-        return sendInsert(sessionId, corrected, reply)
+        return sendInsert(sessionId, InsertionText.withTrailingSpace(corrected), reply)
     }
 
     /** 0.5.8: clipboard fallback when the transcript could not be committed to a
      *  focused field. Sensitive-marked write; returns true only on a confirmed
-     *  copy. */
+     *  copy. Carries the same trailing space as a direct commit. */
     override suspend fun copyToClipboard(sessionId: SessionId, text: String): Boolean =
-        withContext(Dispatchers.IO) { sensitiveClipboard.copySensitive(text) }
+        withContext(Dispatchers.IO) { sensitiveClipboard.copySensitive(InsertionText.withTrailingSpace(text)) }
 
     override fun onSessionFinished(state: DictationState, metrics: MutableSessionMetrics, transcript: String?) {
         // Aggregate per-session outcome + stage latencies. Never transcript or audio.

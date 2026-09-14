@@ -23,12 +23,18 @@ object SetupStatus {
         overlayGranted: Boolean,
         runtimeRunning: Boolean,
         notificationsGranted: Boolean,
-    ): List<String> = buildList {
-        addAll(
-            EligibilityExplanation.blockingReasons(eligibility).filter { it in HOME_SETUP_REASONS },
-        )
-        if (!overlayGranted) add(REASON_OVERLAY_NOT_GRANTED)
-        if (!runtimeRunning) add(REASON_RUNTIME_NOT_RUNNING)
+        appEnabled: Boolean,
+    ): List<String> {
+        // The master toggle is the cause; everything else is a symptom of the
+        // kill-switch shutdown, so collapse to the single actionable reason.
+        if (!appEnabled) return listOf(EligibilityExplanation.REASON_APP_DISABLED)
+        return buildList {
+            addAll(
+                EligibilityExplanation.blockingReasons(eligibility).filter { it in HOME_SETUP_REASONS },
+            )
+            if (!overlayGranted) add(REASON_OVERLAY_NOT_GRANTED)
+            if (!runtimeRunning) add(REASON_RUNTIME_NOT_RUNNING)
+        }
     }
 
     /** All gates for Settings → System (includes setup + contextual, except

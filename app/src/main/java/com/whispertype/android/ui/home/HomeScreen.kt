@@ -76,7 +76,13 @@ fun HomeScreen(
             if (setupBannerReasons.isNotEmpty()) {
                 SetupBanner(
                     message = setupBannerMessage(setupBannerReasons),
-                    actionLabel = stringResource(R.string.status_fix),
+                    actionLabel = stringResource(
+                        if (setupBannerReasons == listOf(EligibilityExplanation.REASON_APP_DISABLED)) {
+                            R.string.home_banner_action_turn_on
+                        } else {
+                            R.string.status_fix
+                        },
+                    ),
                     onClick = onSetupBannerTap,
                 )
                 Spacer(Modifier.height(StudioLayout.SpacingRelated))

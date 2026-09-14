@@ -144,6 +144,7 @@
     <string name="status_on">On</string>
     <string name="status_off">Off</string>
     <string name="status_fix">Fix</string>
+    <string name="home_banner_action_turn_on">Turn on</string>
     <string name="status_configured" tools:ignore="UnusedResources">Configured</string>
     <string name="status_not_configured" tools:ignore="UnusedResources">Not configured</string>
 

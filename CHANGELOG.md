@@ -4,6 +4,13 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Trailing space on insert (`accessibility`, `runtime`)** — dictated text is now committed with exactly one trailing space (direct `commitText()` and the clipboard fallback alike), so the next dictation or keystroke continues after a word boundary without a manual space.
+- **Home banner names the master toggle as the cause (`ui`)** — when the app toggle is off, the Home banner collapses downstream symptoms (accessibility, overlay, runtime, mic, key) to the single actionable `"WhisperType is turned off"` reason, and tapping it turns the app back on directly instead of navigating to Settings.
+
 ## [1.2.3] - 2026-09-08
 
 ### Changed

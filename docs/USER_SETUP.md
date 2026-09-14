@@ -290,7 +290,7 @@ The Home tab provides a clean, glanceable overview of your dictation activity:
 6. Speak naturally.
 7. Tap `Done` to commit the text, or the red X to cancel and discard.
 8. Transient status pills appear while the result is prepared — `Finalizing`, then `Inserting` — before the text lands at the cursor.
-9. WhisperType inserts the result at the current cursor or replaces the selected text; the keyboard stays visible throughout.
+9. WhisperType inserts the result at the current cursor or replaces the selected text, plus exactly one trailing space; the keyboard stays visible throughout.
 10. The bubble returns to its idle state.
 
 ## Cancel a dictation
