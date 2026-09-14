@@ -133,7 +133,7 @@ class HomeHelpersTest {
         assertEquals("—", metrics.wpmValue)
         assertEquals("No timed sessions yet", metrics.wpmLabel)
         assertEquals("0", metrics.perSessionValue)
-        assertEquals("Average words / session", metrics.perSessionLabel)
+        assertEquals("Words / session", metrics.perSessionLabel)
     }
 
     @Test
@@ -146,9 +146,9 @@ class HomeHelpersTest {
         assertEquals("2", metrics.sessionsValue)
         assertEquals("All-time sessions", metrics.sessionsLabel)
         assertEquals("100", metrics.wpmValue)
-        assertEquals("Average words / min", metrics.wpmLabel)
+        assertEquals("Words / min", metrics.wpmLabel)
         assertEquals("75", metrics.perSessionValue)
-        assertEquals("Average words / session", metrics.perSessionLabel)
+        assertEquals("Words / session", metrics.perSessionLabel)
     }
 
     @Test

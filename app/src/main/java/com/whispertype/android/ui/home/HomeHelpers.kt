@@ -122,9 +122,9 @@ object HomeHelpers {
     fun computeGlanceMetrics(
         entries: List<HistoryRepository.HistoryEntry>,
         allTimeSessionsLabel: String = "All-time sessions",
-        avgWpmLabel: String = "Average words / min",
+        avgWpmLabel: String = "Words / min",
         noTimedSessionsLabel: String = "No timed sessions yet",
-        avgWordsPerSessionLabel: String = "Average words / session",
+        avgWordsPerSessionLabel: String = "Words / session",
     ): HomeGlanceMetrics {
         val sessions = HistoryStats.sessions(entries)
         val wpm = HistoryStats.wordsPerMinute(entries)?.roundToInt()

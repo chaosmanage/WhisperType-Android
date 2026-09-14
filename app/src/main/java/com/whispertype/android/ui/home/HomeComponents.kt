@@ -6,8 +6,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -242,7 +244,7 @@ fun GlanceMetricCard(
             Text(
                 text = label,
                 style = StudioType.metricLabel,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
@@ -268,20 +270,26 @@ fun AtAGlanceSection(
             if (maxWidth >= minTwoColWidth) {
                 Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Min),
                         horizontalArrangement = Arrangement.spacedBy(spacing),
                     ) {
                         GlanceMetricCard(
                             value = metrics.sessionsValue,
                             label = metrics.sessionsLabel,
                             minHeight = 88.dp,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
                         )
                         GlanceMetricCard(
                             value = metrics.wpmValue,
                             label = metrics.wpmLabel,
                             minHeight = 88.dp,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
                         )
                     }
                     GlanceMetricCard(
