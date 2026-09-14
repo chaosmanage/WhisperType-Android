@@ -11,6 +11,7 @@ import kotlin.math.roundToInt
 data class DayBarData(
     val dayName: String,
     val initial: String,
+    val dateLabel: String,
     val words: Int,
     val isCurrentDay: Boolean,
     val isEarlierActive: Boolean,
@@ -49,52 +50,43 @@ object HomeHelpers {
 
     private const val MILLIS_PER_DAY = 86_400_000L
 
-    fun dayOfWeekMonday0(nowMillis: Long): Int {
-        val cal = Calendar.getInstance().apply { timeInMillis = nowMillis }
-        return when (cal.get(Calendar.DAY_OF_WEEK)) {
-            Calendar.MONDAY -> 0
-            Calendar.TUESDAY -> 1
-            Calendar.WEDNESDAY -> 2
-            Calendar.THURSDAY -> 3
-            Calendar.FRIDAY -> 4
-            Calendar.SATURDAY -> 5
-            Calendar.SUNDAY -> 6
-            else -> 0
-        }
-    }
-
-    fun startOfWeekMillis(nowMillis: Long): Long {
+    /** Milliseconds at the local start of the oldest day in the trailing 7-day window. */
+    fun trailingWindowStartMillis(nowMillis: Long): Long {
         val startOfToday = HistoryStats.startOfTodayMillis(nowMillis)
-        val dayIndex = dayOfWeekMonday0(nowMillis)
-        return startOfToday - dayIndex * MILLIS_PER_DAY
+        return startOfToday - 6 * MILLIS_PER_DAY
     }
 
     fun computeWeeklyBarsState(
         entries: List<HistoryRepository.HistoryEntry>,
         nowMillis: Long,
     ): WeeklyBarsState {
-        val currentDayIndex = dayOfWeekMonday0(nowMillis)
-        val startOfWeek = startOfWeekMillis(nowMillis)
+        val windowStart = trailingWindowStartMillis(nowMillis)
 
         val days = (0..6).map { i ->
-            val dayStart = startOfWeek + i * MILLIS_PER_DAY
+            val dayStart = windowStart + i * MILLIS_PER_DAY
             val dayEnd = dayStart + MILLIS_PER_DAY
             val words = entries
                 .filter { it.timestampMillis in dayStart until dayEnd }
                 .sumOf { HistoryStats.contentWords(it.text).size }
-            val isCurrentDay = (i == currentDayIndex)
-            val isEarlierActive = (i < currentDayIndex && words > 0)
+            val cal = Calendar.getInstance().apply { timeInMillis = dayStart }
+            val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
+            // Index into the Monday-first name/initial tables.
+            val nameIndex = (dayOfWeek + 5) % 7
+            val isCurrentDay = (i == 6)
+            val isEarlierActive = (i < 6 && words > 0)
             DayBarData(
-                dayName = WEEKDAY_NAMES[i],
-                initial = WEEKDAY_INITIALS[i],
+                dayName = WEEKDAY_NAMES[nameIndex],
+                initial = WEEKDAY_INITIALS[nameIndex],
+                dateLabel = cal.get(Calendar.DAY_OF_MONTH).toString(),
                 words = words,
                 isCurrentDay = isCurrentDay,
                 isEarlierActive = isEarlierActive,
             )
         }
 
+        val windowEnd = windowStart + 7 * MILLIS_PER_DAY
         val weekEntries = entries.filter {
-            it.timestampMillis >= startOfWeek && it.timestampMillis < startOfWeek + 7 * MILLIS_PER_DAY
+            it.timestampMillis >= windowStart && it.timestampMillis < windowEnd
         }
         val weekWords = days.sumOf { it.words }
         val weekSessions = weekEntries.size
@@ -112,7 +104,7 @@ object HomeHelpers {
     }
 
     fun buildWeeklySemantics(weekWords: Int, days: List<DayBarData>): String {
-        if (weekWords == 0) return "No words recorded this week"
+        if (weekWords == 0) return "No words recorded in the last 7 days"
         val activeDays = days.filter { it.words > 0 }.map { it.dayName }
         val wordNoun = if (weekWords == 1) "word" else "words"
         val recordedOn = when (activeDays.size) {
@@ -124,7 +116,7 @@ object HomeHelpers {
                 ", recorded on $head, and ${activeDays.last()}"
             }
         }
-        return "$weekWords $wordNoun this week$recordedOn"
+        return "$weekWords $wordNoun in the last 7 days$recordedOn"
     }
 
     fun computeGlanceMetrics(

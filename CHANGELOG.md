@@ -4,6 +4,12 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.5] - 2026-09-14
+
+### Changed
+
+- **Home hero is now a trailing 7-day window (`ui`)** — the hero card shows total words over the last 7 calendar days (today included) instead of the Monday–Sunday calendar week, so the count no longer collapses on Mondays. The 7 bars track the same trailing window (today rightmost) with stacked weekday-initial + day-of-month labels.
+
 ## [1.2.4] - 2026-09-14
 
 ### Changed

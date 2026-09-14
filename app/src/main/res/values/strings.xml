@@ -113,7 +113,7 @@
     <string name="home_stats_wpm">Words / min</string>
     <string name="home_stats_per_session">Words / session</string>
     <string name="home_stats_hint">Enable History in Settings to see your dictation stats.</string>
-    <string name="home_hero_week_label">Words this week</string>
+    <string name="home_hero_week_label">Words last 7 days</string>
     <string name="home_greeting_morning">Good morning</string>
     <string name="home_greeting_afternoon">Good afternoon</string>
     <string name="home_greeting_evening">Good evening</string>
@@ -132,7 +132,7 @@
     <string name="home_privacy_card_title">Dictation history is turned off</string>
     <string name="home_privacy_card_body">Nothing is stored on this device or sent to external servers for storage.</string>
     <string name="home_privacy_turn_on">Turn on history</string>
-    <string name="home_hero_no_sessions_week">No sessions yet this week</string>
+    <string name="home_hero_no_sessions_week">No sessions in the last 7 days</string>
     <string name="home_banner_accessibility">Accessibility is off</string>
     <string name="home_banner_key">Add your Gemini API key</string>
     <string name="home_banner_mic">Microphone is off</string>

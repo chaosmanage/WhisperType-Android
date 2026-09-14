@@ -37,8 +37,8 @@ android {
         applicationId = "com.whispertype.android"
         minSdk = 33
         targetSdk = 36
-        versionCode = 70
-        versionName = "1.2.4"
+        versionCode = 71
+        versionName = "1.2.5"
 
         // Embedded git revision so the app can display the exact source commit.
         buildConfigField("String", "GIT_COMMIT", "\"${gitCommitHash()}\"")

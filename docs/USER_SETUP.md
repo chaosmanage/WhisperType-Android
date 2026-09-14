@@ -274,7 +274,7 @@ The bubble returns to its default position.
 
 The Home tab provides a clean, glanceable overview of your dictation activity:
 
-- **Weekly Hero Card**: Displays total words dictated this week alongside 7 daily rounded vertical bars (Monday through Sunday) aligned to a common baseline, with today's bar highlighted in accent mint.
+- **Weekly Hero Card**: Displays total words dictated over the trailing 7 calendar days (today included) alongside 7 daily rounded vertical bars (oldest first, today rightmost) aligned to a common baseline, each labeled with the weekday initial stacked over the day-of-month, with today's bar highlighted in accent mint.
 - **At-a-Glance Metrics**: Shows your average speaking speed (`Words / min`) and efficiency (`Words / session`), adapting seamlessly between dual-card and stacked single-column layouts depending on screen width.
 - **Recent Dictations**: A compact, content-height card showing your latest transcript snippet, timestamp, word count, and outcome badge, with a direct affordance to view full history.
 - **Setup Banner**: If a critical system service requires attention (Accessibility service, Overlay permission, Microphone permission, or Gemini API key), an actionable banner appears at the top. Non-blocking notifications never generate a setup error banner.

@@ -43,12 +43,13 @@ class HomeHelpersTest {
     )
 
     @Test
-    fun testDayOfWeekMonday0() {
+    fun testTrailingWindowStart() {
+        // Monday Sept 7 2026 -> window covers Sept 1 (Tue) through Sept 7 (Mon).
         val monday = fixedMondayMillis()
-        assertEquals(0, HomeHelpers.dayOfWeekMonday0(monday))
-
-        val wednesday = fixedWednesdayMillis()
-        assertEquals(2, HomeHelpers.dayOfWeekMonday0(wednesday))
+        val start = HomeHelpers.trailingWindowStartMillis(monday)
+        val cal = Calendar.getInstance().apply { timeInMillis = start }
+        assertEquals(1, cal.get(Calendar.DAY_OF_MONTH))
+        assertEquals(Calendar.SEPTEMBER, cal.get(Calendar.MONTH))
     }
 
     @Test
@@ -61,10 +62,14 @@ class HomeHelpersTest {
         assertNull(state.weekWpm)
         assertEquals(7, state.days.size)
         assertTrue(state.days.all { it.words == 0 })
-        assertEquals("No words recorded this week", state.semanticsDescription)
-        assertTrue(state.days[0].isCurrentDay)
-        assertFalse(state.days[1].isCurrentDay)
+        assertEquals("No words recorded in the last 7 days", state.semanticsDescription)
+        assertTrue(state.days[6].isCurrentDay)
+        assertFalse(state.days[5].isCurrentDay)
         assertFalse(state.days.any { it.isEarlierActive })
+        // Trailing window Sept 1 (Tue) .. Sept 7 (Mon) with stacked date labels.
+        assertEquals(listOf("1", "2", "3", "4", "5", "6", "7"), state.days.map { it.dateLabel })
+        assertEquals(listOf("T", "W", "T", "F", "S", "S", "M"), state.days.map { it.initial })
+        assertEquals("Monday", state.days[6].dayName)
     }
 
     @Test
@@ -75,8 +80,8 @@ class HomeHelpersTest {
 
         assertEquals(5, state.weekWords)
         assertEquals(1, state.weekSessions)
-        assertEquals(5, state.days[0].words)
-        assertEquals("5 words this week, recorded on Monday", state.semanticsDescription)
+        assertEquals(5, state.days[6].words)
+        assertEquals("5 words in the last 7 days, recorded on Monday", state.semanticsDescription)
     }
 
     @Test
@@ -89,11 +94,25 @@ class HomeHelpersTest {
 
         assertEquals(10, state.weekWords)
         assertEquals(2, state.weekSessions)
-        assertTrue(state.days[0].isEarlierActive)
-        assertEquals(5, state.days[0].words)
-        assertTrue(state.days[2].isCurrentDay)
-        assertEquals(5, state.days[2].words)
-        assertEquals("10 words this week, recorded on Monday and Wednesday", state.semanticsDescription)
+        // Trailing window Sept 3 (Thu) .. Sept 9 (Wed): Monday lands at index 4.
+        assertTrue(state.days[4].isEarlierActive)
+        assertEquals(5, state.days[4].words)
+        assertEquals("Monday", state.days[4].dayName)
+        assertTrue(state.days[6].isCurrentDay)
+        assertEquals(5, state.days[6].words)
+        assertEquals("10 words in the last 7 days, recorded on Monday and Wednesday", state.semanticsDescription)
+    }
+
+    @Test
+    fun testComputeWeeklyBarsState_excludesEntriesBeforeWindow() {
+        val now = fixedMondayMillis()
+        val windowStart = HomeHelpers.trailingWindowStartMillis(now)
+        val inside = makeEntry("one two three", windowStart + 60_000L)
+        val outside = makeEntry("four five six seven eight", windowStart - 60_000L)
+        val state = HomeHelpers.computeWeeklyBarsState(listOf(inside, outside), now)
+
+        assertEquals(3, state.weekWords)
+        assertEquals(1, state.weekSessions)
     }
 
     @Test

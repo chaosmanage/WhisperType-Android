@@ -206,6 +206,12 @@ fun WeeklyBarsView(
                         color = if (day.isCurrentDay) StudioColors.Accent else StudioColors.OnSurfaceVariant,
                     ),
                 )
+                Text(
+                    text = day.dateLabel,
+                    style = StudioType.tagLabel.copy(
+                        color = if (day.isCurrentDay) StudioColors.Accent else StudioColors.OnSurfaceVariant,
+                    ),
+                )
             }
         }
     }
