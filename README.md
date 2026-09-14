@@ -23,12 +23,12 @@
 </p>
 
 <p align="center">
-  <img src="whispertype-banner.jpg" alt="WhisperType Showcase Banner" width="100%" style="border-radius: 16px;" />
+  <img src="whispertype-banner.jpg" alt="WhisperType: Advanced AI Voice Transcription for Android" width="100%" style="border-radius: 16px;" />
 </p>
 
 ---
 
-Voice to text for Android that keeps your favorite keyboard. WhisperType floats an elegant, draggable microphone bubble above any text field—in Messages, WhatsApp, Gmail, Slack, Notes, browser, or any Android app—and streams your speech directly to Google's Gemini Live API for instant, structured cursor insertion.
+Fast, private AI voice-to-text for Android that keeps your favorite keyboard. WhisperType floats an elegant, draggable microphone bubble above any text field—in Messages, WhatsApp, Gmail, Slack, Notes, browser, or any Android app—and streams your speech directly to Google's Gemini Live API for instant, structured cursor insertion.
 
 > **Private by design:** WhisperType is 100% local-first. Your Gemini API key is encrypted on-device with an Android Keystore AES-GCM-256 key. Transcripts and audio are never logged or sent to any third-party server. There is no WhisperType account, no analytics, and no tracking.
 
@@ -38,7 +38,7 @@ Voice to text for Android that keeps your favorite keyboard. WhisperType floats 
 
 ```mermaid
 flowchart LR
-    A["📱 Any App<br/>(Focused Text Field)"] --> B["🟢 Mic Bubble<br/>(Tap to Speak)"]
+    A["📱 Any App<br/>(Focused Text Field)"] --> B["🎙️ Floating Bubble<br/>(Tap to Speak)"]
     B --> C["🎙️ Real-time Audio<br/>(16 kHz PCM stream)"]
     C --> D["⚡ Gemini Live Engine<br/>(gemini-3.5-transcribe-live)"]
     D --> E["✨ Shaping Mode<br/>(Smart or Verbatim)"]
@@ -53,8 +53,12 @@ flowchart LR
 
 ## 🌟 Highlights
 
+<p align="center">
+  <img src="whispertype-overlay-states.png" alt="WhisperType Overlay Chrome & Dictation States" width="100%" style="border-radius: 14px;" />
+</p>
+
 ### 🎯 Floating Mic Bubble & Mini-Dot
-- Freely draggable circular bubble floats above your keyboard on any app.
+- Freely draggable squircle bubble floats above your keyboard on any app.
 - Auto-minimizes to an unobtrusive mini-dot after inactivity (configurable delay).
 - Bubble size (12–72 dp) and opacity are fully customizable in Settings.
 
