@@ -5,15 +5,16 @@
 <h1 align="center">WhisperType</h1>
 
 <p align="center">
-  <b>Fast, Private, System-Wide AI Voice-to-Text for Android</b><br>
-  <i>Powered by Google Gemini Live (<code>gemini-3.5-transcribe-live</code>)</i>
+  <b>Effortless, System-Wide AI Voice Typing for Android</b><br>
+  <i>Real-time speech-to-text powered directly by Google Gemini Live</i>
 </p>
 
 <p align="center">
   <a href="https://github.com/chaosmanage/WhisperType-Android/releases/latest"><img src="https://img.shields.io/github/v/release/chaosmanage/WhisperType-Android?label=Release&color=07695D&style=flat-square" alt="Latest Release"></a>
   <img src="https://img.shields.io/badge/Platform-Android%2013%2B%20(API%2033%2B)-0E8388?style=flat-square" alt="Android 13+">
   <img src="https://img.shields.io/badge/Model-gemini--3.5--transcribe--live-4285F4?style=flat-square" alt="Gemini Live">
-  <img src="https://img.shields.io/badge/Privacy-100%25%20Local--First-2EA043?style=flat-square" alt="Local First">
+  <img src="https://img.shields.io/badge/Architecture-Direct%20to%20Gemini%20(No%20Middleman)-4285F4?style=flat-square" alt="Direct to Gemini">
+  <img src="https://img.shields.io/badge/Data-Zero%20WhisperType%20Servers-2EA043?style=flat-square" alt="Zero WhisperType Servers">
 </p>
 
 <p align="center">
@@ -28,9 +29,9 @@
 
 ---
 
-Fast, private AI voice-to-text for Android that keeps your favorite keyboard. WhisperType floats an elegant, draggable microphone bubble above any text field—in Messages, WhatsApp, Gmail, Slack, Notes, browser, or any Android app—and streams your speech directly to Google's Gemini Live API for instant, structured cursor insertion.
+Speak naturally, type instantly in any app—while keeping your favorite keyboard. WhisperType floats an elegant, draggable microphone bubble above any text field—in Messages, WhatsApp, Gmail, Slack, Notes, browser, or any Android app—and streams your voice directly to Google's Gemini Live API for instant, beautifully shaped cursor insertion.
 
-> **Private by design:** WhisperType is 100% local-first. Your Gemini API key is encrypted on-device with an Android Keystore AES-GCM-256 key. Transcripts and audio are never logged or sent to any third-party server. There is no WhisperType account, no analytics, and no tracking.
+> **Direct-to-API Architecture:** WhisperType operates with **no intermediary servers, no accounts, and no telemetry**. Your Gemini API key and dictation history are encrypted on-device with Android Keystore AES-GCM-256. Audio streams directly from your phone to Google's official Gemini Live endpoint over TLS using your own API key. See [Privacy, Security & Data Handling](#-privacy-security--data-handling) for Google API retention and training terms.
 
 ---
 
@@ -133,12 +134,20 @@ graph TD
 
 ---
 
-## 🛡️ Privacy & Security
+## 🛡️ Privacy, Security & Data Handling
 
-- **Encrypted Secrets**: Your API key is encrypted using hardware-backed Android Keystore with AES-GCM-256. It is never logged or exposed.
-- **Zero Cloud Infrastructure**: Audio streams strictly from your device directly to Google's official Gemini Live endpoint over TLS.
-- **Password Exclusion**: Password fields, PIN fields, and `FLAG_SECURE` screens are explicitly blocked. The bubble never displays over sensitive fields.
-- **No Background Recording**: The microphone is strictly activated when you tap the bubble and deactivates immediately when dictation completes.
+### What WhisperType Does
+- **Zero Intermediary Servers**: There are no WhisperType backend servers, user accounts, telemetry, or tracking.
+- **Encrypted Secrets**: Your Gemini API key is encrypted using hardware-backed Android Keystore with AES-GCM-256 in app-private, no-backup storage. It is never logged or exposed.
+- **No Disk Storage for Audio**: Audio streams live in memory and is never saved to disk or logged.
+- **Password & PIN Exclusion**: Password fields, PIN fields, and `FLAG_SECURE` screens are explicitly blocked. The bubble never displays over sensitive fields.
+- **Microphone Discipline**: The microphone captures audio only while you are actively dictating; continuous background recording is not supported.
+
+### How Google Handles Your Data
+WhisperType connects directly to Google's Gemini Live API using your personal API key. Data handling and retention are governed by [Google's Gemini API Terms of Service](https://ai.google.dev/gemini-api/terms):
+- **Free Tier (No Billing Account)**: Under Google's terms for unpaid services, prompts, audio, and responses may be retained and used to train and improve Google's machine learning models, and may be subject to human review (except where prohibited, such as in the EEA, UK, and Switzerland).
+- **Paid Tier (Active Billing Account)**: Under Google's Paid Services terms, Google **does not** use your prompts, audio, or responses to train Google models.
+- **Recommendation for Privacy**: To ensure your voice dictations are not used for model training, attach an active billing account to your Google Cloud / Google AI Studio project (pay-as-you-go).
 
 ---
 

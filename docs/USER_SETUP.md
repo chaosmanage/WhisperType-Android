@@ -486,7 +486,7 @@ Before uninstalling, optionally:
 WhisperType:
 
 - records only after you tap the bubble,
-- streams audio directly to Gemini Live,
+- streams audio directly to Google Gemini Live using your API key (unpaid keys are subject to Google model training under Google API terms; paid keys with billing enabled are not used to train Google models),
 - does not use a WhisperType cloud account,
 - does not use a backend server,
 - does not store audio,
