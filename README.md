@@ -10,10 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/chaosmanage/WhisperType-Android/releases/latest"><img src="https://img.shields.io/github/v/release/chaosmanage/WhisperType-Android?label=Release&color=07695D&style=flat-square" alt="Latest Release"></a>
   <img src="https://img.shields.io/badge/Platform-Android%2013%2B%20(API%2033%2B)-0E8388?style=flat-square" alt="Android 13+">
-  <img src="https://img.shields.io/badge/Model-gemini--3.5--transcribe--live-4285F4?style=flat-square" alt="Gemini Live">
-  <img src="https://img.shields.io/badge/Architecture-Direct%20to%20Gemini%20(No%20Middleman)-4285F4?style=flat-square" alt="Direct to Gemini">
   <img src="https://img.shields.io/badge/Data-Zero%20WhisperType%20Servers-2EA043?style=flat-square" alt="Zero WhisperType Servers">
 </p>
 
