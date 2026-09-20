@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -91,6 +92,8 @@ fun OnboardingWizard(
     var attemptedAccessibility by remember { mutableStateOf(false) }
     var overlayRequested by remember { mutableStateOf(false) }
     var micRequested by remember { mutableStateOf(false) }
+    var appInfoOpened by remember { mutableStateOf(false) }
+    var sandboxText by remember { mutableStateOf("") }
     var step by remember { mutableStateOf(OnboardingStep.Welcome) }
     LaunchedEffect(overlayGranted, refresh, step) {
         if (step == OnboardingStep.Overlay && overlayGranted && overlayRequested) {
@@ -110,6 +113,7 @@ fun OnboardingWizard(
         }
         if (accessibilityOn && (step == OnboardingStep.Accessibility || step == OnboardingStep.Restricted)) {
             attemptedAccessibility = false
+            appInfoOpened = false
             step = OnboardingStep.GeminiKey
         }
     }
@@ -146,6 +150,8 @@ fun OnboardingWizard(
                         keyInput = keyInput,
                         onKeyInputChange = { keyInput = it },
                         keyFeedback = keyFeedback,
+                        sandboxText = sandboxText,
+                        onSandboxTextChange = { sandboxText = it },
                     )
                 }
             }
@@ -158,6 +164,8 @@ fun OnboardingWizard(
                     step = step,
                     overlayGranted = overlayGranted,
                     keySet = keySet,
+                    keyInput = keyInput,
+                    appInfoOpened = appInfoOpened,
                     onRequestOverlay = {
                         overlayRequested = true
                         onRequestOverlay()
@@ -170,7 +178,10 @@ fun OnboardingWizard(
                         attemptedAccessibility = true
                         onOpenAccessibility()
                     },
-                    onOpenAppInfo = onOpenAppInfo,
+                    onOpenAppInfo = {
+                        appInfoOpened = true
+                        onOpenAppInfo()
+                    },
                     onContinue = onContinue,
                     onSaveKey = {
                         scope.launch {
@@ -213,6 +224,8 @@ private fun OnboardingStepContent(
     keyInput: String,
     onKeyInputChange: (String) -> Unit,
     keyFeedback: String?,
+    sandboxText: String,
+    onSandboxTextChange: (String) -> Unit,
 ) {
     when (step) {
         OnboardingStep.Welcome -> {
@@ -227,22 +240,36 @@ private fun OnboardingStepContent(
             Spacer(Modifier.height(16.dp))
             StudioCard(radius = 16) {
                 Column(
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    AppLogo(size = 48.dp)
+                    AppLogo(size = 44.dp)
                     Spacer(Modifier.height(8.dp))
-                    Text(stringResource(R.string.onboard_how_step1), style = StudioType.rowTitle)
+                    Text(stringResource(R.string.onboard_how_step1_title), style = StudioType.rowTitle)
+                    Spacer(Modifier.height(2.dp))
+                    Text(stringResource(R.string.onboard_how_step1_desc), style = StudioType.why)
                 }
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
             StudioCard(radius = 16) {
-                Box(modifier = Modifier.fillMaxWidth().padding(10.dp), contentAlignment = Alignment.Center) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
                     PreviewPill()
+                    Spacer(Modifier.height(12.dp))
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(stringResource(R.string.onboard_how_step2_title), style = StudioType.rowTitle)
+                        Text(stringResource(R.string.onboard_how_step2_desc), style = StudioType.why)
+                        Spacer(Modifier.height(4.dp))
+                        Text(stringResource(R.string.onboard_how_step3_title), style = StudioType.rowTitle)
+                        Text(stringResource(R.string.onboard_how_step3_desc), style = StudioType.why)
+                    }
                 }
             }
-            Spacer(Modifier.height(10.dp))
-            Text(stringResource(R.string.onboard_how_step23), style = StudioType.why)
         }
         OnboardingStep.Overlay -> {
             Text(stringResource(R.string.onboard_overlay_title), style = StudioType.onboardBig)
@@ -262,71 +289,122 @@ private fun OnboardingStepContent(
             Text(stringResource(R.string.onboard_mic_body), style = StudioType.why)
         }
         OnboardingStep.Accessibility -> {
-            Text(stringResource(R.string.onboard_a11y_why_title), style = StudioType.onboardBig)
-            Spacer(Modifier.height(10.dp))
-            Text(stringResource(R.string.onboard_a11y_why_body), style = StudioType.why)
-            Spacer(Modifier.height(10.dp))
-            Text(stringResource(R.string.onboard_a11y_apk_note), style = StudioType.why)
+            Text(stringResource(R.string.onboard_a11y_title), style = StudioType.onboardBig)
+            Spacer(Modifier.height(6.dp))
+            Text(stringResource(R.string.onboard_a11y_subtitle), style = StudioType.why)
+            Spacer(Modifier.height(14.dp))
+            StudioCard(radius = 16) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    InstructionStepRow("1", stringResource(R.string.onboard_a11y_step1))
+                    InstructionStepRow("2", stringResource(R.string.onboard_a11y_step2))
+                    InstructionStepRow("3", stringResource(R.string.onboard_a11y_step3))
+                    InstructionStepRow("4", stringResource(R.string.onboard_a11y_step4))
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            StudioCard(radius = 16) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = StudioColors.SurfaceVariant,
+                        modifier = Modifier.size(24.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Filled.Check,
+                                contentDescription = null,
+                                tint = StudioColors.Accent,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                    }
+                    Text(stringResource(R.string.onboard_a11y_privacy), style = StudioType.why)
+                }
+            }
         }
         OnboardingStep.Restricted -> {
-            Text(stringResource(R.string.onboard_recovery_title), style = StudioType.onboardBig)
-            Spacer(Modifier.height(10.dp))
-            Text(stringResource(R.string.onboard_restricted_body), style = StudioType.why)
-            Spacer(Modifier.height(8.dp))
-            Text(stringResource(R.string.onboard_recovery_body), style = StudioType.why)
+            Text(stringResource(R.string.onboard_restricted_title), style = StudioType.onboardBig)
+            Spacer(Modifier.height(6.dp))
+            Text(stringResource(R.string.onboard_restricted_subtitle), style = StudioType.why)
+            Spacer(Modifier.height(14.dp))
+            StudioCard(radius = 16) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    InstructionStepRow("1", stringResource(R.string.onboard_restricted_step1))
+                    InstructionStepRow("2", stringResource(R.string.onboard_restricted_step2))
+                    InstructionStepRow("3", stringResource(R.string.onboard_restricted_step3))
+                    InstructionStepRow("4", stringResource(R.string.onboard_restricted_step4))
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(stringResource(R.string.onboard_restricted_tip), style = StudioType.heroLabel)
         }
         OnboardingStep.GeminiKey -> {
             val context = LocalContext.current
             Text(stringResource(R.string.onboard_key_title), style = StudioType.onboardBig)
-            Spacer(Modifier.height(10.dp))
-            Text(stringResource(R.string.onboard_key_body), style = StudioType.why)
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(6.dp))
+            Text(stringResource(R.string.onboard_key_subtitle), style = StudioType.why)
+            Spacer(Modifier.height(14.dp))
             StudioCard(radius = 16) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(stringResource(R.string.onboard_key_source), style = StudioType.rowTitle)
-                    Text(
-                        text = stringResource(R.string.onboard_key_source_url),
-                        style = StudioType.rowDesc.copy(color = StudioColors.Accent),
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.onboard_key_step1_title), style = StudioType.rowTitle)
+                    Text(stringResource(R.string.onboard_key_step1_desc), style = StudioType.why)
+                    StudioGhostCta(
+                        text = stringResource(R.string.onboard_key_step1_button),
+                        onClick = {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, "https://aistudio.google.com/api-keys".toUri()),
+                            )
+                        },
                     )
-                    Text(stringResource(R.string.onboard_key_free_tier), style = StudioType.why)
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            StudioGhostCta(
-                text = stringResource(R.string.onboard_open_api_keys),
-                onClick = {
-                    context.startActivity(
-                        Intent(Intent.ACTION_VIEW, "https://aistudio.google.com/api-keys".toUri()),
-                    )
-                },
-            )
-            if (!keySet) {
-                Spacer(Modifier.height(12.dp))
-                StudioCard(radius = 16) {
+            Spacer(Modifier.height(12.dp))
+            StudioCard(radius = 16) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.onboard_key_step2_title), style = StudioType.rowTitle)
                     OutlinedTextField(
                         value = keyInput,
                         onValueChange = onKeyInputChange,
-                        label = { Text(stringResource(R.string.settings_key_hint)) },
+                        placeholder = { Text(stringResource(R.string.settings_key_hint), style = StudioType.rowDesc) },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
                     )
-                }
-                keyFeedback?.let {
-                    Text(it, style = StudioType.rowDesc.copy(color = StudioColors.Accent), modifier = Modifier.padding(top = 8.dp))
+                    keyFeedback?.let {
+                        Text(it, style = StudioType.rowDesc.copy(color = StudioColors.Accent))
+                    }
                 }
             }
+            Spacer(Modifier.height(12.dp))
+            Text(stringResource(R.string.onboard_key_privacy), style = StudioType.heroLabel)
         }
         OnboardingStep.Ready -> {
             Text(stringResource(R.string.onboard_ready_title), style = StudioType.greeting)
             Spacer(Modifier.height(16.dp))
-            StudioCard(radius = 22) {
-                Column(Modifier.padding(16.dp)) {
-                    Text(stringResource(R.string.home_hero_week_label).uppercase(), style = StudioType.heroLabel)
-                    Text("0", style = StudioType.displayHero)
-                    Text(stringResource(R.string.onboard_ready_hero_sub), style = StudioType.heroSub)
+            StudioCard(radius = 18) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(stringResource(R.string.onboard_ready_card_title), style = StudioType.rowTitle)
+                    Text(stringResource(R.string.onboard_ready_card_desc), style = StudioType.why)
+                    OutlinedTextField(
+                        value = sandboxText,
+                        onValueChange = onSandboxTextChange,
+                        placeholder = { Text(stringResource(R.string.onboard_ready_sandbox_hint), style = StudioType.rowDesc) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    )
                 }
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(14.dp))
             Text(stringResource(R.string.onboard_ready_body), style = StudioType.why)
         }
     }
@@ -337,6 +415,8 @@ private fun OnboardingStepActions(
     step: OnboardingStep,
     overlayGranted: Boolean,
     keySet: Boolean,
+    keyInput: String,
+    appInfoOpened: Boolean,
     onRequestOverlay: () -> Unit,
     onRequestMicNotifications: () -> Unit,
     onOpenAccessibility: () -> Unit,
@@ -352,20 +432,54 @@ private fun OnboardingStepActions(
         OnboardingStep.Mic -> StudioCta(stringResource(R.string.onboard_allow_mic), onClick = onRequestMicNotifications)
         OnboardingStep.Accessibility -> StudioCta(stringResource(R.string.onboard_open_accessibility), onClick = onOpenAccessibility)
         OnboardingStep.Restricted -> {
-            StudioCta(stringResource(R.string.onboard_open_appinfo), onClick = onOpenAppInfo)
-            StudioGhostCta(stringResource(R.string.onboard_open_accessibility), onClick = onOpenAccessibility)
+            if (appInfoOpened) {
+                StudioCta(stringResource(R.string.onboard_open_accessibility), onClick = onOpenAccessibility)
+                StudioGhostCta(stringResource(R.string.onboard_open_appinfo), onClick = onOpenAppInfo)
+            } else {
+                StudioCta(stringResource(R.string.onboard_open_appinfo), onClick = onOpenAppInfo)
+                StudioGhostCta(stringResource(R.string.onboard_open_accessibility), onClick = onOpenAccessibility)
+            }
         }
         OnboardingStep.GeminiKey -> {
-            if (!keySet) {
-                StudioCta(stringResource(R.string.settings_key_save), onClick = onSaveKey)
+            if (keyInput.isNotBlank()) {
+                StudioCta(stringResource(R.string.onboard_key_save_continue), onClick = onSaveKey)
+            } else if (keySet) {
+                StudioCta(stringResource(R.string.onboard_continue), onClick = { onAdvance(OnboardingStep.Ready) })
+            } else {
+                StudioCta(stringResource(R.string.onboard_continue), onClick = { onAdvance(OnboardingStep.Ready) })
             }
-            StudioGhostCta(stringResource(R.string.onboard_continue), onClick = { onAdvance(OnboardingStep.Ready) })
         }
         OnboardingStep.Ready -> StudioCta(
             stringResource(R.string.onboarding_get_started),
             onClick = onContinue,
             enabled = overlayGranted,
         )
+    }
+}
+
+@Composable
+private fun InstructionStepRow(
+    number: String,
+    text: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = StudioColors.SurfaceVariant,
+            modifier = Modifier.size(24.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = number,
+                    style = StudioType.rowTitle.copy(fontSize = 12.sp, color = StudioColors.Accent),
+                )
+            }
+        }
+        Text(text = text, style = StudioType.rowTitle.copy(fontSize = 14.sp), modifier = Modifier.weight(1f))
     }
 }
 

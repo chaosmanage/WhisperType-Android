@@ -58,7 +58,7 @@ Layer rules:
 ## Conventions
 
 - **Version bump in the same commit** as any behavior change: `versionCode` +1 and
-  `versionName` bump in `app/build.gradle.kts` (currently 1.2.7 / 73). Add a
+  `versionName` bump in `app/build.gradle.kts` (currently 1.2.8 / 74). Add a
   `CHANGELOG.md` entry for user-visible changes. Sync every version reference in
   the same commit — `README.md` (badge + Current Release line),
   `docs/PUSH_TO_PHONE_VIA_ADB.md` (device reference + download link), and the

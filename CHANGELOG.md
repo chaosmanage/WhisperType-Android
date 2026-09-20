@@ -4,6 +4,20 @@ All notable changes to WhisperType Android are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.8] - 2026-09-20
+
+### Changed
+
+- **Onboarding flow redesign (`ui`)** — restructured onboarding into clear, bite-sized visual cards:
+  - Replaced the asymmetric "1" stamp on "How It Works" with balanced cards for bubble activation and live speech/insert.
+  - Structured accessibility and restricted settings recovery with step-by-step numbered instructions, a privacy reassurance banner, and dynamic CTA swapping to "Open accessibility settings" after visiting App info.
+  - Balanced the Gemini API key setup into a 2-card layout with clear free tier guidance and on-device Keystore encryption reassurance.
+  - Replaced the initial "Words last 7 days: 0" stat on the completion screen with an interactive test sandbox for trying first dictations immediately.
+
+### Fixed
+
+- **Samsung Galaxy squircle app icon crop (`ui`)** — updated the launcher background to a full-bleed vertical gradient (`#0291FD` to `#08C9A7`) spanning the full 108dp canvas, eliminating dark border leakage when Samsung Launcher masks into a squircle while preserving authentic mint-cyan soundwaves and microphone colors.
+
 ## [1.2.7] - 2026-09-14
 
 ### Changed
